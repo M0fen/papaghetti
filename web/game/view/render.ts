@@ -44,6 +44,7 @@ import {
   RGB_IRON_HI,
   RGB_IRON_LO,
   RGB_PLATE,
+  RGB_PLATE_RIM,
   RGB_PLATE_LO,
   RGB_HEBRA,
   RGB_HEBRA_STROKE,
@@ -1218,6 +1219,28 @@ export function renderFrame(
   ctx.globalCompositeOperation = "source-over";
   ctx.setLineDash(EMPTY_DASH);
 
+  // --- 16b. CAST-IRON PAN RIM — frame the arena as a real skillet edge (a beveled metal lip).
+  //     Drawn OVER the clipped field so the border reads as the raised wall of the pan. Mostly
+  //     off-screen while you're deep inside the pan; it greets you as you near the edge. ---
+  if (!reduce) {
+    const rimW = Math.max(6, Math.min(22, bw * 0.02));
+    const lit = mixRgb([98, 80, 60], RGB_FORK, fs.heat01 * 0.45); // warm steel, embers when hot
+    const rimGrad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+    rimGrad.addColorStop(0, rgb(lit));
+    rimGrad.addColorStop(0.5, "rgb(44,32,24)");
+    rimGrad.addColorStop(1, "rgb(16,11,7)");
+    ctx.lineJoin = "round";
+    ctx.lineWidth = rimW;
+    ctx.strokeStyle = rimGrad;
+    roundRect(ctx, bx, by, bw, bh, 18);
+    ctx.stroke();
+    // thin inner lip catching the light (the bevel where the wall meets the cooking surface)
+    ctx.lineWidth = Math.max(1.5, rimW * 0.16);
+    ctx.strokeStyle = "rgba(255,236,200,0.2)";
+    roundRect(ctx, bx + rimW * 0.5, by + rimW * 0.5, bw - rimW, bh - rimW, 13);
+    ctx.stroke();
+  }
+
   // --- 17. ENREDO golden flash ---
   if (fs.enredoFlash > 0.01 && !reduce) {
     ctx.fillStyle = rgba([255, 210, 84], 0.22 * fs.enredoFlash);
@@ -1433,15 +1456,116 @@ function drawForkShadow(
 }
 
 // ---------------------------------------------------------------------------
-// Ceramic PLATES — reconstructed from the topping clusters each frame (the sim has no plate
-// entity; a plate is pure decoration that teaches the enredo by composition: "RODEA ESTO"). It is
-// ceramic on iron: a low-contrast disc whose RELIEF is a BEVEL (up-left lit arc + down-right shadow
-// arc). It breathes, its amber rim tracks how much food is left, and on a loop-close it flashes
-// gold and the bevel collapses to flat. REGLA DURA: never more than ~3:1 contrast vs the pan.
+// Ceramic PLATES — PERSISTENT, view-side (the sim has no plate entity; a plate is pure decoration
+// that teaches the enredo by composition: "RODEA ESTO"). A plate is BORN with a FIXED centre + size
+// when a fresh pocket appears, and STAYS PUT while its food is eaten — it must never shrink or drift
+// as toppings are removed (that read as "not a plate"). How much food is left shows only in the
+// amber rim; an emptied plate fades out. It reads as a real dish by STRUCTURE: a raised RIM (ala)
+// around a recessed WELL (hondo), lit by the one up-left light. On a loop-close it flashes gold and
+// the bevel collapses to flat.
 // ---------------------------------------------------------------------------
+type ViewPlate = {
+  cx: number; // world units — FIXED at birth
+  cy: number;
+  r: number; // world units — FIXED at birth
+  food: number; // toppings currently on it (amber rim)
+  fullFood: number; // max toppings seen (fullness ratio)
+  life: number; // 0..1 fade
+  phase: number; // breathing seed
+  hit: boolean; // matched a topping this frame
+};
+const _plates: ViewPlate[] = [];
+let _plateSeed = -1;
 const _twx = new Float64Array(256);
 const _twy = new Float64Array(256);
 const _tass = new Uint8Array(256);
+const _pocket = new Int32Array(12);
+
+/** Advance the persistent plate set: keep plates fixed, spawn new ones under fresh pockets, fade empties. */
+function updatePlates(w: World): void {
+  if (w.seed0 !== _plateSeed) {
+    _plates.length = 0;
+    _plateSeed = w.seed0; // new run → drop stale plates
+  }
+  const n = w.topCount;
+  for (let i = 0; i < n; i++) {
+    _twx[i] = w.topX[i] / F;
+    _twy[i] = w.topY[i] / F;
+    _tass[i] = (w.topFlags[i] & TOP_FLAG.ALIVE) === 0 ? 1 : 0; // dead toppings anchor nothing
+  }
+  // 1. attach toppings to EXISTING plates (nearest whose disc contains it) — keeps plates fixed.
+  for (let p = 0; p < _plates.length; p++) {
+    _plates[p].food = 0;
+    _plates[p].hit = false;
+  }
+  for (let i = 0; i < n; i++) {
+    if (_tass[i]) continue;
+    let best = -1;
+    let bestD = 0;
+    for (let p = 0; p < _plates.length; p++) {
+      const pl = _plates[p];
+      const dx = _twx[i] - pl.cx;
+      const dy = _twy[i] - pl.cy;
+      const d = dx * dx + dy * dy;
+      const rr = pl.r * 1.08;
+      if (d <= rr * rr && (best < 0 || d < bestD)) {
+        best = p;
+        bestD = d;
+      }
+    }
+    if (best >= 0) {
+      _plates[best].food++;
+      _plates[best].hit = true;
+      _tass[i] = 1;
+    }
+  }
+  // 2. spawn NEW plates under still-unclaimed toppings (a fresh pocket). Sized to the FULL pocket
+  //    now, then frozen — so it never resizes as the pocket is eaten down.
+  const cap = CLUSTER_RADIUS / F;
+  const cap2 = cap * cap;
+  for (let i = 0; i < n; i++) {
+    if (_tass[i]) continue;
+    let m = 0;
+    _pocket[m++] = i;
+    _tass[i] = 1;
+    let sumx = _twx[i];
+    let sumy = _twy[i];
+    for (let j = i + 1; j < n && m < _pocket.length; j++) {
+      if (_tass[j]) continue;
+      const dx = _twx[j] - _twx[i];
+      const dy = _twy[j] - _twy[i];
+      if (dx * dx + dy * dy <= cap2) {
+        _tass[j] = 1;
+        _pocket[m++] = j;
+        sumx += _twx[j];
+        sumy += _twy[j];
+      }
+    }
+    if (m < 2) continue; // no plate under a lone topping
+    const cxw = sumx / m;
+    const cyw = sumy / m;
+    let maxd = 0;
+    for (let k = 0; k < m; k++) {
+      const dx = _twx[_pocket[k]] - cxw;
+      const dy = _twy[_pocket[k]] - cyw;
+      const d = dx * dx + dy * dy;
+      if (d > maxd) maxd = d;
+    }
+    const r = Math.max(50, Math.min(cap + 12, Math.sqrt(maxd) + 28)); // rim margin beyond the food
+    if (_plates.length < 40) {
+      _plates.push({ cx: cxw, cy: cyw, r, food: m, fullFood: m, life: 0.02, phase: (i % 7) * 0.9, hit: true });
+    }
+  }
+  // 3. fade: seen plates ramp up, unseen (emptied) plates fade out and are culled.
+  for (let p = _plates.length - 1; p >= 0; p--) {
+    const pl = _plates[p];
+    if (pl.food > pl.fullFood) pl.fullFood = pl.food;
+    if (pl.hit) pl.life = Math.min(1, pl.life + 0.14);
+    else pl.life = Math.max(0, pl.life - 0.05);
+    if (pl.life <= 0 && !pl.hit) _plates.splice(p, 1);
+  }
+}
+
 function drawPlates(
   ctx: CanvasRenderingContext2D,
   w: World,
@@ -1451,95 +1575,87 @@ function drawPlates(
   enredoFlash: number,
   reduce: boolean,
 ): void {
-  const n = w.topCount;
-  if (n < 2) return;
-  for (let i = 0; i < n; i++) {
-    _twx[i] = w.topX[i] / F;
-    _twy[i] = w.topY[i] / F;
-    _tass[i] = (w.topFlags[i] & TOP_FLAG.ALIVE) === 0 ? 1 : 0; // dead toppings never anchor a plate
-  }
-  const cap = (CLUSTER_RADIUS / F) * 1.5; // capture radius from a seed (pocket ≈ 75u radius)
-  const cap2 = cap * cap;
-  for (let i = 0; i < n; i++) {
-    if (_tass[i]) continue;
-    // gather this pocket: members within `cap` of seed i.
-    let sumx = _twx[i];
-    let sumy = _twy[i];
-    let cnt = 1;
-    _tass[i] = 1;
-    for (let j = i + 1; j < n; j++) {
-      if (_tass[j]) continue;
-      const dx = _twx[j] - _twx[i];
-      const dy = _twy[j] - _twy[i];
-      if (dx * dx + dy * dy <= cap2) {
-        _tass[j] = 1;
-        sumx += _twx[j];
-        sumy += _twy[j];
-        cnt++;
-      }
-    }
-    if (cnt < 2) continue; // no plate under a lone topping
-    const cxw = sumx / cnt;
-    const cyw = sumy / cnt;
-    // radius = furthest member from centroid + margin, clamped so the plate stays a subtle pocket.
-    let maxd = 0;
-    for (let j = i; j < n; j++) {
-      // (re-scan is cheap; members were flagged this pass — approximate with distance to centroid)
-      const dx = _twx[j] - cxw;
-      const dy = _twy[j] - cyw;
-      const d = dx * dx + dy * dy;
-      if (d <= cap2 && d > maxd) maxd = d;
-    }
-    const rw = Math.min(cap, Math.sqrt(maxd) + 16);
-    const cxp = w2sx(cxw);
-    const cyp = w2sy(cyw);
-    const rp = rw * cam.scale;
-    if (rp < 6) continue;
-    const breathe = reduce ? 1 : 1 + 0.012 * Math.sin(w.tick * 0.03 + (i % 7));
+  updatePlates(w);
+  const bevel = 1 - Math.min(1, enredoFlash * 1.4); // loop-close → bevel collapses to flat
+  for (let p = 0; p < _plates.length; p++) {
+    const pl = _plates[p];
+    if (pl.life <= 0.001) continue;
+    const cxp = w2sx(pl.cx);
+    const cyp = w2sy(pl.cy);
+    const rp = pl.r * cam.scale;
+    if (rp < 7) continue;
+    const breathe = reduce ? 1 : 1 + 0.009 * Math.sin(w.tick * 0.03 + pl.phase);
     const rr = rp * breathe;
-    const bevel = 1 - Math.min(1, enredoFlash * 1.4); // loop-close → bevel collapses to flat
-    // 1. contact shadow (down-right)
-    ctx.fillStyle = rgba(RGB_PLATE_LO, 0.45);
+    const wr = rr * 0.8; // the WELL (hondo)
+    ctx.save();
+    ctx.globalAlpha = pl.life;
+    // 1. contact shadow (down-right, soft) — lifts the plate off the pan
+    ctx.fillStyle = rgba(RGB_PLATE_LO, 0.5);
     ctx.beginPath();
-    ctx.ellipse(cxp + rp * 0.05 + 2, cyp + rp * 0.07 + 3, rr * 1.02, rr * 0.95, 0, 0, TAU);
+    ctx.ellipse(cxp + rr * 0.05 + 2, cyp + rr * 0.08 + 4, rr * 1.05, rr * 0.98, 0, 0, TAU);
     ctx.fill();
-    // 2. body disc (barely above the pan)
-    ctx.fillStyle = rgb(RGB_PLATE);
+    // 2. RIM disc (the raised ala), lit up-left
+    const rg = ctx.createRadialGradient(cxp - rr * 0.34, cyp - rr * 0.4, rr * 0.2, cxp, cyp, rr);
+    rg.addColorStop(0, rgb(mixRgb(RGB_PLATE_RIM, [255, 240, 210], 0.16)));
+    rg.addColorStop(0.7, rgb(RGB_PLATE_RIM));
+    rg.addColorStop(1, rgb(mixRgb(RGB_PLATE_RIM, RGB_PLATE_LO, 0.5)));
+    ctx.fillStyle = rg;
     ctx.beginPath();
     ctx.arc(cxp, cyp, rr, 0, TAU);
     ctx.fill();
-    // 3. BEVEL: up-left lit arc + down-right shadow arc (the relief)
-    ctx.lineWidth = Math.max(2, rr * 0.15);
-    ctx.strokeStyle = `rgba(255,220,150,${(0.2 * bevel).toFixed(3)})`;
+    // 3. rim BEVEL: up-left lit arc + down-right shadow arc (the relief)
+    ctx.lineWidth = Math.max(2, rr * 0.08);
+    ctx.strokeStyle = `rgba(255,236,200,${(0.3 * bevel).toFixed(3)})`;
     ctx.beginPath();
-    ctx.arc(cxp, cyp, rr * 0.92, Math.PI * 0.85, Math.PI * 1.7);
+    ctx.arc(cxp, cyp, rr * 0.95, Math.PI * 0.85, Math.PI * 1.7);
     ctx.stroke();
-    ctx.strokeStyle = `rgba(0,0,0,${(0.35 * bevel).toFixed(3)})`;
+    ctx.strokeStyle = `rgba(0,0,0,${(0.34 * bevel).toFixed(3)})`;
     ctx.beginPath();
-    ctx.arc(cxp, cyp, rr * 0.92, Math.PI * 1.7, Math.PI * 2.85);
+    ctx.arc(cxp, cyp, rr * 0.95, Math.PI * 1.7, Math.PI * 2.85);
     ctx.stroke();
-    // 4. glaze: thin specular arc on the upper edge
+    // 4. WELL (recessed hondo): darker dish + an inner shadow where the rim steps down
+    const wg = ctx.createRadialGradient(cxp - wr * 0.3, cyp - wr * 0.34, wr * 0.2, cxp, cyp, wr);
+    wg.addColorStop(0, rgb(RGB_PLATE));
+    wg.addColorStop(1, rgb(mixRgb(RGB_PLATE, RGB_PLATE_LO, 0.7)));
+    ctx.fillStyle = wg;
+    ctx.beginPath();
+    ctx.arc(cxp, cyp, wr, 0, TAU);
+    ctx.fill();
+    // the rim casts a shadow onto the NEAR (up-left) inner wall; the FAR (down-right) wall is lit
+    ctx.lineWidth = Math.max(1.5, rr * 0.06);
+    ctx.strokeStyle = `rgba(0,0,0,${(0.32 * bevel).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(cxp, cyp, wr, Math.PI * 0.8, Math.PI * 1.75);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255,236,200,${(0.12 * bevel).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(cxp, cyp, wr, Math.PI * 1.75, Math.PI * 2.8);
+    ctx.stroke();
+    // 5. glaze sheen on the rim (up-left)
     if (!reduce) {
-      ctx.lineWidth = Math.max(1, rr * 0.05);
-      ctx.strokeStyle = `rgba(255,245,220,${(0.4 * bevel).toFixed(3)})`;
+      ctx.lineWidth = Math.max(1, rr * 0.04);
+      ctx.strokeStyle = `rgba(255,248,230,${(0.5 * bevel).toFixed(3)})`;
       ctx.beginPath();
-      ctx.arc(cxp, cyp, rr * 0.82, Math.PI * 1.02, Math.PI * 1.5);
+      ctx.arc(cxp, cyp, rr * 0.9, Math.PI * 1.05, Math.PI * 1.5);
       ctx.stroke();
     }
-    // 5. amber edge = food remaining (dims as the pocket empties)
-    const full = Math.min(1, cnt / 5);
-    ctx.lineWidth = Math.max(1.5, rr * 0.06);
-    ctx.strokeStyle = rgba(RGB_AMBAR, 0.05 + 0.16 * full);
-    ctx.beginPath();
-    ctx.arc(cxp, cyp, rr, 0, TAU);
-    ctx.stroke();
-    // 6. loop-close: gold flash
+    // 6. amber "food remaining" ring on the rim — dims as the pocket empties (NOT the size)
+    const full = pl.fullFood > 0 ? Math.min(1, pl.food / pl.fullFood) : 0;
+    if (full > 0.01) {
+      ctx.lineWidth = Math.max(1.5, rr * 0.05);
+      ctx.strokeStyle = rgba(RGB_AMBAR, 0.06 + 0.2 * full);
+      ctx.beginPath();
+      ctx.arc(cxp, cyp, rr * 0.99, 0, TAU);
+      ctx.stroke();
+    }
+    // 7. loop-close gold flash
     if (enredoFlash > 0.01) {
-      ctx.fillStyle = rgba([255, 210, 84], 0.18 * enredoFlash);
+      ctx.fillStyle = rgba([255, 210, 84], 0.2 * enredoFlash);
       ctx.beginPath();
       ctx.arc(cxp, cyp, rr, 0, TAU);
       ctx.fill();
     }
+    ctx.restore();
   }
 }
 

@@ -48,9 +48,12 @@ export const RGB_PAN_GLOW: RGB = [74, 51, 32]; // #4A3320 soft warm centre glow
 export const RGB_IRON_HI: RGB = [52, 38, 27]; // lighter mottle / ring highlight (top-left of a ring)
 export const RGB_IRON_LO: RGB = [26, 18, 13]; // darker mottle / ring shadow (bottom-right of a ring)
 
-// CERAMIC plate under a cluster (decoration; <=3:1 contrast vs pan). Body ~ the pan, relief by BEVEL.
-export const RGB_PLATE: RGB = [48, 36, 28]; // disc body, barely above the pan
-export const RGB_PLATE_LO: RGB = [30, 22, 16]; // plate contact shadow / lower-right sink
+// CERAMIC plate under a cluster (stoneware on iron; kept muted so it never outshines the food).
+// It reads as a plate by STRUCTURE — a raised RIM (ala) around a recessed WELL (hondo) — not by
+// brightness. Contrast stays modest vs the pan; the relief (bevel + rim/well steps) does the work.
+export const RGB_PLATE_RIM: RGB = [108, 88, 66]; // the raised lip / ala (catches the up-left light)
+export const RGB_PLATE: RGB = [74, 58, 44]; // the recessed well / hondo (where the food sits)
+export const RGB_PLATE_LO: RGB = [24, 17, 12]; // contact shadow under the plate
 
 // LIGHT LAW: one light from ABOVE-LEFT. This is the universal warm rim that REPLACES black outlines
 // (top-left edge catches the light); shadows are the object's OWN dark color on the lower-right.
