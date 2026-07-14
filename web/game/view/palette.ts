@@ -44,6 +44,18 @@ export const RGB_PAN: RGB = [36, 26, 20]; // #241A14 dark pan (the stage)
 export const RGB_PAN_RIM: RGB = [58, 42, 28]; // #3A2A1C border of the pan
 export const RGB_PAN_GLOW: RGB = [74, 51, 32]; // #4A3320 soft warm centre glow
 
+// CAST-IRON pan surface (used, not flat): mottle specks + concentric wear rings.
+export const RGB_IRON_HI: RGB = [52, 38, 27]; // lighter mottle / ring highlight (top-left of a ring)
+export const RGB_IRON_LO: RGB = [26, 18, 13]; // darker mottle / ring shadow (bottom-right of a ring)
+
+// CERAMIC plate under a cluster (decoration; <=3:1 contrast vs pan). Body ~ the pan, relief by BEVEL.
+export const RGB_PLATE: RGB = [48, 36, 28]; // disc body, barely above the pan
+export const RGB_PLATE_LO: RGB = [30, 22, 16]; // plate contact shadow / lower-right sink
+
+// LIGHT LAW: one light from ABOVE-LEFT. This is the universal warm rim that REPLACES black outlines
+// (top-left edge catches the light); shadows are the object's OWN dark color on the lower-right.
+export const RGB_LIGHT_WARM: RGB = [255, 231, 180]; // #FFE7B4 warm key-light rim
+
 // The HEBRA (the character): amber body, thick dark outline, single cream shine.
 export const RGB_HEBRA_STROKE: RGB = [122, 62, 18]; // #7A3E12
 export const RGB_HEBRA: RGB = [242, 165, 22]; // #F2A516 (8.25:1)

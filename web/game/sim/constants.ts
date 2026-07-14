@@ -73,7 +73,8 @@ export const AREA_SHIFT = 9; // shoelace coord reduction: 65536>>9 => 1/128-u gr
 export const MIN_LOOP_AREA_UNITS = 5000; // world-units^2 minimum loop area
 // doubled + reduced-grid units for the shoelace gate: 2 * area * 128^2. Compared
 // against Math.abs(loopArea2(...)) after fmul-scaling by mods.minLoopAreaMul.
-export const MIN_LOOP_AREA_2 = 2 * MIN_LOOP_AREA_UNITS * 128 * 128; // 13,107,200
+// With MIN_LOOP_AREA_UNITS = 5000 → 2 * 5000 * 128 * 128 = 163,840,000.
+export const MIN_LOOP_AREA_2 = 2 * MIN_LOOP_AREA_UNITS * 128 * 128; // 163,840,000
 export const LOOP_CAP = 10; // default enclosed-count multiplier cap
 
 // --- collision radii (POS / Q16.16) --------------------------------------
@@ -128,21 +129,27 @@ export const FORK_BLOCK_TICKS = 5 * TICKS_PER_SEC; // stun when enclosed by an e
 export const FORK_ENTER_MARGIN = 40 * FP_ONE; // POS, distance inside border to reach CHASE
 
 // --- spawning -------------------------------------------------------------
-// Food should feel FREE (scattered organically) but the map NUTRIDO (dense). We still seed food in
-// LOOSE pockets (so the enredo lasso can enclose a worthwhile catch) but the pockets are wide and
-// numerous enough that they read as free-standing food, not "a plate". No plato is drawn.
-export const TOP_TARGET_PER_SERVICE = 22; // maintained topping count (nourished map)
+// Food should feel FREE (scattered organically) but the map NUTRIDO (dense). We seed food in
+// TIGHT-ish pockets (so ONE screen-sized enredo lasso can enclose a whole cluster — the signature
+// mechanic must pay). CLUSTER_RADIUS 75 keeps a 4-topping catch inside a ~150u loop that FITS on
+// screen (span ~300); the in-disc rejection sampling + TOP_MIN_SEP already reads "scattered", not
+// a tight clump, so no plato clumping. The COUNT of food/clusters scales with the arena AREA (see
+// step.ts P9a) so density stays ~constant as the world expands — the enredo never starves late.
+export const TOP_TARGET_PER_SERVICE = 22; // BASE topping count at the initial world size (nourished)
 export const SPAWN_MAX_TRIES = 8; // bounded rejection sampling (determinism)
 export const CLUSTER_COUNT = 3; // (legacy) reference count; real count scales with size in step
 export const CLUSTER_MIN = 3; // toppings per loose pocket (min)
 export const CLUSTER_MAX = 5; // toppings per loose pocket (max)
-export const CLUSTER_RADIUS = 120 * FP_ONE; // POS, WIDE scatter → reads as free food, not a tight clump
+export const CLUSTER_RADIUS = 75 * FP_ONE; // POS, a lasso-sized pocket → one enredo can enclose it
 export const CLUSTER_MIN_DIST_HEAD = 160 * FP_ONE; // POS, keep from head but findable fast
 export const TOP_MIN_SEP = 26 * FP_ONE; // POS, min separation between toppings (no overlap)
 export const TOP_PLACE_TRIES = 8; // bounded rejection per topping placement (determinism)
 
 // --- pool capacities ------------------------------------------------------
-export const MAX_TOP = 64;
+// MAX_TOP is a real cap on the AREA-scaled topping target (step.ts P9a). The arena grows x7.7 in
+// area (360→1000 half); to keep density ~constant the target rises from ~22 toward ~123, so the
+// pool must hold it. 128 keeps near-constant density up to ~850 half, diluting only at the extreme.
+export const MAX_TOP = 128;
 export const MAX_PAPA = 16;
 export const MAX_OBS = 24;
 export const MAX_ZONE = 16; // burn zones

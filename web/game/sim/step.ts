@@ -40,7 +40,6 @@ import {
   BASE_SPEED,
   BOOST_MULT,
   BURN_LIFE_TICKS,
-  CHICHARRON_EVERY,
   CRUMB_CAP,
   START_NODES,
   TURN_NMAX,
@@ -674,8 +673,14 @@ export function step(w: World, input: Input): void {
     const need2 = radiusSq(CLUSTER_RADIUS); // in-disc acceptance (uniform density, no clumping)
     const sepSq = radiusSq(TOP_MIN_SEP); // min separation between toppings (no overlap)
     let guard = 0;
-    // MORE clusters as the snake/world grows, so the expanding arena never feels empty (density).
-    const target = Math.min(MAX_TOP - CLUSTER_MAX, TOP_TARGET_PER_SERVICE + (w.bodyCount >> 5));
+    // Topping/cluster COUNT scales with the playfield AREA so DENSITY stays ~constant as the arena
+    // expands (else the enredo starves in late-game with the same handful of clusters spread thin).
+    // ratio = (usableHalf / WORLD_HALF)^2 in integer units; usableHalf ∈ [360,1000] u ⇒ target grows
+    // from ~22 toward ~123, capped by the pool. Pure function of usableHalf ⇒ determinism holds.
+    const halfU = fromFixedToInt(w.usableHalf);
+    const baseU = fromFixedToInt(WORLD_HALF);
+    const areaTarget = Math.floor((TOP_TARGET_PER_SERVICE * halfU * halfU) / (baseU * baseU));
+    const target = Math.min(MAX_TOP - CLUSTER_MAX, areaTarget);
     // Only spawn a fresh cluster when there's room for a whole one (no per-topping trickle).
     // guard bounds the loop hard (each pass adds >= CLUSTER_MIN).
     while (w.topCount + CLUSTER_MIN <= target && w.topCount < MAX_TOP && guard < 6) {

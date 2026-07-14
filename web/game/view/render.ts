@@ -41,6 +41,10 @@ import {
   RGB_SALSA_DARK,
   RGB_PAN,
   RGB_PAN_RIM,
+  RGB_IRON_HI,
+  RGB_IRON_LO,
+  RGB_PLATE,
+  RGB_PLATE_LO,
   RGB_HEBRA,
   RGB_HEBRA_STROKE,
   RGB_HEBRA_HI,
@@ -156,6 +160,7 @@ let VIGNETTE: CanvasGradient | null = null;
 let vigW = 0;
 let vigH = 0;
 let GRAIN: CanvasPattern | null = null; // tiled film-grain noise (makes the flat vector look "expensive")
+let IRON: CanvasPattern | null = null; // coarse cast-iron mottle (the pan is USED, not a flat colour)
 const ATLAS: Off[] = []; // baked food sprites, indexed by ToppingCode 0..7
 const ATLAS_PX = 72; // sprite canvas size
 const ATLAS_R = 24; // baked food radius inside the sprite
@@ -207,6 +212,7 @@ function initCaches(ctx: CanvasRenderingContext2D): void {
     [1, "#d7dbe2"],
   ]);
   GRAIN = ctx.createPattern(bakeGrain(), "repeat");
+  IRON = ctx.createPattern(bakeIron(), "repeat");
   bakeAtlas();
   cachesReady = true;
 }
@@ -227,6 +233,41 @@ function bakeGrain(): Off {
     d[i + 3] = 255;
   }
   g.putImageData(img, 0, 0);
+  return c;
+}
+
+// Cast-iron mottle: a 128×128 tile of warm-dark speckle + a few smudges, tiled over the pan at low
+// alpha so the surface reads as USED seasoned iron, not a flat fill. Baked once (view-only random).
+function bakeIron(): Off {
+  const S = 128;
+  const c = makeOffscreen(S, S);
+  const g = offCtx(c);
+  g.fillStyle = "rgba(0,0,0,0)";
+  g.fillRect(0, 0, S, S);
+  // fine speckle
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const light = Math.random() < 0.5;
+    const a = 0.04 + Math.random() * 0.06;
+    g.fillStyle = light ? `rgba(70,52,36,${a})` : `rgba(14,9,6,${a})`;
+    g.beginPath();
+    g.arc(x, y, 0.6 + Math.random() * 1.4, 0, TAU);
+    g.fill();
+  }
+  // a few broad seasoning smudges
+  for (let i = 0; i < 12; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const r = 8 + Math.random() * 22;
+    const sm = g.createRadialGradient(x, y, 0, x, y, r);
+    sm.addColorStop(0, `rgba(20,13,8,${0.05 + Math.random() * 0.05})`);
+    sm.addColorStop(1, "rgba(20,13,8,0)");
+    g.fillStyle = sm;
+    g.beginPath();
+    g.arc(x, y, r, 0, TAU);
+    g.fill();
+  }
   return c;
 }
 
@@ -252,19 +293,36 @@ function stamp(
 }
 
 // ---------------------------------------------------------------------------
-// Bake the 8 food sprites ONCE (shadow + volume + rim + specular baked in) so the hot
-// loop is a single drawImage per topping. Math.random here is fine: one-time, view-only.
+// Bake the 8 food sprites ONCE under a FIXED light (from ABOVE-LEFT). Zero per-frame cost:
+// the hot loop is a single drawImage per topping. Math.random here is fine (one-time, view-only).
+//
+// THE LIGHT MODEL (no black outlines — separation comes from LIGHT, Overcooked-style):
+//   1. AO      — soft dark ellipse, offset DOWN-RIGHT (the object floats above the pan)
+//   2. FORM    — radial gradient, light core pushed UP-LEFT → volume
+//   3. SHADOW  — the OWN dark colour on the DOWN-RIGHT edge (a shadow edge, never a black contour)
+//   4. RIM     — a thin WARM arc on the UP-LEFT edge (this is what replaces the outline)
+//   5. SPEC    — a specular highlight whose SHAPE encodes the MATERIAL (gloss/semi/matte)
 // ---------------------------------------------------------------------------
-/** ONE accent shine (top-left) — bold sprites read at ~17px with a single highlight, never two. */
-function accentShine(g: CanvasRenderingContext2D, cx: number, cy: number, R: number, color: string): void {
-  g.fillStyle = color;
+const FOOD_GREEN = "#5AAE5C";
+const FOOD_GREEN_HI = "#8FD07C";
+// Material per ToppingCode (0 tomate 1 queso 2 cebolla 3 maíz 4 rizadas 5 piña 6 huevo 7 chicharrón).
+type Mat = "gloss" | "semi" | "matte";
+const KIND_MAT: Mat[] = ["gloss", "semi", "gloss", "semi", "matte", "semi", "gloss", "matte"];
+
+/** Soft contact shadow (ambient occlusion), offset DOWN-RIGHT — obeys the one-light law. */
+function aoEllipse(g: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
+  const ao = g.createRadialGradient(cx + R * 0.14, cy + R * 0.7, R * 0.1, cx + R * 0.14, cy + R * 0.7, R * 1.15);
+  ao.addColorStop(0, "rgba(0,0,0,0.30)");
+  ao.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = ao;
   g.beginPath();
-  g.arc(cx - R * 0.3, cy - R * 0.34, R * 0.24, 0, TAU);
+  g.ellipse(cx + R * 0.14, cy + R * 0.72, R * 1.02, R * 0.5, 0, 0, TAU);
   g.fill();
 }
-/** Round-food radial shading: light (accent) → mid (fill) → dark (stroke). */
-function radialFood(
+/** Build a path (beginPath already implied by caller closures); then FORM+SHADOW+RIM in one place. */
+function litBody(
   g: CanvasRenderingContext2D,
+  build: () => void,
   cx: number,
   cy: number,
   R: number,
@@ -272,16 +330,63 @@ function radialFood(
   mid: string,
   dark: string,
 ): void {
-  const grad = g.createRadialGradient(cx - R * 0.34, cy - R * 0.4, R * 0.1, cx, cy, R);
-  grad.addColorStop(0, light);
-  grad.addColorStop(0.55, mid);
-  grad.addColorStop(1, dark);
-  g.fillStyle = grad;
-  g.beginPath();
-  g.arc(cx, cy, R, 0, TAU);
+  // FORM: light core pushed up-left.
+  const vg = g.createRadialGradient(cx - R * 0.38, cy - R * 0.44, R * 0.1, cx, cy, R * 1.08);
+  vg.addColorStop(0, light);
+  vg.addColorStop(0.55, mid);
+  vg.addColorStop(1, dark);
+  build();
+  g.fillStyle = vg;
   g.fill();
+  // SHADOW EDGE: own dark colour, fading in from the down-right (NOT a black outline).
+  const sg = g.createLinearGradient(cx + R, cy + R, cx - R * 0.15, cy - R * 0.15);
+  sg.addColorStop(0, dark);
+  sg.addColorStop(0.5, "rgba(0,0,0,0)");
+  build();
+  g.lineWidth = Math.max(2, R * 0.17);
+  g.strokeStyle = sg;
+  g.stroke();
 }
-/** Curly-fry spiral path (stroke it 2-3× with decreasing width for a fried coil). */
+/** Warm rim on the UP-LEFT edge — the light-based replacement for the black contour. */
+function rimLight(g: CanvasRenderingContext2D, build: () => void, cx: number, cy: number, R: number, strength = 0.95): void {
+  const rg = g.createLinearGradient(cx - R, cy - R, cx + R * 0.2, cy + R * 0.2);
+  rg.addColorStop(0, `rgba(255,231,180,${strength})`);
+  rg.addColorStop(0.5, "rgba(255,231,180,0)");
+  build();
+  g.lineWidth = Math.max(1.4, R * 0.12);
+  g.strokeStyle = rg;
+  g.stroke();
+}
+/** Specular whose SHAPE reads the material: gloss=small hard hot dot, semi=medium, matte=wide faint. */
+function specHi(g: CanvasRenderingContext2D, x: number, y: number, R: number, mat: Mat): void {
+  if (mat === "matte") {
+    const sg = g.createRadialGradient(x, y, 0, x, y, R * 0.62);
+    sg.addColorStop(0, "rgba(255,248,232,0.26)");
+    sg.addColorStop(1, "rgba(255,248,232,0)");
+    g.fillStyle = sg;
+    g.beginPath();
+    g.arc(x, y, R * 0.62, 0, TAU);
+    g.fill();
+  } else if (mat === "semi") {
+    const sg = g.createRadialGradient(x, y, 0, x, y, R * 0.34);
+    sg.addColorStop(0, "rgba(255,252,242,0.72)");
+    sg.addColorStop(1, "rgba(255,252,242,0)");
+    g.fillStyle = sg;
+    g.beginPath();
+    g.arc(x, y, R * 0.34, 0, TAU);
+    g.fill();
+  } else {
+    g.fillStyle = "rgba(255,255,255,0.92)";
+    g.beginPath();
+    g.arc(x, y, R * 0.16, 0, TAU);
+    g.fill();
+    g.fillStyle = "rgba(255,255,255,0.4)";
+    g.beginPath();
+    g.arc(x, y, R * 0.28, 0, TAU);
+    g.fill();
+  }
+}
+/** Curly-fry spiral path (stroke it several times with decreasing width for a fried coil). */
 function spiralPath(g: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
   g.beginPath();
   const steps = 44;
@@ -306,17 +411,9 @@ function roundRectG(g: CanvasRenderingContext2D, x: number, y: number, w: number
   g.arcTo(x, y, x + w, y, rr);
   g.closePath();
 }
-function contactShadow(g: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
-  g.fillStyle = "rgba(0,0,0,0.26)";
-  g.beginPath();
-  g.ellipse(cx + 1.5, cy + R * 0.82, R * 0.92, R * 0.4, 0, 0, TAU);
-  g.fill();
-}
 
-// Recognisable FOOD, not abstract shapes — the point is to know the ingredient at a glance.
-// Indexed by ToppingCode: 0 SALSA(tomate) 1 QUESO(cuña) 2 CEBOLLA(rodaja) 3 MAIZ(mazorca)
-// 4 RIZADAS(espiral) 5 PINA(piña) 6 HUEVO(frito) 7 CHICHARRON(crujiente). Colours from TOPPING_STYLES.
-const FOOD_GREEN = "#5AAE5C";
+// Recognisable FOOD, chunky + toy-like, lit by ONE up-left light. Colours from TOPPING_STYLES
+// (accent = lit tint, fill = mid, stroke = the OWN dark shade used for the shadow edge & details).
 function bakeAtlas(): void {
   ATLAS.length = 0;
   for (let kind = 0; kind < 8; kind++) {
@@ -326,89 +423,91 @@ function bakeAtlas(): void {
     const cy = ATLAS_PX / 2;
     const R = ATLAS_R;
     const st = TOPPING_STYLES[kind];
-    contactShadow(g, cx, cy, R);
+    const mat = KIND_MAT[kind];
     g.lineJoin = "round";
     g.lineCap = "round";
-    const lw = Math.max(2.2, R * 0.13);
+    aoEllipse(g, cx, cy, R);
 
     if (kind === 0) {
-      // TOMATE (salsa): red sphere + green calyx & stem
-      radialFood(g, cx, cy + R * 0.08, R * 0.96, st.accent, st.fill, st.stroke);
-      g.lineWidth = lw;
-      g.strokeStyle = st.stroke;
-      g.beginPath();
-      g.arc(cx, cy + R * 0.08, R * 0.96, 0, TAU);
-      g.stroke();
-      g.fillStyle = FOOD_GREEN;
+      // TOMATE (salsa): plump red sphere + green calyx & stem.
+      const cyb = cy + R * 0.08;
+      const body = (): void => {
+        g.beginPath();
+        g.arc(cx, cyb, R * 0.95, 0, TAU);
+      };
+      litBody(g, body, cx, cyb, R * 0.95, st.accent, st.fill, st.stroke);
+      // green calyx (own lighting: base green + up-left hi)
       for (let k = -2; k <= 2; k++) {
         const a = -Math.PI / 2 + k * 0.55;
+        g.fillStyle = k <= 0 ? FOOD_GREEN_HI : FOOD_GREEN;
         g.beginPath();
-        g.moveTo(cx, cy - R * 0.5);
-        g.lineTo(cx + Math.cos(a) * R * 0.5, cy - R * 0.5 + Math.sin(a) * R * 0.5);
-        g.lineTo(cx + Math.cos(a + 0.28) * R * 0.16, cy - R * 0.5 + Math.sin(a + 0.28) * R * 0.16);
+        g.moveTo(cx, cy - R * 0.46);
+        g.lineTo(cx + Math.cos(a) * R * 0.5, cy - R * 0.46 + Math.sin(a) * R * 0.5);
+        g.lineTo(cx + Math.cos(a + 0.28) * R * 0.16, cy - R * 0.46 + Math.sin(a + 0.28) * R * 0.16);
         g.closePath();
         g.fill();
       }
-      g.strokeStyle = FOOD_GREEN;
+      g.strokeStyle = FOOD_GREEN_HI;
       g.lineWidth = 3.2;
       g.beginPath();
-      g.moveTo(cx, cy - R * 0.5);
-      g.lineTo(cx + 2, cy - R * 0.98);
+      g.moveTo(cx, cy - R * 0.46);
+      g.lineTo(cx + 2, cy - R * 0.95);
       g.stroke();
-      accentShine(g, cx, cy - R * 0.05, R * 0.9, "rgba(255,255,255,0.55)");
+      rimLight(g, body, cx, cyb, R * 0.95);
+      specHi(g, cx - R * 0.3, cyb - R * 0.36, R, mat);
     } else if (kind === 1) {
-      // CUÑA DE QUESO con huecos
-      g.beginPath();
-      g.moveTo(cx - R * 0.95, cy + R * 0.6);
-      g.lineTo(cx + R * 0.95, cy + R * 0.6);
-      g.lineTo(cx + R * 0.95, cy - R * 0.35);
-      g.closePath();
-      g.fillStyle = st.fill;
-      g.fill();
-      g.lineWidth = lw;
-      g.strokeStyle = st.stroke;
-      g.stroke();
-      g.fillStyle = st.accent; // crust rind band (lighter top)
-      g.beginPath();
-      g.moveTo(cx - R * 0.95, cy + R * 0.6);
-      g.lineTo(cx + R * 0.95, cy + R * 0.6);
-      g.lineTo(cx + R * 0.95, cy + R * 0.42);
-      g.lineTo(cx - R * 0.95, cy + R * 0.42);
-      g.closePath();
-      g.fill();
-      g.fillStyle = st.stroke;
+      // CUÑA DE QUESO con corteza y huecos.
+      const wedge = (): void => {
+        g.beginPath();
+        g.moveTo(cx - R * 0.92, cy + R * 0.58);
+        g.arcTo(cx + R * 0.98, cy + R * 0.58, cx + R * 0.98, cy - R * 0.3, R * 0.16);
+        g.lineTo(cx + R * 0.98, cy - R * 0.3);
+        g.closePath();
+      };
+      litBody(g, wedge, cx, cy + R * 0.2, R * 1.05, st.accent, st.fill, st.stroke);
+      // rind band (lighter top)
+      g.save();
+      wedge();
+      g.clip();
+      g.fillStyle = st.accent;
+      g.fillRect(cx - R, cy + R * 0.42, R * 2, R * 0.2);
+      g.restore();
+      // holes (own dark, each with a tiny down-right sink)
       const holes: Array<[number, number, number]> = [
-        [cx + R * 0.32, cy + R * 0.16, 3],
-        [cx + R * 0.58, cy + R * 0.38, 2.4],
-        [cx + R * 0.1, cy + R * 0.4, 2.2],
+        [cx + R * 0.3, cy + R * 0.14, 3],
+        [cx + R * 0.56, cy + R * 0.36, 2.4],
+        [cx + R * 0.08, cy + R * 0.38, 2.2],
       ];
       for (const [hx, hy, hr] of holes) {
+        g.fillStyle = st.stroke;
         g.beginPath();
         g.arc(hx, hy, hr, 0, TAU);
         g.fill();
+        g.fillStyle = "rgba(255,235,150,0.5)"; // rim of the hole catches light up-left
+        g.beginPath();
+        g.arc(hx - hr * 0.3, hy - hr * 0.3, hr * 0.5, 0, TAU);
+        g.fill();
       }
-      g.fillStyle = "rgba(255,255,255,0.45)";
-      g.beginPath();
-      g.arc(cx + R * 0.6, cy - R * 0.02, R * 0.13, 0, TAU);
-      g.fill();
+      rimLight(g, wedge, cx, cy + R * 0.2, R * 1.05);
+      specHi(g, cx + R * 0.4, cy - R * 0.04, R, mat);
     } else if (kind === 2) {
-      // RODAJA DE CEBOLLA (capas concéntricas)
-      radialFood(g, cx, cy, R, "#F4ECFB", st.fill, "#B7A6D6");
-      g.lineWidth = lw;
-      g.strokeStyle = st.stroke;
-      g.beginPath();
-      g.arc(cx, cy, R, 0, TAU);
-      g.stroke();
-      g.strokeStyle = "rgba(90,74,120,0.75)";
-      g.lineWidth = Math.max(1.4, R * 0.08);
+      // RODAJA DE CEBOLLA (capas concéntricas translúcidas).
+      const body = (): void => {
+        g.beginPath();
+        g.arc(cx, cy, R, 0, TAU);
+      };
+      litBody(g, body, cx, cy, R, "#F6EEFC", st.fill, st.stroke);
+      g.strokeStyle = "rgba(120,102,150,0.6)";
+      g.lineWidth = Math.max(1.3, R * 0.07);
       for (const rr of [R * 0.72, R * 0.5, R * 0.28]) {
         g.beginPath();
         g.arc(cx, cy, rr, 0, TAU);
         g.stroke();
       }
-      accentShine(g, cx, cy, R, "rgba(255,255,255,0.7)");
+      rimLight(g, body, cx, cy, R);
+      specHi(g, cx - R * 0.32, cy - R * 0.34, R, mat);
     } else if (kind === 3) {
-      // MAZORCA DE MAÍZ (hojas verdes + granos)
+      // MAZORCA DE MAÍZ (hojas verdes + cob con granos).
       g.fillStyle = FOOD_GREEN;
       g.beginPath();
       g.moveTo(cx - R * 0.5, cy + R * 0.35);
@@ -422,58 +521,70 @@ function bakeAtlas(): void {
       g.quadraticCurveTo(cx + R * 0.28, cy + R * 0.6, cx, cy + R * 0.5);
       g.closePath();
       g.fill();
-      roundRectG(g, cx - R * 0.48, cy - R * 0.98, R * 0.96, R * 1.7, R * 0.42);
-      g.fillStyle = st.fill;
-      g.fill();
-      g.lineWidth = lw * 0.8;
-      g.strokeStyle = st.stroke;
-      g.stroke();
-      g.fillStyle = "rgba(122,106,20,0.75)";
+      const cob = (): void => roundRectG(g, cx - R * 0.46, cy - R * 0.98, R * 0.92, R * 1.7, R * 0.42);
+      litBody(g, cob, cx, cy - R * 0.1, R, st.accent, st.fill, st.stroke);
+      // kernels (own dark grid, each with a lit top-left facet)
+      g.save();
+      cob();
+      g.clip();
       for (let ry = -3; ry <= 3; ry++) {
         for (let rx = -1; rx <= 1; rx++) {
+          const kx = cx + rx * R * 0.28;
+          const ky = cy - R * 0.2 + ry * R * 0.22;
+          g.fillStyle = "rgba(140,120,20,0.55)";
           g.beginPath();
-          g.arc(cx + rx * R * 0.28, cy - R * 0.2 + ry * R * 0.22, 1.7, 0, TAU);
+          g.arc(kx, ky, 2.4, 0, TAU);
+          g.fill();
+          g.fillStyle = "rgba(255,246,190,0.6)";
+          g.beginPath();
+          g.arc(kx - 0.7, ky - 0.7, 1.1, 0, TAU);
           g.fill();
         }
       }
-      accentShine(g, cx - R * 0.12, cy - R * 0.3, R * 0.6, "rgba(255,255,255,0.5)");
+      g.restore();
+      rimLight(g, cob, cx, cy - R * 0.1, R);
+      specHi(g, cx - R * 0.18, cy - R * 0.44, R, mat);
     } else if (kind === 4) {
-      // PAPA RIZADA (espiral frita)
+      // PAPA RIZADA (espiral frita) — matte: no hard highlight, warm cross-light along the coil.
       g.strokeStyle = st.stroke;
-      g.lineWidth = R * 0.5;
+      g.lineWidth = R * 0.52;
       spiralPath(g, cx, cy, R);
       g.stroke();
-      g.strokeStyle = st.fill;
-      g.lineWidth = R * 0.34;
+      // volume: coil brighter on the up-left via a linear gradient stroke.
+      const vg = g.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
+      vg.addColorStop(0, st.accent);
+      vg.addColorStop(0.5, st.fill);
+      vg.addColorStop(1, st.stroke);
+      g.strokeStyle = vg;
+      g.lineWidth = R * 0.36;
       spiralPath(g, cx, cy, R);
       g.stroke();
-      g.strokeStyle = "rgba(255,240,205,0.55)";
+      g.strokeStyle = "rgba(255,240,205,0.4)";
       g.lineWidth = R * 0.1;
       spiralPath(g, cx, cy, R);
       g.stroke();
+      specHi(g, cx - R * 0.24, cy - R * 0.26, R, mat);
     } else if (kind === 5) {
-      // PIÑA (corona verde + cuerpo con retícula)
-      g.fillStyle = FOOD_GREEN;
+      // PIÑA (corona verde + cuerpo con retícula).
       for (const dx of [-R * 0.32, 0, R * 0.32]) {
+        g.fillStyle = dx <= 0 ? FOOD_GREEN_HI : FOOD_GREEN;
         g.beginPath();
-        g.moveTo(cx + dx, cy - R * 0.5);
-        g.lineTo(cx + dx - R * 0.16, cy - R * 1.15);
-        g.lineTo(cx + dx + R * 0.16, cy - R * 1.02);
+        g.moveTo(cx + dx, cy - R * 0.48);
+        g.lineTo(cx + dx - R * 0.16, cy - R * 1.12);
+        g.lineTo(cx + dx + R * 0.16, cy - R * 0.98);
         g.closePath();
         g.fill();
       }
-      g.fillStyle = st.fill;
-      g.beginPath();
-      g.ellipse(cx, cy + R * 0.16, R * 0.82, R * 0.94, 0, 0, TAU);
-      g.fill();
-      g.lineWidth = lw;
-      g.strokeStyle = st.stroke;
-      g.stroke();
+      const body = (): void => {
+        g.beginPath();
+        g.ellipse(cx, cy + R * 0.16, R * 0.82, R * 0.94, 0, 0, TAU);
+      };
+      litBody(g, body, cx, cy + R * 0.16, R * 0.94, st.accent, st.fill, st.stroke);
       g.save();
       g.beginPath();
       g.ellipse(cx, cy + R * 0.16, R * 0.8, R * 0.92, 0, 0, TAU);
       g.clip();
-      g.strokeStyle = "rgba(120,140,40,0.8)";
+      g.strokeStyle = "rgba(120,140,40,0.7)";
       g.lineWidth = 1.3;
       for (let k = -3; k <= 3; k++) {
         g.beginPath();
@@ -486,60 +597,64 @@ function bakeAtlas(): void {
         g.stroke();
       }
       g.restore();
-      accentShine(g, cx - R * 0.2, cy - R * 0.05, R * 0.6, "rgba(255,255,255,0.5)");
+      rimLight(g, body, cx, cy + R * 0.16, R * 0.94);
+      specHi(g, cx - R * 0.24, cy - R * 0.06, R, mat);
     } else if (kind === 6) {
-      // HUEVO FRITO (clara ondulada + yema)
-      g.fillStyle = st.fill;
-      g.beginPath();
-      for (let k = 0; k <= 16; k++) {
-        const a = (k / 16) * TAU;
-        const wob = R * (1 + 0.16 * Math.sin(a * 3 + 0.7));
-        const px = cx + Math.cos(a) * wob;
-        const py = cy + Math.sin(a) * wob * 0.92;
-        if (k === 0) g.moveTo(px, py);
-        else g.lineTo(px, py);
-      }
-      g.closePath();
-      g.fill();
-      g.strokeStyle = st.stroke;
-      g.lineWidth = Math.max(1.5, R * 0.1);
-      g.stroke();
-      radialFood(g, cx + R * 0.08, cy, R * 0.42, "#FFE79A", "#FFB01F", "#E07A10");
-      g.strokeStyle = "#C9820E";
-      g.lineWidth = 1.4;
-      g.beginPath();
-      g.arc(cx + R * 0.08, cy, R * 0.42, 0, TAU);
-      g.stroke();
-      accentShine(g, cx + R * 0.08, cy, R * 0.42, "rgba(255,255,255,0.85)");
+      // HUEVO FRITO (clara ondulada + yema brillante).
+      const white = (): void => {
+        g.beginPath();
+        for (let k = 0; k <= 16; k++) {
+          const a = (k / 16) * TAU;
+          const wob = R * (1 + 0.16 * Math.sin(a * 3 + 0.7));
+          const px = cx + Math.cos(a) * wob;
+          const py = cy + Math.sin(a) * wob * 0.92;
+          if (k === 0) g.moveTo(px, py);
+          else g.lineTo(px, py);
+        }
+        g.closePath();
+      };
+      litBody(g, white, cx, cy, R, "#FFFFFF", st.fill, st.stroke);
+      rimLight(g, white, cx, cy, R, 0.7);
+      // yolk with its own volume + hard gloss.
+      const yolk = (): void => {
+        g.beginPath();
+        g.arc(cx + R * 0.08, cy, R * 0.42, 0, TAU);
+      };
+      litBody(g, yolk, cx + R * 0.08, cy, R * 0.42, "#FFE79A", "#FFB01F", "#C9740C");
+      specHi(g, cx - R * 0.02, cy - R * 0.14, R * 0.42, "gloss");
+      specHi(g, cx - R * 0.5, cy - R * 0.36, R, "semi"); // sheen on the white
     } else {
-      // CHICHARRÓN (blob crujiente inflado + burbujas)
-      g.fillStyle = st.fill;
-      g.beginPath();
-      for (let k = 0; k <= 16; k++) {
-        const a = (k / 16) * TAU;
-        const wob = R * (0.8 + 0.2 * Math.sin(a * 3 + 1.2) + 0.08 * Math.sin(a * 5 + 0.5));
-        const px = cx + Math.cos(a) * wob;
-        const py = cy + Math.sin(a) * wob * 0.94;
-        if (k === 0) g.moveTo(px, py);
-        else g.lineTo(px, py);
-      }
-      g.closePath();
-      g.fill();
-      g.lineWidth = lw;
-      g.strokeStyle = st.stroke;
-      g.stroke();
-      g.fillStyle = "rgba(90,58,24,0.7)";
+      // CHICHARRÓN (blob crujiente inflado + burbujas) — matte, rugoso.
+      const blob = (): void => {
+        g.beginPath();
+        for (let k = 0; k <= 16; k++) {
+          const a = (k / 16) * TAU;
+          const wob = R * (0.82 + 0.2 * Math.sin(a * 3 + 1.2) + 0.08 * Math.sin(a * 5 + 0.5));
+          const px = cx + Math.cos(a) * wob;
+          const py = cy + Math.sin(a) * wob * 0.94;
+          if (k === 0) g.moveTo(px, py);
+          else g.lineTo(px, py);
+        }
+        g.closePath();
+      };
+      litBody(g, blob, cx, cy, R, st.accent, st.fill, st.stroke);
       const craters: Array<[number, number, number]> = [
         [cx - R * 0.22, cy - R * 0.12, 3],
         [cx + R * 0.26, cy + R * 0.04, 2.4],
         [cx + R * 0.02, cy + R * 0.34, 2.2],
       ];
       for (const [hx, hy, hr] of craters) {
+        g.fillStyle = "rgba(80,50,20,0.6)";
         g.beginPath();
         g.arc(hx, hy, hr, 0, TAU);
         g.fill();
+        g.fillStyle = "rgba(255,224,170,0.45)";
+        g.beginPath();
+        g.arc(hx - hr * 0.3, hy - hr * 0.3, hr * 0.5, 0, TAU);
+        g.fill();
       }
-      accentShine(g, cx - R * 0.1, cy - R * 0.2, R * 0.7, st.accent);
+      rimLight(g, blob, cx, cy, R, 0.7);
+      specHi(g, cx - R * 0.16, cy - R * 0.2, R, mat);
     }
     ATLAS.push(c);
   }
@@ -657,6 +772,38 @@ export function renderFrame(
   roundRect(ctx, bx, by, bw, bh, 14);
   ctx.clip();
 
+  // --- 3b. CAST-IRON surface: mottle tile + concentric wear rings (a USED pan). Under everything. ---
+  if (!reduce && IRON) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = IRON;
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.restore();
+  }
+  {
+    const ox = w2sx(0);
+    const oy = w2sy(0);
+    const rPx = halfU * cam.scale;
+    ctx.lineWidth = Math.max(1, cam.scale * 2.2);
+    for (let k = 1; k <= 4; k++) {
+      const rr = rPx * (0.26 + k * 0.17);
+      ctx.strokeStyle = rgba(RGB_IRON_HI, 0.1); // top arc: lit
+      ctx.beginPath();
+      ctx.arc(ox, oy, rr, Math.PI, TAU);
+      ctx.stroke();
+      ctx.strokeStyle = rgba(RGB_IRON_LO, 0.13); // bottom arc: shadow
+      ctx.beginPath();
+      ctx.arc(ox, oy, rr, 0, Math.PI);
+      ctx.stroke();
+    }
+  }
+
+  // --- 3c. FORK telegraph: its tall shadow (h4) reaches into frame BEFORE the fork enters. ---
+  if (w.fork.active === 1) drawForkShadow(ctx, w, w2sx, w2sy, cam);
+
+  // --- 3d. ceramic PLATES under each cluster (teach the enredo: "surround this"). Decoration. ---
+  drawPlates(ctx, w, w2sx, w2sy, cam, fs.enredoFlash, reduce);
+
   const parts = fs.parts;
 
   // --- 4. SAUCE TRAIL — a FAINT dark stain under the noodle. Deliberately subdued (no gloss, low
@@ -689,24 +836,60 @@ export function renderFrame(
     const phase = ((w.obsPhase[i] & 0xffff) / F) * TAU;
     const t = w.obsType[i];
     if (t === OBS.OIL) {
-      // a DARK HOLE in the pan — reads as danger by DARKNESS + shape, never by colour. Slow crawl.
+      // OILY MIRROR: a deep dark pool that reads as danger by DARKNESS + shape (never by colour),
+      // with a MOVING elongated specular streak (the "espejo/aceitoso" material) that slowly drifts.
       const orr = or * (1 + 0.06 * Math.sin(w.tick * 0.05 + i * 1.3));
-      ctx.fillStyle = rgb(RGB_OIL);
+      const og = ctx.createRadialGradient(ox - orr * 0.3, oy - orr * 0.34, orr * 0.1, ox, oy, orr);
+      og.addColorStop(0, rgb(RGB_OIL_RIM));
+      og.addColorStop(0.5, rgb(RGB_OIL));
+      og.addColorStop(1, "rgba(8,5,3,1)");
+      ctx.fillStyle = og;
       ctx.beginPath();
       ctx.arc(ox, oy, orr, 0, TAU);
       ctx.fill();
+      if (!reduce) {
+        const dphase = w.tick * 0.03 + i * 2.1;
+        const sxo = ox + Math.cos(dphase) * orr * 0.26;
+        const syo = oy + Math.sin(dphase * 0.7) * orr * 0.16 - orr * 0.22;
+        ctx.save();
+        ctx.translate(sxo, syo);
+        ctx.rotate(-0.7);
+        const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, orr * 0.5);
+        sg.addColorStop(0, "rgba(255,222,150,0.5)");
+        sg.addColorStop(1, "rgba(255,222,150,0)");
+        ctx.fillStyle = sg;
+        ctx.scale(1, 0.3);
+        ctx.beginPath();
+        ctx.arc(0, 0, orr * 0.5, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+      // warm rim on the up-left lip (light-based edge, not a flat contour)
+      const rimG = ctx.createLinearGradient(ox - orr, oy - orr, ox + orr * 0.2, oy + orr * 0.2);
+      rimG.addColorStop(0, "rgba(255,210,150,0.4)");
+      rimG.addColorStop(0.5, "rgba(255,210,150,0)");
       ctx.lineWidth = 2;
-      ctx.strokeStyle = rgb(RGB_OIL_RIM);
+      ctx.strokeStyle = rimG;
       ctx.beginPath();
       ctx.arc(ox, oy, orr, 0, TAU);
       ctx.stroke();
     } else if (t === OBS.WALL) {
-      ctx.fillStyle = rgb(RGB_WALL);
+      // a chunky iron lump: volume gradient (lit up-left) + warm rim, no flat outline.
+      const wg = ctx.createRadialGradient(ox - or * 0.34, oy - or * 0.4, or * 0.1, ox, oy, or);
+      wg.addColorStop(0, rgb(mixRgb(RGB_WALL, [96, 76, 56], 0.7)));
+      wg.addColorStop(0.6, rgb(RGB_WALL));
+      wg.addColorStop(1, rgb(mixRgb(RGB_WALL, RGB_ESPRESSO, 0.6)));
+      ctx.fillStyle = wg;
       ctx.beginPath();
       ctx.arc(ox, oy, or, 0, TAU);
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = rgb(RGB_PAN_RIM);
+      const rimG = ctx.createLinearGradient(ox - or, oy - or, ox + or * 0.2, oy + or * 0.2);
+      rimG.addColorStop(0, "rgba(255,231,180,0.5)");
+      rimG.addColorStop(0.5, "rgba(255,231,180,0)");
+      ctx.lineWidth = Math.max(1.5, or * 0.12);
+      ctx.strokeStyle = rimG;
+      ctx.beginPath();
+      ctx.arc(ox, oy, or * 0.95, 0, TAU);
       ctx.stroke();
     } else if (t === OBS.SAUCE) {
       ctx.fillStyle = rgba(RGB_VERDE, 0.3);
@@ -722,7 +905,7 @@ export function renderFrame(
       ctx.save();
       ctx.translate(ox, oy);
       ctx.rotate(phase);
-      ctx.fillStyle = lethal ? rgb(RGB_ROJO) : "#C9CDD2";
+      ctx.fillStyle = lethal ? rgb(RGB_ROJO) : "#9AA0A8";
       ctx.beginPath();
       ctx.moveTo(-or, -3);
       ctx.lineTo(or, -1);
@@ -730,6 +913,19 @@ export function renderFrame(
       ctx.lineTo(-or, 3);
       ctx.closePath();
       ctx.fill();
+      // COLD METAL: a hard linear light on the top edge + a dark underside (the steel "filo").
+      ctx.lineWidth = 1.3;
+      ctx.strokeStyle = lethal ? "rgba(255,190,180,0.95)" : "rgba(245,248,252,0.95)";
+      ctx.beginPath();
+      ctx.moveTo(-or, -2.4);
+      ctx.lineTo(or, -0.8);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(0,0,0,0.4)";
+      ctx.beginPath();
+      ctx.moveTo(-or, 2.4);
+      ctx.lineTo(or, 0.8);
+      ctx.stroke();
       ctx.restore();
     } else if (t === OBS.WHISK) {
       ctx.save();
@@ -844,47 +1040,69 @@ export function renderFrame(
       ctx.stroke(path);
       ctx.restore();
     }
-    // pass 0: projected shadow — lifts the noodle off the pan
+    // NO black outline. Volume comes from a TRANSVERSE gradient built by offset strokes, all under
+    // the one up-left light: cast shadow (down-right) → body → own-dark underside (down-right) →
+    // lit ridge (up-left) → thin specular (up-left). Round caps/joins keep it a soft noodle.
+    const ridge = mixRgb(body, RGB_HEBRA_HI, 0.55);
+    // pass 0: projected shadow onto the pan (a cast shadow, not a contour)
     ctx.save();
-    ctx.translate(0.16 * D, 0.28 * D);
-    ctx.lineWidth = D + 4;
-    ctx.strokeStyle = "rgba(0,0,0,0.34)";
+    ctx.translate(0.14 * D, 0.26 * D);
+    ctx.lineWidth = D + 2;
+    ctx.strokeStyle = "rgba(0,0,0,0.30)";
     ctx.stroke(path);
     ctx.restore();
-    // pass 1: thick dark OUTLINE (bold silhouette that reads instantly)
-    ctx.lineWidth = D + 3;
-    ctx.strokeStyle = rgb(RGB_HEBRA_STROKE);
-    ctx.stroke(path);
-    // pass 2: amber BODY
+    // pass 1: amber BODY (full width) — its 8:1 value against the dark pan IS the separation
     ctx.lineWidth = D;
     ctx.strokeStyle = rgb(body);
     ctx.stroke(path);
-    // pass 3: ONE thin SHINE, offset toward the light (up-left) — what makes it pasta, not a line
+    // pass 2: shaded UNDERSIDE — own dark colour on the down-right (the shadow side of the tube)
     ctx.save();
-    ctx.translate(-0.2 * D, -0.22 * D);
-    ctx.globalAlpha = 0.9;
-    ctx.lineWidth = D * 0.26;
+    ctx.translate(0.12 * D, 0.14 * D);
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = D * 0.74;
+    ctx.strokeStyle = rgb(RGB_HEBRA_STROKE);
+    ctx.stroke(path);
+    ctx.restore();
+    // pass 3: lit RIDGE — lighter amber pushed up-left (the top of the tube catches the light)
+    ctx.save();
+    ctx.translate(-0.16 * D, -0.18 * D);
+    ctx.lineWidth = D * 0.58;
+    ctx.strokeStyle = rgb(ridge);
+    ctx.stroke(path);
+    ctx.restore();
+    // pass 4: thin SPECULAR filo, offset up-left the most
+    ctx.save();
+    ctx.translate(-0.24 * D, -0.26 * D);
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = D * 0.2;
     ctx.strokeStyle = rgb(shine);
     ctx.stroke(path);
     ctx.restore();
     ctx.globalAlpha = 1;
 
-    // TAPERED TAIL — shrinking amber discs (dark outline + body) from pe to the tip
+    // TAPERED TAIL — shrinking discs, each lit (down-right own-dark under, amber body, up-left kiss)
     const denom = Math.max(1, n - 1 - pe);
     for (let i = pe + 1; i < n; i++) {
       const tt = (i - pe) / denom; // 0 at pe -> 1 at the very tip
       const rr = Math.max(1, D * 0.5 * (1 - tt));
-      ctx.fillStyle = rgb(RGB_HEBRA_STROKE);
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
       ctx.beginPath();
-      ctx.arc(sx[i], sy[i], rr + 1.4, 0, TAU);
+      ctx.arc(sx[i] + rr * 0.28, sy[i] + rr * 0.34, rr, 0, TAU);
       ctx.fill();
       ctx.fillStyle = rgb(body);
       ctx.beginPath();
       ctx.arc(sx[i], sy[i], rr, 0, TAU);
       ctx.fill();
+      if (rr > 2.5) {
+        ctx.fillStyle = rgb(ridge);
+        ctx.beginPath();
+        ctx.arc(sx[i] - rr * 0.28, sy[i] - rr * 0.3, rr * 0.5, 0, TAU);
+        ctx.fill();
+      }
     }
 
-    // SEGMENT ITEMS: each card taken rides a body segment (the build, visible on the snake).
+    // SEGMENT ITEMS: each card taken rides a body node (the build, visible on the snake). Lit like
+    // a rounded gem: own down-right shadow, coloured body, warm up-left rim + spec (no black ring).
     for (let p = 0; p < w.pickedCount; p++) {
       const tags = CARD_TAGS[CARD_POOL[w.pickedCards[p]]];
       const col = TAG_RGB[tags[0]] ?? RGB_AMBAR;
@@ -894,17 +1112,26 @@ export function renderFrame(
       const bx = sx[ni];
       const by = sy[ni];
       const br = Math.max(3, D * 0.36);
-      ctx.fillStyle = "rgba(28,16,10,0.92)";
+      ctx.fillStyle = "rgba(0,0,0,0.32)";
       ctx.beginPath();
-      ctx.arc(bx, by, br + 1.6, 0, TAU);
+      ctx.arc(bx + br * 0.24, by + br * 0.3, br, 0, TAU);
       ctx.fill();
-      ctx.fillStyle = rgb(col);
+      const bg = ctx.createRadialGradient(bx - br * 0.34, by - br * 0.38, br * 0.1, bx, by, br);
+      bg.addColorStop(0, rgb(mixRgb(col, [255, 255, 255], 0.4)));
+      bg.addColorStop(0.6, rgb(col));
+      bg.addColorStop(1, rgb(mixRgb(col, RGB_ESPRESSO, 0.45)));
+      ctx.fillStyle = bg;
       ctx.beginPath();
       ctx.arc(bx, by, br, 0, TAU);
       ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.strokeStyle = "rgba(255,231,180,0.7)";
+      ctx.lineWidth = Math.max(1, br * 0.18);
       ctx.beginPath();
-      ctx.arc(bx - br * 0.32, by - br * 0.34, br * 0.3, 0, TAU);
+      ctx.arc(bx, by, br * 0.94, Math.PI * 0.9, Math.PI * 1.7);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.beginPath();
+      ctx.arc(bx - br * 0.32, by - br * 0.34, br * 0.22, 0, TAU);
       ctx.fill();
     }
   }
@@ -1174,6 +1401,149 @@ function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy:
 }
 
 // ---------------------------------------------------------------------------
+// FORK telegraph shadow (height h4 — the tallest object). Its shadow is offset far DOWN-RIGHT so
+// it stretches into frame while the fork is still at/behind the border: the warning comes for free
+// from the height/light system (no bespoke telegraph). Drawn on the pan, under everything.
+// ---------------------------------------------------------------------------
+function drawForkShadow(
+  ctx: CanvasRenderingContext2D,
+  w: World,
+  w2sx: (u: number) => number,
+  w2sy: (u: number) => number,
+  cam: Camera,
+): void {
+  const fx = w2sx(w.fork.x / F);
+  const fy = w2sy(w.fork.y / F);
+  const fr = Math.max(6, (FORK_CAPTURE_RADIUS / F) * cam.scale);
+  const ox = fx + fr * 0.55 + 12; // down-right, far (tall object)
+  const oy = fy + fr * 0.7 + 16;
+  const hr = (w.fork.heading / F) * TAU;
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.rotate(hr);
+  const g = ctx.createRadialGradient(0, 0, fr * 0.2, 0, 0, fr * 1.7);
+  g.addColorStop(0, "rgba(0,0,0,0.32)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.scale(1.5, 0.68);
+  ctx.beginPath();
+  ctx.arc(0, 0, fr * 1.7, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Ceramic PLATES — reconstructed from the topping clusters each frame (the sim has no plate
+// entity; a plate is pure decoration that teaches the enredo by composition: "RODEA ESTO"). It is
+// ceramic on iron: a low-contrast disc whose RELIEF is a BEVEL (up-left lit arc + down-right shadow
+// arc). It breathes, its amber rim tracks how much food is left, and on a loop-close it flashes
+// gold and the bevel collapses to flat. REGLA DURA: never more than ~3:1 contrast vs the pan.
+// ---------------------------------------------------------------------------
+const _twx = new Float64Array(256);
+const _twy = new Float64Array(256);
+const _tass = new Uint8Array(256);
+function drawPlates(
+  ctx: CanvasRenderingContext2D,
+  w: World,
+  w2sx: (u: number) => number,
+  w2sy: (u: number) => number,
+  cam: Camera,
+  enredoFlash: number,
+  reduce: boolean,
+): void {
+  const n = w.topCount;
+  if (n < 2) return;
+  for (let i = 0; i < n; i++) {
+    _twx[i] = w.topX[i] / F;
+    _twy[i] = w.topY[i] / F;
+    _tass[i] = (w.topFlags[i] & TOP_FLAG.ALIVE) === 0 ? 1 : 0; // dead toppings never anchor a plate
+  }
+  const cap = (CLUSTER_RADIUS / F) * 1.5; // capture radius from a seed (pocket ≈ 75u radius)
+  const cap2 = cap * cap;
+  for (let i = 0; i < n; i++) {
+    if (_tass[i]) continue;
+    // gather this pocket: members within `cap` of seed i.
+    let sumx = _twx[i];
+    let sumy = _twy[i];
+    let cnt = 1;
+    _tass[i] = 1;
+    for (let j = i + 1; j < n; j++) {
+      if (_tass[j]) continue;
+      const dx = _twx[j] - _twx[i];
+      const dy = _twy[j] - _twy[i];
+      if (dx * dx + dy * dy <= cap2) {
+        _tass[j] = 1;
+        sumx += _twx[j];
+        sumy += _twy[j];
+        cnt++;
+      }
+    }
+    if (cnt < 2) continue; // no plate under a lone topping
+    const cxw = sumx / cnt;
+    const cyw = sumy / cnt;
+    // radius = furthest member from centroid + margin, clamped so the plate stays a subtle pocket.
+    let maxd = 0;
+    for (let j = i; j < n; j++) {
+      // (re-scan is cheap; members were flagged this pass — approximate with distance to centroid)
+      const dx = _twx[j] - cxw;
+      const dy = _twy[j] - cyw;
+      const d = dx * dx + dy * dy;
+      if (d <= cap2 && d > maxd) maxd = d;
+    }
+    const rw = Math.min(cap, Math.sqrt(maxd) + 16);
+    const cxp = w2sx(cxw);
+    const cyp = w2sy(cyw);
+    const rp = rw * cam.scale;
+    if (rp < 6) continue;
+    const breathe = reduce ? 1 : 1 + 0.012 * Math.sin(w.tick * 0.03 + (i % 7));
+    const rr = rp * breathe;
+    const bevel = 1 - Math.min(1, enredoFlash * 1.4); // loop-close → bevel collapses to flat
+    // 1. contact shadow (down-right)
+    ctx.fillStyle = rgba(RGB_PLATE_LO, 0.45);
+    ctx.beginPath();
+    ctx.ellipse(cxp + rp * 0.05 + 2, cyp + rp * 0.07 + 3, rr * 1.02, rr * 0.95, 0, 0, TAU);
+    ctx.fill();
+    // 2. body disc (barely above the pan)
+    ctx.fillStyle = rgb(RGB_PLATE);
+    ctx.beginPath();
+    ctx.arc(cxp, cyp, rr, 0, TAU);
+    ctx.fill();
+    // 3. BEVEL: up-left lit arc + down-right shadow arc (the relief)
+    ctx.lineWidth = Math.max(2, rr * 0.15);
+    ctx.strokeStyle = `rgba(255,220,150,${(0.2 * bevel).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(cxp, cyp, rr * 0.92, Math.PI * 0.85, Math.PI * 1.7);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(0,0,0,${(0.35 * bevel).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(cxp, cyp, rr * 0.92, Math.PI * 1.7, Math.PI * 2.85);
+    ctx.stroke();
+    // 4. glaze: thin specular arc on the upper edge
+    if (!reduce) {
+      ctx.lineWidth = Math.max(1, rr * 0.05);
+      ctx.strokeStyle = `rgba(255,245,220,${(0.4 * bevel).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(cxp, cyp, rr * 0.82, Math.PI * 1.02, Math.PI * 1.5);
+      ctx.stroke();
+    }
+    // 5. amber edge = food remaining (dims as the pocket empties)
+    const full = Math.min(1, cnt / 5);
+    ctx.lineWidth = Math.max(1.5, rr * 0.06);
+    ctx.strokeStyle = rgba(RGB_AMBAR, 0.05 + 0.16 * full);
+    ctx.beginPath();
+    ctx.arc(cxp, cyp, rr, 0, TAU);
+    ctx.stroke();
+    // 6. loop-close: gold flash
+    if (enredoFlash > 0.01) {
+      ctx.fillStyle = rgba([255, 210, 84], 0.18 * enredoFlash);
+      ctx.beginPath();
+      ctx.arc(cxp, cyp, rr, 0, TAU);
+      ctx.fill();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Fork boss — a bit more menace than raw fillRects.
 // ---------------------------------------------------------------------------
 function drawFork(
@@ -1299,8 +1669,8 @@ function drawTouchControls(ctx: CanvasRenderingContext2D, view: Viewport, fs: Fr
     ctx.beginPath();
     ctx.arc(s.ox, s.oy, R, 0, TAU);
     ctx.stroke();
-    let dx = s.x - s.ox;
-    let dy = s.y - s.oy;
+    const dx = s.x - s.ox;
+    const dy = s.y - s.oy;
     const d = Math.hypot(dx, dy) || 1;
     const kx = (Math.min(d, R) / d) * dx;
     const ky = (Math.min(d, R) / d) * dy;
