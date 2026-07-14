@@ -37,7 +37,6 @@ import {
   RGB_AMBAR,
   RGB_ROJO,
   RGB_VERDE,
-  RGB_SALSA,
   RGB_SALSA_DARK,
   RGB_PAN,
   RGB_PAN_RIM,
@@ -1052,9 +1051,13 @@ export function renderFrame(
     ctx.strokeStyle = "rgba(0,0,0,0.30)";
     ctx.stroke(path);
     ctx.restore();
-    // pass 1: amber BODY (full width) — its 8:1 value against the dark pan IS the separation
+    // pass 1: amber BODY (full width) with a HEAD→TAIL colour gradient — richer/brighter at the
+    // head (fresh, sauced), a touch deeper toward the tail. Its 8:1 value vs the dark pan separates.
+    const bodyGrad = ctx.createLinearGradient(sx[0], sy[0], sx[pe], sy[pe]);
+    bodyGrad.addColorStop(0, rgb(mixRgb(body, [255, 240, 190], 0.24)));
+    bodyGrad.addColorStop(1, rgb(mixRgb(body, RGB_HEBRA_STROKE, 0.22)));
     ctx.lineWidth = D;
-    ctx.strokeStyle = rgb(body);
+    ctx.strokeStyle = bodyGrad;
     ctx.stroke(path);
     // pass 2: shaded UNDERSIDE — own dark colour on the down-right (the shadow side of the tube)
     ctx.save();
@@ -1064,6 +1067,24 @@ export function renderFrame(
     ctx.strokeStyle = rgb(RGB_HEBRA_STROKE);
     ctx.stroke(path);
     ctx.restore();
+    // pass 2b: SEGMENT definition — faint cross-ticks so it reads as a spaghetti strand, not a hose
+    if (!reduce && cam.scale > 0.45) {
+      ctx.strokeStyle = rgba(RGB_HEBRA_STROKE, 0.26);
+      ctx.lineWidth = Math.max(1, D * 0.06);
+      const seg = 3;
+      const th = D * 0.44;
+      for (let i = seg; i < pe; i += seg) {
+        const tx = sx[i + 1] - sx[i - 1];
+        const ty = sy[i + 1] - sy[i - 1];
+        const len = Math.hypot(tx, ty) || 1;
+        const nxp = -ty / len;
+        const nyp = tx / len;
+        ctx.beginPath();
+        ctx.moveTo(sx[i] - nxp * th, sy[i] - nyp * th);
+        ctx.lineTo(sx[i] + nxp * th, sy[i] + nyp * th);
+        ctx.stroke();
+      }
+    }
     // pass 3: lit RIDGE — lighter amber pushed up-left (the top of the tube catches the light)
     ctx.save();
     ctx.translate(-0.16 * D, -0.18 * D);
@@ -1080,6 +1101,21 @@ export function renderFrame(
     ctx.stroke(path);
     ctx.restore();
     ctx.globalAlpha = 1;
+    // pass 5: TRAVELLING SAUCE SHEEN — bright wet glints that flow along the strand (additive dashed
+    // stroke on the lit ridge, dash offset animated by the tick). Reads as a glossy sauce coating.
+    if (!reduce) {
+      ctx.save();
+      ctx.translate(-0.13 * D, -0.15 * D);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "round";
+      ctx.lineWidth = D * 0.17;
+      ctx.strokeStyle = rgba(RGB_HEBRA_HI, 0.5);
+      ctx.setLineDash([D * 0.5, D * 3.4]);
+      ctx.lineDashOffset = -((w.tick * (D * 0.08)) % (D * 3.9));
+      ctx.stroke(path);
+      ctx.setLineDash(EMPTY_DASH);
+      ctx.restore();
+    }
 
     // TAPERED TAIL — shrinking discs, each lit (down-right own-dark under, amber body, up-left kiss)
     const denom = Math.max(1, n - 1 - pe);
@@ -1335,46 +1371,73 @@ function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy:
   const perpx = -fwdy;
   const perpy = fwdx;
 
-  if (!reduce) stamp(ctx, GLOW_WARM, hx, hy, headR * 2.3, 0.32);
+  if (!reduce) stamp(ctx, GLOW_WARM, hx, hy, headR * 2.2, 0.3);
 
-  // skull — a bright pasta tip, squash-stretch along heading
-  ctx.save();
-  ctx.translate(hx, hy);
-  ctx.rotate(hrad);
-  ctx.scale(st, 1 / st);
-  ctx.fillStyle = rgb(mixRgb(RGB_CREMA, RGB_AMBAR, 0.06));
-  ctx.beginPath();
-  ctx.ellipse(0, 0, headR * 1.12, headR, 0, 0, TAU);
-  ctx.fill();
-  // warm bottom shading
-  ctx.fillStyle = rgba(RGB_SALSA, 0.16);
-  ctx.beginPath();
-  ctx.ellipse(0, headR * 0.32, headR * 0.9, headR * 0.5, 0, 0, TAU);
-  ctx.fill();
-  // top gloss
-  ctx.fillStyle = "rgba(255,255,255,0.55)";
-  ctx.beginPath();
-  ctx.ellipse(-headR * 0.25, -headR * 0.42, headR * 0.52, headR * 0.26, -0.3, 0, TAU);
-  ctx.fill();
-  ctx.lineWidth = 2.4;
-  ctx.strokeStyle = rgb(mixRgb(RGB_SALSA_DARK, RGB_ESPRESSO, 0.25));
-  ctx.beginPath();
-  ctx.ellipse(0, 0, headR * 1.12, headR, 0, 0, TAU);
-  ctx.stroke();
-  if (fs.flashHead > 0.05) {
-    ctx.fillStyle = `rgba(255,255,255,${(fs.flashHead * 0.85).toFixed(3)})`;
+  // The head is the noodle TIP: a bright, sauce-glossy pasta knob lit by the SAME up-left light as
+  // everything else. The squash-stretch tilts along the heading (ellipse rotation), but the LIGHTING
+  // is screen-fixed (gradients in screen space) so the lit side never spins with the turn.
+  let mid = mixRgb(RGB_HEBRA, heatColor(fs.heat01), 0.22 * fs.heat01);
+  mid = mixRgb(mid, [255, 240, 190], 0.34); // a touch brighter than the body
+  if (w.mods.infiniteBoost) mid = mixRgb(mid, [255, 224, 130], 0.4);
+  if (w.mods.smokeTrailEnabled) mid = mixRgb(mid, [150, 150, 150], 0.28);
+  const light = mixRgb(mid, [255, 250, 215], 0.6);
+  const rx = headR * 1.12 * st; // along heading
+  const ry = headR / st; // across
+  const headPath = (): void => {
     ctx.beginPath();
-    ctx.ellipse(0, 0, headR * 1.12, headR, 0, 0, TAU);
+    ctx.ellipse(hx, hy, rx, ry, hrad, 0, TAU);
+  };
+
+  // AO under the head (down-right) — floats above the pan like the food
+  if (!reduce) {
+    ctx.fillStyle = "rgba(0,0,0,0.26)";
+    ctx.beginPath();
+    ctx.ellipse(hx + headR * 0.16, hy + headR * 0.52, headR * 1.02, headR * 0.5, 0, 0, TAU);
     ctx.fill();
   }
-  ctx.restore();
+  // FORM: volume gradient, light core up-left
+  const vg = ctx.createRadialGradient(hx - headR * 0.4, hy - headR * 0.46, headR * 0.12, hx, hy, headR * 1.22);
+  vg.addColorStop(0, rgb(light));
+  vg.addColorStop(0.55, rgb(mid));
+  vg.addColorStop(1, rgb(RGB_HEBRA_STROKE));
+  headPath();
+  ctx.fillStyle = vg;
+  ctx.fill();
+  // SHADOW edge (down-right, own dark) — not a black outline
+  const sg = ctx.createLinearGradient(hx + headR, hy + headR, hx - headR * 0.2, hy - headR * 0.2);
+  sg.addColorStop(0, rgb(RGB_HEBRA_STROKE));
+  sg.addColorStop(0.5, "rgba(0,0,0,0)");
+  headPath();
+  ctx.lineWidth = Math.max(2, headR * 0.18);
+  ctx.strokeStyle = sg;
+  ctx.stroke();
+  // RIM light (up-left) — the light-based edge that replaces the old flat outline
+  const rg = ctx.createLinearGradient(hx - headR, hy - headR, hx + headR * 0.2, hy + headR * 0.2);
+  rg.addColorStop(0, "rgba(255,236,190,0.95)");
+  rg.addColorStop(0.5, "rgba(255,236,190,0)");
+  headPath();
+  ctx.lineWidth = Math.max(1.4, headR * 0.13);
+  ctx.strokeStyle = rg;
+  ctx.stroke();
+  // glossy SPECULAR (sauce-coated), up-left
+  if (!reduce) {
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.beginPath();
+    ctx.ellipse(hx - headR * 0.34, hy - headR * 0.4, headR * 0.26, headR * 0.15, hrad, 0, TAU);
+    ctx.fill();
+  }
+  if (fs.flashHead > 0.05) {
+    headPath();
+    ctx.fillStyle = `rgba(255,255,255,${(fs.flashHead * 0.8).toFixed(3)})`;
+    ctx.fill();
+  }
 
   // mouth — forward-facing, opens when eating (screen space, orientation-correct)
   const mx = hx + fwdx * headR * 0.58;
   const my = hy + fwdy * headR * 0.58;
   if (fs.mouthOpen > 0.05) {
     const mr = headR * 0.3 * fs.mouthOpen + 2;
-    ctx.fillStyle = "#5A1414";
+    ctx.fillStyle = "#4A1010";
     ctx.beginPath();
     ctx.arc(mx, my, mr, 0, TAU);
     ctx.fill();
@@ -1385,7 +1448,7 @@ function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy:
   } else {
     ctx.lineWidth = 2.4;
     ctx.lineCap = "round";
-    ctx.strokeStyle = rgb(RGB_ESPRESSO);
+    ctx.strokeStyle = rgb(mixRgb(RGB_HEBRA_STROKE, RGB_ESPRESSO, 0.3));
     ctx.beginPath();
     ctx.moveTo(mx - perpx * headR * 0.24, my - perpy * headR * 0.24);
     ctx.quadraticCurveTo(
@@ -1397,28 +1460,42 @@ function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy:
     ctx.stroke();
   }
 
-  // BIG googly eyes — forward + to the sides, looking toward gaze (the "alive" charm)
+  // BIG googly eyes — little spheres seated in sockets, looking toward gaze (the "alive" charm)
   const gaze = fs.gaze;
   for (const side of [-1, 1]) {
     const ex = hx + fwdx * headR * 0.24 + perpx * side * headR * 0.46;
     const ey = hy + fwdy * headR * 0.24 + perpy * side * headR * 0.46;
     const er = headR * 0.5;
-    stamp(ctx, EYE_GRAD, ex, ey, er, 1);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = "rgba(70,45,30,0.35)";
+    // socket shadow (down-right) so the eye sits in the face, not stuck on top
+    ctx.fillStyle = "rgba(58,32,16,0.32)";
     ctx.beginPath();
-    ctx.arc(ex, ey, er, 0, TAU);
+    ctx.ellipse(ex + er * 0.14, ey + er * 0.18, er * 1.04, er * 0.98, 0, 0, TAU);
+    ctx.fill();
+    // white sphere + warm rim (up-left), no flat ring
+    stamp(ctx, EYE_GRAD, ex, ey, er, 1);
+    const eg = ctx.createLinearGradient(ex - er, ey - er, ex + er * 0.2, ey + er * 0.2);
+    eg.addColorStop(0, "rgba(255,240,205,0.7)");
+    eg.addColorStop(0.5, "rgba(255,240,205,0)");
+    ctx.lineWidth = Math.max(1, er * 0.12);
+    ctx.strokeStyle = eg;
+    ctx.beginPath();
+    ctx.arc(ex, ey, er * 0.95, 0, TAU);
     ctx.stroke();
+    // pupil toward gaze + a bold catchlight up-left and a faint secondary down-right
     const pr = er * 0.56;
-    const px = ex + Math.cos(gaze) * er * 0.34;
-    const py = ey + Math.sin(gaze) * er * 0.34;
+    const px = ex + Math.cos(gaze) * er * 0.32;
+    const py = ey + Math.sin(gaze) * er * 0.32;
     ctx.fillStyle = rgb(RGB_ESPRESSO);
     ctx.beginPath();
     ctx.arc(px, py, pr, 0, TAU);
     ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.fillStyle = "rgba(255,255,255,0.98)";
     ctx.beginPath();
-    ctx.arc(px - pr * 0.36, py - pr * 0.46, pr * 0.36, 0, TAU);
+    ctx.arc(px - pr * 0.34, py - pr * 0.44, pr * 0.38, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.beginPath();
+    ctx.arc(px + pr * 0.32, py + pr * 0.34, pr * 0.16, 0, TAU);
     ctx.fill();
   }
 }
