@@ -111,7 +111,7 @@ import {
 import { MODE, PHASE, FORK_STATE, OBS, OBS_FLAG, TOPPING, TOP_FLAG, PAPA } from "./types.ts";
 import type { Input, World } from "./types.ts";
 import { runEnredo } from "./enredo.ts";
-import { applyCard, generateOffer } from "./cards.ts";
+import { pickCard, generateOffer } from "./cards.ts";
 
 export { createWorld } from "./world.ts";
 
@@ -396,7 +396,7 @@ export function step(w: World, input: Input): void {
       w.rerollLeft--;
       generateOffer(w);
     } else if (input.cardPick >= 0 && input.cardPick < w.offerCount) {
-      applyCard(w, input.cardPick);
+      pickCard(w, input.cardPick);
       advanceService(w);
     }
     w.tick++;

@@ -20,6 +20,7 @@ import {
   MAX_NODES,
   MAX_OBS,
   MAX_OFFERS,
+  MAX_PICKS,
   MAX_PAPA,
   MAX_SMOKE,
   MAX_TOP,
@@ -30,7 +31,7 @@ import {
   START_NODES,
   WORLD_HALF,
 } from "./constants.ts";
-import { FORK_STATE, PHASE, TOPPING } from "./types.ts";
+import { FORK_STATE, PHASE, TOPPING, CARD_TAG_ORDER } from "./types.ts";
 import type { ModeName, Modifiers, World } from "./types.ts";
 
 const ONE = 65536; // Q16.16 1.0 (local literal; avoids importing for a single default)
@@ -152,6 +153,10 @@ export function createWorld(seed: number, mode: ModeName): World {
     toppingsEaten: 0,
 
     mods: initModifiers(),
+
+    pickedCards: new Int8Array(MAX_PICKS),
+    pickedCount: 0,
+    synergyTier: new Int8Array(CARD_TAG_ORDER.length),
 
     offerIds: new Int8Array(MAX_OFFERS),
     offerCount: 0,

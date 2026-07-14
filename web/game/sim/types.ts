@@ -58,6 +58,18 @@ export type PapaCode = (typeof PAPA)[keyof typeof PAPA];
 export const CARD_TIPO = { ING: "ING", REC: "REC", MAL: "MAL" } as const;
 export type CardTipo = (typeof CARD_TIPO)[keyof typeof CARD_TIPO];
 
+// Card TAGS drive TFT-style synergies: having N cards of a tag activates a tier. A card can carry
+// 1-2 tags. FUEGO=quema, GRASA=cuerpo/boost, LAZO=enredo, VELOZ=maniobra, COSECHA=papa/economía.
+export const CARD_TAG = {
+  FUEGO: "FUEGO",
+  GRASA: "GRASA",
+  LAZO: "LAZO",
+  VELOZ: "VELOZ",
+  COSECHA: "COSECHA",
+} as const;
+export type CardTag = (typeof CARD_TAG)[keyof typeof CARD_TAG];
+export const CARD_TAG_ORDER: readonly CardTag[] = ["FUEGO", "GRASA", "LAZO", "VELOZ", "COSECHA"];
+
 export type CardId =
   | "al_dente"
   | "hebra_gruesa"
@@ -281,6 +293,12 @@ export type World = {
 
   // card state
   mods: Modifiers;
+
+  // build: cards taken so far, in pick order (each one "rides" a body segment). Mods are REBUILT
+  // from this list + synergies on every pick, so the effect is a pure function of the build.
+  pickedCards: Int8Array; // CARD_POOL indices, length MAX_PICKS
+  pickedCount: number;
+  synergyTier: Int8Array; // active tier per tag (index = CARD_TAG_ORDER), 0/1/2 — view + effects
 
   // draft buffer (meaningful only while phase === DRAFT)
   offerIds: Int8Array; // pool indices into CARD_POOL, length MAX_OFFERS

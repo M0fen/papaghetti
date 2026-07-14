@@ -150,6 +150,7 @@ export const MAX_SMOKE = 128; // smoke trail segments
 export const SMOKE_LIFE_TICKS = 3 * TICKS_PER_SEC;
 export const BURN_LIFE_TICKS = 2 * TICKS_PER_SEC;
 export const MAX_OFFERS = 5; // draft offer buffer size
+export const MAX_PICKS = 16; // max cards taken in a run (one per service; padded for safety)
 
 // --- angle ----------------------------------------------------------------
 export const FULL_CIRCLE = 65536; // brads per revolution

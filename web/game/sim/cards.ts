@@ -15,8 +15,9 @@
 import { fmul, ONE } from "./fixed.ts";
 import { makeRng, nextInt } from "./rng.ts";
 import { CHICHARRON_EVERY, COSECHA_MAX, PINA_TUG_MAG } from "./constants.ts";
-import { CARD_TIPO } from "./types.ts";
-import type { CardId, CardTipo, CosechaLevel, Modifiers, World } from "./types.ts";
+import { CARD_TIPO, CARD_TAG_ORDER } from "./types.ts";
+import type { CardId, CardTipo, CardTag, CosechaLevel, Modifiers, World } from "./types.ts";
+import { initModifiers } from "./world.ts";
 
 // ===========================================================================
 // Q16.16 multiplier constants (the frozen table from the contract).
@@ -29,6 +30,7 @@ const M_125 = 81920; // +25%
 const M_130 = 85197; // +30%
 const M_135 = 88474; // +35%
 const M_150 = 98304; // +50%
+const M_160 = 104858; // +60%
 const M_200 = 131072; // x2
 const M_075 = 49152; // -25%
 const M_070 = 45875; // -30% (0.70 => expires 30% faster)
@@ -273,14 +275,99 @@ export function cardIdAt(index: number): CardId {
   return CARD_POOL[index];
 }
 
+// ===========================================================================
+// TAGS + SYNERGIES (TFT-style, the "build"). A card carries 1-2 tags; having enough of a tag
+// activates a tier that layers extra mods on top. Everything is PURE: rebuildMods() resets mods
+// and re-derives the whole build (cards + synergies) from w.pickedCards, so the result never
+// depends on pick order and stays deterministic (anti-cheat safe).
+// ===========================================================================
+export const CARD_TAGS: Record<CardId, CardTag[]> = {
+  al_dente: ["VELOZ"],
+  hebra_gruesa: ["GRASA"],
+  cabello_angel: ["VELOZ"],
+  almidon_puro: ["GRASA", "VELOZ"],
+  lazo_avido: ["LAZO"],
+  corte_limpio: ["LAZO"],
+  enredo_ardiente: ["FUEGO", "LAZO"],
+  lazo_hierro: ["LAZO"],
+  chicharron: ["FUEGO", "GRASA"],
+  pina_acida: ["COSECHA"],
+  tocineta: ["GRASA", "FUEGO"],
+  ojo_criolla: ["COSECHA"],
+  cosecha_voraz: ["COSECHA"],
+  fuego_alto: ["FUEGO"],
+};
+
+// Tier thresholds: >=2 tags = tier 1, >=3 = tier 2 (tier 2 also keeps the tier-1 effect).
+const SYN_T1 = 2;
+const SYN_T2 = 3;
+function tagTier(count: number): number {
+  return count >= SYN_T2 ? 2 : count >= SYN_T1 ? 1 : 0;
+}
+
+/** Layer synergy effects onto mods from per-tag counts; record the active tier per tag for the HUD. */
+function applySynergies(mods: Modifiers, counts: Int32Array, tierOut: Int8Array): void {
+  for (let i = 0; i < CARD_TAG_ORDER.length; i++) {
+    const tier = tagTier(counts[i]);
+    tierOut[i] = tier;
+    if (tier === 0) continue;
+    switch (CARD_TAG_ORDER[i]) {
+      case "FUEGO": // quema
+        mods.enredoBurnsOil = true;
+        if (tier >= 2) mods.globalScoreMul = fmul(mods.globalScoreMul, M_125);
+        break;
+      case "GRASA": // cuerpo / empuje
+        mods.toppingScoreMul = fmul(mods.toppingScoreMul, M_120);
+        if (tier >= 2) mods.baseSpeedMul = fmul(mods.baseSpeedMul, M_112);
+        break;
+      case "LAZO": // enredo
+        mods.loopCap += 4;
+        if (tier >= 2) mods.enredoCutsTail = false;
+        break;
+      case "VELOZ": // maniobra
+        mods.turnRateMul = fmul(mods.turnRateMul, M_115);
+        if (tier >= 2) mods.turnRateMul = fmul(mods.turnRateMul, M_115);
+        break;
+      case "COSECHA": // papa / economía
+        mods.cosechaGainMul = fmul(mods.cosechaGainMul, M_135);
+        if (tier >= 2) mods.papaLifeMul = fmul(mods.papaLifeMul, M_160);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+// Scratch tag-count buffer — rebuildMods runs only on a draft pick, never per tick.
+const _tagCounts = new Int32Array(CARD_TAG_ORDER.length);
+
+/** Rebuild w.mods from scratch: neutral → every picked card's apply() → synergies. Pure over the build. */
+export function rebuildMods(w: World): void {
+  Object.assign(w.mods, initModifiers());
+  _tagCounts.fill(0);
+  for (let i = 0; i < w.pickedCount; i++) {
+    const id = CARD_POOL[w.pickedCards[i]];
+    CARDS[id].apply(w.mods, w);
+    const tags = CARD_TAGS[id];
+    for (let t = 0; t < tags.length; t++) {
+      const idx = CARD_TAG_ORDER.indexOf(tags[t]);
+      if (idx >= 0) _tagCounts[idx]++;
+    }
+  }
+  applySynergies(w.mods, _tagCounts, w.synergyTier);
+}
+
 /**
- * Apply the card in draft offer slot `offerSlot` to the world's Modifiers.
- * Resolves the pool index stored in w.offerIds, then runs that card's pure apply().
+ * Take the card in draft offer slot `offerSlot`: append it to the build (each card rides a body
+ * segment) and REBUILD mods (cards + synergies). Replaces the old direct-apply.
  */
-export function applyCard(w: World, offerSlot: number): void {
+export function pickCard(w: World, offerSlot: number): void {
   const poolIdx = w.offerIds[offerSlot];
-  const id = CARD_POOL[poolIdx];
-  CARDS[id].apply(w.mods, w);
+  if (w.pickedCount < w.pickedCards.length) {
+    w.pickedCards[w.pickedCount] = poolIdx;
+    w.pickedCount++;
+  }
+  rebuildMods(w);
 }
 
 // ===========================================================================

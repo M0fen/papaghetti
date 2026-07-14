@@ -104,6 +104,10 @@ function hashWorld(w: World): number {
   h = mix(h, w.rerollLeft);
   h = mix(h, w.offerCount);
   for (let i = 0; i < w.offerCount; i++) h = mix(h, w.offerIds[i]);
+  // build state (cards taken + active synergy tiers) — a divergence here flips the hash.
+  h = mix(h, w.pickedCount);
+  for (let i = 0; i < w.pickedCount; i++) h = mix(h, w.pickedCards[i]);
+  for (let i = 0; i < w.synergyTier.length; i++) h = mix(h, w.synergyTier[i]);
   const m = w.mods;
   const b = (v: boolean) => (v ? 1 : 0);
   h = mix(h, m.turnRateMul);

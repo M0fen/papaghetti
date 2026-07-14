@@ -27,9 +27,9 @@ import {
   CLUSTER_RADIUS,
   PAPA_LIFE_TICKS,
 } from "@/game/sim/constants.ts";
-import { TOP_FLAG, OBS, OBS_FLAG, PAPA } from "@/game/sim/types.ts";
-import type { World, CardId } from "@/game/sim/types.ts";
-import { CARDS, CARD_POOL } from "@/game/sim/cards.ts";
+import { TOP_FLAG, OBS, OBS_FLAG, PAPA, CARD_TAG_ORDER } from "@/game/sim/types.ts";
+import type { World } from "@/game/sim/types.ts";
+import { CARDS, CARD_POOL, CARD_TAGS } from "@/game/sim/cards.ts";
 import {
   PALETTE,
   RGB_ESPRESSO,
@@ -67,6 +67,16 @@ const TAU = Math.PI * 2;
 // Module-level scratch so the hot render loop never allocates per frame.
 const sx = new Float64Array(MAXN);
 const sy = new Float64Array(MAXN);
+
+// Synergy tag colours (build visibility). Order matches CARD_TAG_ORDER.
+const TAG_RGB: Record<string, readonly [number, number, number]> = {
+  FUEGO: [240, 116, 42],
+  GRASA: [242, 193, 78],
+  LAZO: [200, 50, 30],
+  VELOZ: [127, 208, 192],
+  COSECHA: [143, 224, 74],
+};
+const _synCounts = new Int32Array(8);
 
 export type Rect = { x: number; y: number; w: number; h: number };
 export type Viewport = { w: number; h: number };
@@ -252,42 +262,48 @@ function accentShine(g: CanvasRenderingContext2D, cx: number, cy: number, R: num
   g.arc(cx - R * 0.3, cy - R * 0.34, R * 0.24, 0, TAU);
   g.fill();
 }
-/** Build the path for a topping SHAPE (the colorblind channel). Ring/wave/egg are special-cased. */
-function buildShapePath(g: CanvasRenderingContext2D, cx: number, cy: number, R: number, shape: string): void {
+/** Round-food radial shading: light (accent) → mid (fill) → dark (stroke). */
+function radialFood(
+  g: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  R: number,
+  light: string,
+  mid: string,
+  dark: string,
+): void {
+  const grad = g.createRadialGradient(cx - R * 0.34, cy - R * 0.4, R * 0.1, cx, cy, R);
+  grad.addColorStop(0, light);
+  grad.addColorStop(0.55, mid);
+  grad.addColorStop(1, dark);
+  g.fillStyle = grad;
   g.beginPath();
-  switch (shape) {
-    case "square": {
-      const s = R * 0.86;
-      const rr = R * 0.28;
-      g.moveTo(cx - s + rr, cy - s);
-      g.arcTo(cx + s, cy - s, cx + s, cy + s, rr);
-      g.arcTo(cx + s, cy + s, cx - s, cy + s, rr);
-      g.arcTo(cx - s, cy + s, cx - s, cy - s, rr);
-      g.arcTo(cx - s, cy - s, cx + s, cy - s, rr);
-      break;
-    }
-    case "triangle":
-      g.moveTo(cx, cy - R);
-      g.lineTo(cx + R * 0.92, cy + R * 0.72);
-      g.lineTo(cx - R * 0.92, cy + R * 0.72);
-      break;
-    case "diamond":
-      g.moveTo(cx, cy - R);
-      g.lineTo(cx + R, cy);
-      g.lineTo(cx, cy + R);
-      g.lineTo(cx - R, cy);
-      break;
-    case "star":
-      for (let i = 0; i < 5; i++) {
-        const a0 = -Math.PI / 2 + (i * TAU) / 5;
-        const a1 = a0 + Math.PI / 5;
-        g.lineTo(cx + Math.cos(a0) * R, cy + Math.sin(a0) * R);
-        g.lineTo(cx + Math.cos(a1) * R * 0.46, cy + Math.sin(a1) * R * 0.46);
-      }
-      break;
-    default: // disc
-      g.arc(cx, cy, R, 0, TAU);
+  g.arc(cx, cy, R, 0, TAU);
+  g.fill();
+}
+/** Curly-fry spiral path (stroke it 2-3× with decreasing width for a fried coil). */
+function spiralPath(g: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
+  g.beginPath();
+  const steps = 44;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const a = t * 2.4 * TAU;
+    const rr = R * 0.26 + t * R * 0.64;
+    const px = cx + Math.cos(a) * rr;
+    const py = cy + Math.sin(a) * rr;
+    if (i === 0) g.moveTo(px, py);
+    else g.lineTo(px, py);
   }
+}
+/** roundRect PATH on an offscreen context (no fill/stroke performed). */
+function roundRectG(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const rr = Math.min(r, w / 2, h / 2);
+  g.beginPath();
+  g.moveTo(x + rr, y);
+  g.arcTo(x + w, y, x + w, y + h, rr);
+  g.arcTo(x + w, y + h, x, y + h, rr);
+  g.arcTo(x, y + h, x, y, rr);
+  g.arcTo(x, y, x + w, y, rr);
   g.closePath();
 }
 function contactShadow(g: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
@@ -297,6 +313,10 @@ function contactShadow(g: CanvasRenderingContext2D, cx: number, cy: number, R: n
   g.fill();
 }
 
+// Recognisable FOOD, not abstract shapes — the point is to know the ingredient at a glance.
+// Indexed by ToppingCode: 0 SALSA(tomate) 1 QUESO(cuña) 2 CEBOLLA(rodaja) 3 MAIZ(mazorca)
+// 4 RIZADAS(espiral) 5 PINA(piña) 6 HUEVO(frito) 7 CHICHARRON(crujiente). Colours from TOPPING_STYLES.
+const FOOD_GREEN = "#5AAE5C";
 function bakeAtlas(): void {
   ATLAS.length = 0;
   for (let kind = 0; kind < 8; kind++) {
@@ -309,47 +329,166 @@ function bakeAtlas(): void {
     contactShadow(g, cx, cy, R);
     g.lineJoin = "round";
     g.lineCap = "round";
-    const lw = Math.max(2.5, R * 0.18); // thick dark outline = legible silhouette at ~17px
-    if (st.shape === "wave") {
-      // RIZADAS — curly fry: bold 3-pass tube, all colours from the style
-      const draw = (col: string, wd: number, dy: number): void => {
-        g.strokeStyle = col;
-        g.lineWidth = wd;
+    const lw = Math.max(2.2, R * 0.13);
+
+    if (kind === 0) {
+      // TOMATE (salsa): red sphere + green calyx & stem
+      radialFood(g, cx, cy + R * 0.08, R * 0.96, st.accent, st.fill, st.stroke);
+      g.lineWidth = lw;
+      g.strokeStyle = st.stroke;
+      g.beginPath();
+      g.arc(cx, cy + R * 0.08, R * 0.96, 0, TAU);
+      g.stroke();
+      g.fillStyle = FOOD_GREEN;
+      for (let k = -2; k <= 2; k++) {
+        const a = -Math.PI / 2 + k * 0.55;
         g.beginPath();
-        g.moveTo(cx - R, cy + dy);
-        g.bezierCurveTo(cx - R * 0.4, cy - R + dy, cx + R * 0.4, cy + R + dy, cx + R, cy + dy);
-        g.stroke();
-      };
-      draw(st.stroke, R * 0.74, 1.5);
-      draw(st.fill, R * 0.54, 0);
-      draw(st.accent, R * 0.16, -R * 0.18);
-    } else if (st.shape === "ring") {
-      // CEBOLLA — onion ring: filled disc, hole punched, thick outline + one accent arc
+        g.moveTo(cx, cy - R * 0.5);
+        g.lineTo(cx + Math.cos(a) * R * 0.5, cy - R * 0.5 + Math.sin(a) * R * 0.5);
+        g.lineTo(cx + Math.cos(a + 0.28) * R * 0.16, cy - R * 0.5 + Math.sin(a + 0.28) * R * 0.16);
+        g.closePath();
+        g.fill();
+      }
+      g.strokeStyle = FOOD_GREEN;
+      g.lineWidth = 3.2;
+      g.beginPath();
+      g.moveTo(cx, cy - R * 0.5);
+      g.lineTo(cx + 2, cy - R * 0.98);
+      g.stroke();
+      accentShine(g, cx, cy - R * 0.05, R * 0.9, "rgba(255,255,255,0.55)");
+    } else if (kind === 1) {
+      // CUÑA DE QUESO con huecos
+      g.beginPath();
+      g.moveTo(cx - R * 0.95, cy + R * 0.6);
+      g.lineTo(cx + R * 0.95, cy + R * 0.6);
+      g.lineTo(cx + R * 0.95, cy - R * 0.35);
+      g.closePath();
       g.fillStyle = st.fill;
+      g.fill();
+      g.lineWidth = lw;
+      g.strokeStyle = st.stroke;
+      g.stroke();
+      g.fillStyle = st.accent; // crust rind band (lighter top)
+      g.beginPath();
+      g.moveTo(cx - R * 0.95, cy + R * 0.6);
+      g.lineTo(cx + R * 0.95, cy + R * 0.6);
+      g.lineTo(cx + R * 0.95, cy + R * 0.42);
+      g.lineTo(cx - R * 0.95, cy + R * 0.42);
+      g.closePath();
+      g.fill();
+      g.fillStyle = st.stroke;
+      const holes: Array<[number, number, number]> = [
+        [cx + R * 0.32, cy + R * 0.16, 3],
+        [cx + R * 0.58, cy + R * 0.38, 2.4],
+        [cx + R * 0.1, cy + R * 0.4, 2.2],
+      ];
+      for (const [hx, hy, hr] of holes) {
+        g.beginPath();
+        g.arc(hx, hy, hr, 0, TAU);
+        g.fill();
+      }
+      g.fillStyle = "rgba(255,255,255,0.45)";
+      g.beginPath();
+      g.arc(cx + R * 0.6, cy - R * 0.02, R * 0.13, 0, TAU);
+      g.fill();
+    } else if (kind === 2) {
+      // RODAJA DE CEBOLLA (capas concéntricas)
+      radialFood(g, cx, cy, R, "#F4ECFB", st.fill, "#B7A6D6");
+      g.lineWidth = lw;
+      g.strokeStyle = st.stroke;
       g.beginPath();
       g.arc(cx, cy, R, 0, TAU);
-      g.fill();
-      g.globalCompositeOperation = "destination-out";
+      g.stroke();
+      g.strokeStyle = "rgba(90,74,120,0.75)";
+      g.lineWidth = Math.max(1.4, R * 0.08);
+      for (const rr of [R * 0.72, R * 0.5, R * 0.28]) {
+        g.beginPath();
+        g.arc(cx, cy, rr, 0, TAU);
+        g.stroke();
+      }
+      accentShine(g, cx, cy, R, "rgba(255,255,255,0.7)");
+    } else if (kind === 3) {
+      // MAZORCA DE MAÍZ (hojas verdes + granos)
+      g.fillStyle = FOOD_GREEN;
       g.beginPath();
-      g.arc(cx, cy, R * 0.44, 0, TAU);
+      g.moveTo(cx - R * 0.5, cy + R * 0.35);
+      g.quadraticCurveTo(cx - R * 0.95, cy + R * 0.95, cx - R * 0.15, cy + R * 0.98);
+      g.quadraticCurveTo(cx - R * 0.28, cy + R * 0.6, cx, cy + R * 0.5);
+      g.closePath();
       g.fill();
-      g.globalCompositeOperation = "source-over";
+      g.beginPath();
+      g.moveTo(cx + R * 0.5, cy + R * 0.35);
+      g.quadraticCurveTo(cx + R * 0.95, cy + R * 0.95, cx + R * 0.15, cy + R * 0.98);
+      g.quadraticCurveTo(cx + R * 0.28, cy + R * 0.6, cx, cy + R * 0.5);
+      g.closePath();
+      g.fill();
+      roundRectG(g, cx - R * 0.48, cy - R * 0.98, R * 0.96, R * 1.7, R * 0.42);
+      g.fillStyle = st.fill;
+      g.fill();
+      g.lineWidth = lw * 0.8;
       g.strokeStyle = st.stroke;
+      g.stroke();
+      g.fillStyle = "rgba(122,106,20,0.75)";
+      for (let ry = -3; ry <= 3; ry++) {
+        for (let rx = -1; rx <= 1; rx++) {
+          g.beginPath();
+          g.arc(cx + rx * R * 0.28, cy - R * 0.2 + ry * R * 0.22, 1.7, 0, TAU);
+          g.fill();
+        }
+      }
+      accentShine(g, cx - R * 0.12, cy - R * 0.3, R * 0.6, "rgba(255,255,255,0.5)");
+    } else if (kind === 4) {
+      // PAPA RIZADA (espiral frita)
+      g.strokeStyle = st.stroke;
+      g.lineWidth = R * 0.5;
+      spiralPath(g, cx, cy, R);
+      g.stroke();
+      g.strokeStyle = st.fill;
+      g.lineWidth = R * 0.34;
+      spiralPath(g, cx, cy, R);
+      g.stroke();
+      g.strokeStyle = "rgba(255,240,205,0.55)";
+      g.lineWidth = R * 0.1;
+      spiralPath(g, cx, cy, R);
+      g.stroke();
+    } else if (kind === 5) {
+      // PIÑA (corona verde + cuerpo con retícula)
+      g.fillStyle = FOOD_GREEN;
+      for (const dx of [-R * 0.32, 0, R * 0.32]) {
+        g.beginPath();
+        g.moveTo(cx + dx, cy - R * 0.5);
+        g.lineTo(cx + dx - R * 0.16, cy - R * 1.15);
+        g.lineTo(cx + dx + R * 0.16, cy - R * 1.02);
+        g.closePath();
+        g.fill();
+      }
+      g.fillStyle = st.fill;
+      g.beginPath();
+      g.ellipse(cx, cy + R * 0.16, R * 0.82, R * 0.94, 0, 0, TAU);
+      g.fill();
       g.lineWidth = lw;
-      g.beginPath();
-      g.arc(cx, cy, R * 0.97, 0, TAU);
+      g.strokeStyle = st.stroke;
       g.stroke();
-      g.lineWidth = Math.max(1.5, R * 0.1);
+      g.save();
       g.beginPath();
-      g.arc(cx, cy, R * 0.46, 0, TAU);
-      g.stroke();
-      g.strokeStyle = st.accent;
-      g.lineWidth = Math.max(2, R * 0.16);
-      g.beginPath();
-      g.arc(cx, cy, R * 0.71, Math.PI * 1.05, Math.PI * 1.5);
-      g.stroke();
-    } else if (st.shape === "egg") {
-      // HUEVO — wavy white + warm yolk + one shine
+      g.ellipse(cx, cy + R * 0.16, R * 0.8, R * 0.92, 0, 0, TAU);
+      g.clip();
+      g.strokeStyle = "rgba(120,140,40,0.8)";
+      g.lineWidth = 1.3;
+      for (let k = -3; k <= 3; k++) {
+        g.beginPath();
+        g.moveTo(cx - R, cy + k * 9 - R);
+        g.lineTo(cx + R, cy + k * 9 + R);
+        g.stroke();
+        g.beginPath();
+        g.moveTo(cx - R, cy + k * 9 + R);
+        g.lineTo(cx + R, cy + k * 9 - R);
+        g.stroke();
+      }
+      g.restore();
+      accentShine(g, cx - R * 0.2, cy - R * 0.05, R * 0.6, "rgba(255,255,255,0.5)");
+    } else if (kind === 6) {
+      // HUEVO FRITO (clara ondulada + yema)
       g.fillStyle = st.fill;
       g.beginPath();
       for (let k = 0; k <= 16; k++) {
@@ -365,23 +504,42 @@ function bakeAtlas(): void {
       g.strokeStyle = st.stroke;
       g.lineWidth = Math.max(1.5, R * 0.1);
       g.stroke();
-      g.fillStyle = "#FFB01F"; // yolk (warm, still bright)
-      g.beginPath();
-      g.arc(cx + R * 0.1, cy, R * 0.42, 0, TAU);
-      g.fill();
+      radialFood(g, cx + R * 0.08, cy, R * 0.42, "#FFE79A", "#FFB01F", "#E07A10");
       g.strokeStyle = "#C9820E";
       g.lineWidth = 1.4;
+      g.beginPath();
+      g.arc(cx + R * 0.08, cy, R * 0.42, 0, TAU);
       g.stroke();
-      accentShine(g, cx + R * 0.1, cy, R * 0.42, st.accent);
+      accentShine(g, cx + R * 0.08, cy, R * 0.42, "rgba(255,255,255,0.85)");
     } else {
-      // disc / square / triangle / diamond / star: bold fill + thick outline + ONE shine
-      buildShapePath(g, cx, cy, R, st.shape);
+      // CHICHARRÓN (blob crujiente inflado + burbujas)
       g.fillStyle = st.fill;
+      g.beginPath();
+      for (let k = 0; k <= 16; k++) {
+        const a = (k / 16) * TAU;
+        const wob = R * (0.8 + 0.2 * Math.sin(a * 3 + 1.2) + 0.08 * Math.sin(a * 5 + 0.5));
+        const px = cx + Math.cos(a) * wob;
+        const py = cy + Math.sin(a) * wob * 0.94;
+        if (k === 0) g.moveTo(px, py);
+        else g.lineTo(px, py);
+      }
+      g.closePath();
       g.fill();
-      g.strokeStyle = st.stroke;
       g.lineWidth = lw;
+      g.strokeStyle = st.stroke;
       g.stroke();
-      accentShine(g, cx, cy, R, st.accent);
+      g.fillStyle = "rgba(90,58,24,0.7)";
+      const craters: Array<[number, number, number]> = [
+        [cx - R * 0.22, cy - R * 0.12, 3],
+        [cx + R * 0.26, cy + R * 0.04, 2.4],
+        [cx + R * 0.02, cy + R * 0.34, 2.2],
+      ];
+      for (const [hx, hy, hr] of craters) {
+        g.beginPath();
+        g.arc(hx, hy, hr, 0, TAU);
+        g.fill();
+      }
+      accentShine(g, cx - R * 0.1, cy - R * 0.2, R * 0.7, st.accent);
     }
     ATLAS.push(c);
   }
@@ -723,6 +881,30 @@ export function renderFrame(
       ctx.fillStyle = rgb(body);
       ctx.beginPath();
       ctx.arc(sx[i], sy[i], rr, 0, TAU);
+      ctx.fill();
+    }
+
+    // SEGMENT ITEMS: each card taken rides a body segment (the build, visible on the snake).
+    for (let p = 0; p < w.pickedCount; p++) {
+      const tags = CARD_TAGS[CARD_POOL[w.pickedCards[p]]];
+      const col = TAG_RGB[tags[0]] ?? RGB_AMBAR;
+      let ni = Math.round(((p + 0.7) / (w.pickedCount + 0.4)) * (n - 1));
+      if (ni < 1) ni = 1;
+      else if (ni > n - 1) ni = n - 1;
+      const bx = sx[ni];
+      const by = sy[ni];
+      const br = Math.max(3, D * 0.36);
+      ctx.fillStyle = "rgba(28,16,10,0.92)";
+      ctx.beginPath();
+      ctx.arc(bx, by, br + 1.6, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = rgb(col);
+      ctx.beginPath();
+      ctx.arc(bx, by, br, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.beginPath();
+      ctx.arc(bx - br * 0.32, by - br * 0.34, br * 0.3, 0, TAU);
       ctx.fill();
     }
   }
@@ -1210,52 +1392,44 @@ function drawHud(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState):
     px += pipW + pipGap;
   }
 
-  // build chips — the upgrades you carry, colored good/bad (make the build visible)
-  drawBuildChips(ctx, fs, left, top + 122);
+  // active SYNERGIES (the build's traits, TFT-style) — make the build legible at a glance
+  drawSynergies(ctx, fs, left, top + 122);
 
   if (w.pedido.active === 1) drawPedido(ctx, view, fs);
 }
 
-function drawBuildChips(
-  ctx: CanvasRenderingContext2D,
-  fs: FrameState,
-  x: number,
-  y: number,
-): void {
-  const picked = fs.picked;
-  if (!picked || picked.length === 0) return;
-  const chip = picked.length > 8 ? 26 : 30;
-  const gap = 5;
-  const maxPerRow = Math.max(1, Math.floor((fs.world.usableHalf > 0 ? 6 : 6)));
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (let i = 0; i < picked.length && i < 12; i++) {
-    const id = picked[i] as CardId;
-    const card = CARDS[id];
-    if (!card) continue;
-    const col = i % maxPerRow;
-    const row = Math.floor(i / maxPerRow);
-    const cx = x + col * (chip + gap);
-    const cy = y + row * (chip + gap);
-    const tc = tipoColor(card.tipo);
-    ctx.fillStyle = rgba(RGB_CREMA, 0.92);
-    roundRect(ctx, cx, cy, chip, chip, 8);
-    ctx.fill();
-    ctx.lineWidth = 2.4;
-    ctx.strokeStyle = rgb(tc);
-    roundRect(ctx, cx, cy, chip, chip, 8);
-    ctx.stroke();
-    // good/bad footer bar (every card is a trade-off)
-    ctx.fillStyle = rgb(RGB_VERDE);
-    ctx.fillRect(cx + 3, cy + chip - 6, (chip - 6) / 2, 3);
-    ctx.fillStyle = rgb(RGB_ROJO);
-    ctx.fillRect(cx + 3 + (chip - 6) / 2, cy + chip - 6, (chip - 6) / 2, 3);
-    // abbreviation glyph
-    ctx.fillStyle = rgb(RGB_ESPRESSO);
-    ctx.font = `bold ${Math.round(chip * 0.4)}px system-ui, sans-serif`;
-    ctx.fillText(card.nombre.slice(0, 2).toUpperCase(), cx + chip / 2, cy + chip / 2 - 1);
+function drawSynergies(ctx: CanvasRenderingContext2D, fs: FrameState, x: number, y: number): void {
+  const w = fs.world;
+  if (w.pickedCount === 0) return;
+  _synCounts.fill(0);
+  for (let i = 0; i < w.pickedCount; i++) {
+    const tags = CARD_TAGS[CARD_POOL[w.pickedCards[i]]];
+    for (let t = 0; t < tags.length; t++) {
+      const idx = CARD_TAG_ORDER.indexOf(tags[t]);
+      if (idx >= 0) _synCounts[idx]++;
+    }
   }
   ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  let ry = y;
+  for (let t = 0; t < CARD_TAG_ORDER.length; t++) {
+    const cnt = _synCounts[t];
+    if (cnt === 0) continue; // only show tags you actually carry
+    const tier = w.synergyTier[t];
+    const active = tier > 0;
+    const col = TAG_RGB[CARD_TAG_ORDER[t]] ?? RGB_AMBAR;
+    ctx.globalAlpha = active ? 1 : 0.5; // dim = carried but not yet a synergy (shows progress)
+    ctx.fillStyle = rgb(col);
+    ctx.beginPath();
+    ctx.arc(x + 6, ry + 6, active ? 6 : 4, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = active ? rgb(RGB_CREMA) : rgba(RGB_CREMA, 0.7);
+    ctx.font = active ? "bold 11px system-ui, sans-serif" : "11px system-ui, sans-serif";
+    const stars = tier >= 2 ? " ★★" : tier >= 1 ? " ★" : "";
+    ctx.fillText(`${CARD_TAG_ORDER[t]} ${cnt}${stars}`, x + 18, ry + 6);
+    ctx.globalAlpha = 1;
+    ry += 17;
+  }
   ctx.textBaseline = "alphabetic";
 }
 
