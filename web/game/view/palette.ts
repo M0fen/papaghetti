@@ -25,9 +25,14 @@ export const RGB_AMBAR: RGB = [242, 165, 22];
 export const RGB_ROJO: RGB = [200, 50, 30];
 export const RGB_VERDE: RGB = [76, 154, 90];
 export const RGB_BRASA: RGB = [214, 74, 28]; // ember-red for peak heat
-export const RGB_SALSA: RGB = [188, 56, 26]; // cooked-tomato sauce coating the noodle
-export const RGB_SALSA_DARK: RGB = [92, 22, 12]; // deep sauce base / outline
-export const RGB_FIDEO: RGB = [245, 206, 128]; // pasta showing under the sauce (ridge highlight)
+export const RGB_SALSA: RGB = [188, 56, 26]; // cooked-tomato sauce (now a PATCH overlay, not full-width)
+export const RGB_SALSA_DARK: RGB = [92, 22, 12]; // deep sauce base / pooling
+export const RGB_SALSA_HI: RGB = [244, 168, 120]; // warm sauce sheen (NOT white — reads as sauce, not plastic)
+export const RGB_FIDEO: RGB = [245, 206, 128]; // legacy pasta tone (kept for compat)
+// Spaghetti strand palette — the pasta is the DOMINANT full-width color; sauce clings on top.
+export const RGB_PASTA: RGB = [232, 205, 138]; // cooked strand (dominant body color)
+export const RGB_PASTA_HI: RGB = [250, 240, 200]; // lit ridge of the strand
+export const RGB_PASTA_SH: RGB = [176, 140, 74]; // shaded underside of the strand
 
 export function rgba(c: RGB, a: number): string {
   return `rgba(${c[0]},${c[1]},${c[2]},${a})`;

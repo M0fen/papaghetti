@@ -248,7 +248,8 @@ export function mountGame(
     prevBodyY.set(world.bodyY.subarray(0, prevBodyCount));
     const bodyCountBefore = world.bodyCount;
 
-    // build input
+    // build input — feed the REAL heading back so the steering emitter stays near it (no 180° flip)
+    controller.setHeading(world.heading);
     input.angle = controller.readAngle();
     input.boost = controller.readBoost();
     input.cardPick = -1;

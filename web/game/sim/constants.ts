@@ -37,7 +37,9 @@ export const TURN_NMAX = 240; // node count where the turn cap bottoms out
 export const TURN_FLOOR = 32768; // Q16.16 = 0.50 (min fraction of TURN_RATE)
 export const TURN_SPAN = 32768; // Q16.16 = 0.50 (span above the floor)
 export const SPACING = 8 * FP_ONE; // POS, arc-length spacing between body nodes on the trail
-export const START_NODES = 24; // initial body length
+// BUG FIX: the min-radius circle needs 198.6u of trail; 24*8=192u made closing a loop IMPOSSIBLE
+// in the first seconds (the signature mechanic looked broken). 28*8=224u makes it just closeable.
+export const START_NODES = 28; // initial body length
 export const CRUMB_CAP = 8192; // breadcrumb ring capacity (~40k u of trail; covers a max-length snake)
 export const BOOST_MULT = 114688; // Q16.16 = round(1.75 * 65536)
 export const SAUCE_TURN_FACTOR = 45875; // Q16.16 = round(0.70 * 65536), widens radius in sauce
@@ -56,7 +58,10 @@ export const MAX_NODES = 4096; // hard body cap / pool capacity
 // --- enredo (loop) --------------------------------------------------------
 export const SKIP_NEAR_HEAD = 4; // body segments near the neck are not tested
 export const AREA_SHIFT = 9; // shoelace coord reduction: 65536>>9 => 1/128-u grid
-export const MIN_LOOP_AREA_UNITS = 400; // world-units^2 minimum loop area
+// BUG FIX: the smallest physically closeable loop is ~3138 u², so a 400 u² gate was DEAD CODE —
+// it never triggered, and "Lazo Ávido"'s doubling debuff (800 u²) did nothing (free x15). At 5000
+// the gate bites (min loop rejected) and Lazo Ávido (10000 u²) forces bigger, more exposed loops.
+export const MIN_LOOP_AREA_UNITS = 5000; // world-units^2 minimum loop area
 // doubled + reduced-grid units for the shoelace gate: 2 * area * 128^2. Compared
 // against Math.abs(loopArea2(...)) after fmul-scaling by mods.minLoopAreaMul.
 export const MIN_LOOP_AREA_2 = 2 * MIN_LOOP_AREA_UNITS * 128 * 128; // 13,107,200
@@ -114,8 +119,16 @@ export const FORK_BLOCK_TICKS = 5 * TICKS_PER_SEC; // stun when enclosed by an e
 export const FORK_ENTER_MARGIN = 40 * FP_ONE; // POS, distance inside border to reach CHASE
 
 // --- spawning -------------------------------------------------------------
-export const TOP_TARGET_PER_SERVICE = 14; // maintained topping count
+export const TOP_TARGET_PER_SERVICE = 14; // maintained topping count (~3 clusters worth)
 export const SPAWN_MAX_TRIES = 8; // bounded rejection sampling (determinism)
+// BUG FIX: toppings used to spawn UNIFORMLY in a 4M-u² world → the smallest possible loop enclosed
+// 0.011 toppings, so every enredo came out empty (net punishment) and the signature mechanic was
+// unusable. Toppings now spawn in CLUSTERS so a loop can actually enclose a feast. Papa stays loose.
+export const CLUSTER_COUNT = 3; // clusters kept alive
+export const CLUSTER_MIN = 4; // toppings per cluster (min)
+export const CLUSTER_MAX = 6; // toppings per cluster (max)
+export const CLUSTER_RADIUS = 70 * FP_ONE; // POS, toppings scatter within this of the cluster centre
+export const CLUSTER_MIN_DIST_HEAD = 250 * FP_ONE; // POS, a new cluster centre keeps this from the head
 
 // --- pool capacities ------------------------------------------------------
 export const MAX_TOP = 64;

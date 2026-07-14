@@ -263,14 +263,17 @@ function square(sideUnits: number): { x: Int32Array; y: Int32Array; n: number } 
 }
 
 test("loopArea2 gate rejects micro-loops, accepts real loops", () => {
-  const small = square(5); // 5x5 units
-  const big = square(60); // 60x60 units
+  const small = square(5); // 5x5 = 25 u² — a degenerate micro-loop
+  const mid = square(60); // 60x60 = 3600 u² — below the 5000 u² gate: must be REJECTED now
+  const big = square(80); // 80x80 = 6400 u² — a real enclosing loop: must clear the gate
   const aSmall = Math.abs(loopArea2(small.x, small.y, small.n));
+  const aMid = Math.abs(loopArea2(mid.x, mid.y, mid.n));
   const aBig = Math.abs(loopArea2(big.x, big.y, big.n));
 
   assert.ok(aSmall > 0, "degenerate area");
-  assert.ok(aSmall < MIN_LOOP_AREA_2, "5u loop must be below the gate");
-  assert.ok(aBig >= MIN_LOOP_AREA_2, "60u loop must clear the gate");
+  assert.ok(aSmall < MIN_LOOP_AREA_2, "25 u² loop must be below the gate");
+  assert.ok(aMid < MIN_LOOP_AREA_2, "3600 u² loop must be below the 5000 u² gate");
+  assert.ok(aBig >= MIN_LOOP_AREA_2, "6400 u² loop must clear the gate");
 });
 
 test("pointInPoly inside/outside a square", () => {

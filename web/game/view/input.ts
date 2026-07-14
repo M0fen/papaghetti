@@ -15,9 +15,22 @@ import { FULL_CIRCLE } from "@/game/sim/constants.ts";
 import type { Rect, Insets } from "./render.ts";
 
 const MASK = FULL_CIRCLE - 1;
-const R_MAX = 64; // px: lever length; origin trails the thumb to stay this far behind
-const R_DEAD = 11; // px: below this, hold the last heading (no jitter)
+const R_MAX = 40; // px: lever length; origin trails the thumb to stay this far behind
+const R_DEAD = 6; // px: below this, hold the last heading (no jitter)
 const TAP_SLOP_PX = 14; // pointer travel under this on a draft = a tap, not a drag
+
+// Directed-emitter tuning (fixes "sometimes turns the wrong way"): the emitted heading is kept
+// close to the REAL heading and the turn SIGN is committed with hysteresis, so the sim's internal
+// shortest-path resolver never sits at the ambiguous ~180° coin-flip. All VIEW-side, determinism-safe.
+const VIEW_CAP = 2600; // brads/tick the emitted heading may lead the real heading (> sim turn rate)
+const HYST_LOCK = 24000; // |Δ| below this (~132°): commit the turn sign; above: hold the committed side
+
+/** Shortest signed difference a-b, in [-32768, 32768). */
+function angDiff(a: number, b: number): number {
+  let d = (a - b) & MASK;
+  if (d >= FULL_CIRCLE / 2) d -= FULL_CIRCLE;
+  return d;
+}
 
 /**
  * Ability button geometry — SINGLE SOURCE OF TRUTH shared by hit-test (here) and drawing
@@ -34,6 +47,7 @@ export type SteerController = {
   readAngle(): number;
   readBoost(): boolean;
   setAngle(brads: number): void;
+  setHeading(brads: number): void;
   setInsets(insets: Insets): void;
   setDraft(active: boolean, cards: Rect[], reroll: Rect | null): void;
   consumeDraftPick(): number;
@@ -61,7 +75,10 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
   const pointers = new Map<number, Ptr>();
   let primaryId = -1; // the steer pointer
   let boostPointerId = -1; // a pointer parked on the boost pad
-  let currentAngle = 0;
+  let currentAngle = 0; // last EMITTED absolute heading (what the sim receives)
+  let curHeading = 0; // real sim heading, fed back each tick via setHeading()
+  let touchTarget = 0; // raw absolute finger direction (before the directed emitter)
+  let lastSign = 1; // committed turn direction for the hysteresis band
 
   let hoverX = 0;
   let hoverY = 0;
@@ -101,8 +118,25 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
     }
     if (d > R_DEAD) {
       const a = vecAngle(dx, dy);
-      if (a !== null) currentAngle = a;
+      if (a !== null) touchTarget = a; // raw finger direction; the emitter turns it into currentAngle
     }
+  };
+
+  // Directed emitter: emit an absolute heading that stays within VIEW_CAP of the REAL heading,
+  // choosing the turn sign ONCE with hysteresis so a U-turn commits to a side instead of flipping.
+  const emitToward = (target: number): number => {
+    const d = angDiff(target, curHeading);
+    const ad = d < 0 ? -d : d;
+    let sign: number;
+    if (ad < HYST_LOCK) {
+      sign = d >= 0 ? 1 : -1;
+      lastSign = sign; // finger clearly to one side -> commit it
+    } else {
+      sign = lastSign; // ambiguous ~180° band -> keep the committed side (no coin-flip)
+    }
+    const stepA = ad < VIEW_CAP ? ad : VIEW_CAP;
+    currentAngle = (curHeading + sign * stepA) & MASK;
+    return currentAngle;
   };
 
   const onPointerDown = (e: PointerEvent): void => {
@@ -126,7 +160,10 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
       return;
     }
     pointers.set(e.pointerId, { ox: x, oy: y, x, y, moved: 0 });
-    if (primaryId === -1) primaryId = e.pointerId;
+    if (primaryId === -1) {
+      primaryId = e.pointerId;
+      touchTarget = currentAngle; // a fresh touch that hasn't dragged yet = keep going straight
+    }
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
@@ -174,6 +211,7 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
     pointers.delete(e.pointerId);
     if (e.pointerId === primaryId) {
       primaryId = pointers.size > 0 ? (pointers.keys().next().value ?? -1) : -1;
+      if (primaryId !== -1) touchTarget = currentAngle; // handoff: don't inherit the old finger dir
     }
     try {
       canvas.releasePointerCapture(e.pointerId);
@@ -248,6 +286,8 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
 
   return {
     readAngle(): number {
+      // 1) raw desired ABSOLUTE heading from the active source (keys > touch > hover); else hold
+      let target = currentAngle;
       let kx = 0;
       let ky = 0;
       if (keys.up) ky -= 1;
@@ -256,19 +296,19 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
       if (keys.right) kx += 1;
       if (kx !== 0 || ky !== 0) {
         const a = vecAngle(kx, ky);
-        if (a !== null) currentAngle = a;
-        return currentAngle;
+        if (a !== null) target = a;
+      } else {
+        const p = primaryId !== -1 ? pointers.get(primaryId) : undefined;
+        if (p) {
+          applySteer(p); // keep steering even if the finger is held still between move events
+          target = touchTarget;
+        } else if (hasHover) {
+          const a = vecAngle(hoverX - canvas.clientWidth / 2, hoverY - canvas.clientHeight / 2);
+          if (a !== null) target = a;
+        }
       }
-      const p = primaryId !== -1 ? pointers.get(primaryId) : undefined;
-      if (p) {
-        applySteer(p); // keep steering even if the finger is held still between move events
-        return currentAngle;
-      }
-      if (hasHover) {
-        const a = vecAngle(hoverX - canvas.clientWidth / 2, hoverY - canvas.clientHeight / 2);
-        if (a !== null) currentAngle = a;
-      }
-      return currentAngle;
+      // 2) directed emitter -> determinism-safe heading near the real heading, sign committed
+      return emitToward(target);
     },
     readBoost(): boolean {
       if (keys.boost) return true;
@@ -278,6 +318,11 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
     },
     setAngle(brads: number): void {
       currentAngle = brads & MASK;
+      curHeading = brads & MASK;
+      touchTarget = brads & MASK;
+    },
+    setHeading(brads: number): void {
+      curHeading = brads & MASK;
     },
     setInsets(insets: Insets): void {
       curInsets = insets;

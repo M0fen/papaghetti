@@ -37,7 +37,11 @@ import {
   RGB_VERDE,
   RGB_SALSA,
   RGB_SALSA_DARK,
-  RGB_FIDEO,
+  RGB_SALSA_HI,
+  RGB_BRASA,
+  RGB_PASTA,
+  RGB_PASTA_HI,
+  RGB_PASTA_SH,
   rgba,
   rgb,
   heatColor,
@@ -126,7 +130,6 @@ type Off = OffscreenCanvas | HTMLCanvasElement;
 
 let cachesReady = false;
 let BG_GRAD: CanvasGradient | null = null;
-let SAUCE_GRAD: CanvasGradient | null = null;
 let GLOW_WARM: CanvasGradient | null = null;
 let GLOW_GREEN: CanvasGradient | null = null;
 let GLOW_RED: CanvasGradient | null = null;
@@ -134,12 +137,16 @@ let EYE_GRAD: CanvasGradient | null = null;
 let VIGNETTE: CanvasGradient | null = null;
 let vigW = 0;
 let vigH = 0;
+let GRAIN: CanvasPattern | null = null; // tiled film-grain noise (makes the flat vector look "expensive")
 const ATLAS: Off[] = []; // baked food sprites, indexed by ToppingCode 0..7
 const ATLAS_PX = 72; // sprite canvas size
 const ATLAS_R = 24; // baked food radius inside the sprite
-const SAUCE_DASH: number[] = [6, 6];
+const SAUCE_DASH: number[] = [6, 6]; // obstacle "salsa" ring
 const EMPTY_DASH: number[] = [];
-const GLOSS_DASH: number[] = [1, 1]; // rewritten each frame (2 numbers, no alloc)
+// Noodle dashes — 2 numbers each, rewritten per frame (no alloc). Sauce clings in PATCHES.
+const SALSA_DASH: number[] = [1, 1];
+const SPEC_DASH: number[] = [1, 1];
+const STRAND_DASH: number[] = [1, 1];
 
 function makeOffscreen(w: number, h: number): Off {
   if (typeof OffscreenCanvas !== "undefined") {
@@ -173,11 +180,6 @@ function initCaches(ctx: CanvasRenderingContext2D): void {
     [0.55, "rgb(30,22,17)"],
     [1, "rgb(18,12,9)"],
   ]);
-  SAUCE_GRAD = unitGrad(ctx, [
-    [0, "rgba(168,44,22,0.55)"],
-    [0.6, "rgba(120,26,12,0.38)"],
-    [1, "rgba(120,26,12,0)"],
-  ]);
   GLOW_WARM = unitGrad(ctx, [
     [0, "rgba(255,196,110,0.85)"],
     [1, "rgba(255,196,110,0)"],
@@ -195,8 +197,28 @@ function initCaches(ctx: CanvasRenderingContext2D): void {
     [0.7, "#f3f4f6"],
     [1, "#d7dbe2"],
   ]);
+  GRAIN = ctx.createPattern(bakeGrain(), "repeat");
   bakeAtlas();
   cachesReady = true;
+}
+
+// Film grain: a 64×64 monochrome noise tile, repeated across the frame at low alpha. Baked once
+// (Math.random is fine here — view init, never the sim). Static (screen-fixed) so it never boils.
+function bakeGrain(): Off {
+  const S = 64;
+  const c = makeOffscreen(S, S);
+  const g = offCtx(c);
+  const img = g.createImageData(S, S);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = 110 + ((Math.random() * 90) | 0); // gray 110..200
+    d[i] = v;
+    d[i + 1] = v;
+    d[i + 2] = v;
+    d[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
 }
 
 // Stamp a cached unit-radial gradient at (x,y) with radius r. No allocation.
@@ -616,18 +638,30 @@ export function renderFrame(
 
   const parts = fs.parts;
 
-  // --- 4. sauce trail decals (UNDER everything on the pan) ---
+  // --- 4. viscous SAUCE TRAIL — dense glossy sauce drips (not smoke), short-lived, under the noodle ---
   for (let i = 0; i < parts.count; i++) {
     if (parts.type[i] !== PT_SAUCE) continue;
-    stamp(
-      ctx,
-      SAUCE_GRAD,
-      w2sx(parts.px[i]),
-      w2sy(parts.py[i]),
-      parts.size[i] * cam.scale,
-      parts.life[i] * 0.8,
-    );
+    const life = parts.life[i];
+    const a = Math.min(0.94, life * 1.7); // stays thick/opaque, then fades fast at the very end
+    if (a <= 0.02) continue;
+    const x = w2sx(parts.px[i]);
+    const y = w2sy(parts.py[i]);
+    const r = parts.size[i] * cam.scale * (0.72 + 0.28 * life); // firms up (shrinks a touch) as it sets
+    ctx.globalAlpha = a;
+    ctx.fillStyle = rgb(RGB_SALSA_DARK); // dark sauce base = defined edge (reads pasty, not hazy)
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = rgb(RGB_SALSA); // rich tomato body
+    ctx.beginPath();
+    ctx.arc(x - r * 0.12, y - r * 0.14, r * 0.8, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,176,140,0.45)"; // wet glossy highlight = viscous sheen
+    ctx.beginPath();
+    ctx.arc(x - r * 0.3, y - r * 0.34, r * 0.26, 0, TAU);
+    ctx.fill();
   }
+  ctx.globalAlpha = 1;
 
   // --- 5. obstacles: oil / walls / knives / sauce / whisk ---
   for (let i = 0; i < w.obsCount; i++) {
@@ -762,24 +796,32 @@ export function renderFrame(
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
 
-    // one smoothed path (quadratics through node midpoints), reused across strokes
+    // Taper the last K nodes into a tail (kills the constant-diameter "worm" look). The main
+    // strand path stops at `pe`; the tail is drawn as shrinking pasta discs.
+    const K = Math.min(12, n - 1);
+    const pe = Math.max(1, n - K);
+
+    // one smoothed path over nodes [0..pe] (quadratics through midpoints), reused across strokes
     const path = new Path2D();
     path.moveTo(sx[0], sy[0]);
-    for (let i = 1; i < n - 1; i++) {
+    for (let i = 1; i < pe; i++) {
       path.quadraticCurveTo(sx[i], sy[i], (sx[i] + sx[i + 1]) * 0.5, (sy[i] + sy[i + 1]) * 0.5);
     }
-    path.lineTo(sx[n - 1], sy[n - 1]);
+    path.lineTo(sx[pe], sy[pe]);
 
-    // body color: sauce, warmed by heat
-    let bodyCol = mixRgb(RGB_SALSA, heatColor(fs.heat01), 0.35 * fs.heat01);
-    if (w.mods.infiniteBoost) bodyCol = mixRgb(bodyCol, RGB_AMBAR, 0.4);
-    if (w.mods.smokeTrailEnabled) bodyCol = mixRgb(bodyCol, [140, 140, 140], 0.35);
+    // PASTA is the dominant full-width color (warmed by heat); mods tint the pasta.
+    let pasta = mixRgb(RGB_PASTA, heatColor(fs.heat01), 0.3 * fs.heat01);
+    if (w.mods.infiniteBoost) pasta = mixRgb(pasta, RGB_AMBAR, 0.4);
+    if (w.mods.smokeTrailEnabled) pasta = mixRgb(pasta, [140, 140, 140], 0.35);
+    // SAUCE is a PATCH overlay on top (darkens toward ember with heat = "reduced on the fire").
+    let salsa = mixRgb(RGB_SALSA, RGB_BRASA, 0.3 * fs.heat01);
+    if (fs.enredoFlash > 0.01) salsa = mixRgb(salsa, [255, 214, 90], fs.enredoFlash);
 
     // glow (only when hot/boosting)
     if (!reduce && (fs.heat01 > 0.35 || fs.boosting)) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = rgba([255, 120, 60], 0.1 + 0.16 * fs.heat01);
+      ctx.strokeStyle = rgba([255, 150, 70], 0.1 + 0.16 * fs.heat01);
       ctx.lineWidth = D * 1.15;
       ctx.stroke(path);
       ctx.restore();
@@ -792,36 +834,65 @@ export function renderFrame(
     ctx.strokeStyle = rgba(RGB_ESPRESSO, 0.32);
     ctx.stroke(path);
     ctx.restore();
-    // pass 1: dark sauce base / outline
-    ctx.lineWidth = D + 2;
-    ctx.strokeStyle = rgb(RGB_SALSA_DARK);
-    ctx.stroke(path);
-    // pass 2: sauce body
-    ctx.lineWidth = D;
-    ctx.strokeStyle = rgb(bodyCol);
-    ctx.stroke(path);
-    // pass 3: warm ridge (pasta peeking through), offset toward the light (up-left)
+    // pass 1: strand underside shadow (volume without a gradient)
     ctx.save();
-    ctx.translate(-0.14 * D, -0.16 * D);
-    ctx.lineWidth = D * 0.42;
-    let ridge = mixRgb(bodyCol, RGB_FIDEO, 0.55);
-    if (fs.enredoFlash > 0.01) ridge = mixRgb(ridge, [255, 214, 90], fs.enredoFlash);
-    ctx.strokeStyle = rgb(ridge);
+    ctx.translate(0.08 * D, 0.12 * D);
+    ctx.lineWidth = D + 1;
+    ctx.strokeStyle = rgb(RGB_PASTA_SH);
     ctx.stroke(path);
     ctx.restore();
-    // pass 4 (gated): running specular gloss (dashed), skipped when reduced / long / zoomed out
-    if (!reduce && n < 900 && cam.scale > 0.28) {
-      GLOSS_DASH[0] = D * 1.4;
-      GLOSS_DASH[1] = D * 4.2;
+    // pass 2: PASTA body — full width, pale (the dominant read)
+    ctx.lineWidth = D;
+    ctx.strokeStyle = rgb(pasta);
+    ctx.stroke(path);
+    // pass 3: lit ridge of the strand (thin, offset toward the light up-left)
+    ctx.save();
+    ctx.translate(-0.16 * D, -0.18 * D);
+    ctx.lineWidth = D * 0.3;
+    ctx.strokeStyle = rgb(mixRgb(RGB_PASTA_HI, pasta, 0.2));
+    ctx.stroke(path);
+    ctx.restore();
+    // pass 4: SAUCE IN PATCHES — dashed overlay (fixed offset = clings in place, no shimmer)
+    SALSA_DASH[0] = D * 2.2;
+    SALSA_DASH[1] = D * 1.6;
+    ctx.setLineDash(SALSA_DASH);
+    ctx.lineDashOffset = 0;
+    ctx.lineWidth = D * 0.82;
+    ctx.strokeStyle = rgb(salsa);
+    ctx.stroke(path);
+    ctx.lineWidth = D * 0.4;
+    ctx.strokeStyle = rgb(RGB_SALSA_DARK); // pooling in the centre of each patch
+    ctx.stroke(path);
+    ctx.setLineDash(EMPTY_DASH);
+    // pass 5 (gated): warm sauce sheen + strand micro-texture, only over patches
+    if (!reduce && n < 1100 && cam.scale > 0.26) {
+      SPEC_DASH[0] = D * 0.9;
+      SPEC_DASH[1] = D * 3.4;
       ctx.save();
-      ctx.translate(-0.22 * D, -0.24 * D);
-      ctx.lineWidth = D * (fs.boosting ? 0.22 : 0.15);
-      ctx.strokeStyle = "rgba(255,244,214,0.8)";
-      ctx.setLineDash(GLOSS_DASH);
-      ctx.lineDashOffset = -((w.tick + alpha) * (fs.boosting ? 4.4 : 2.2)) % 100000;
+      ctx.translate(-0.1 * D, -0.12 * D);
+      ctx.setLineDash(SPEC_DASH);
+      ctx.lineWidth = D * 0.18;
+      ctx.strokeStyle = rgba(RGB_SALSA_HI, 0.85);
+      ctx.stroke(path);
+      ctx.restore();
+      STRAND_DASH[0] = D * 3;
+      STRAND_DASH[1] = D * 0.7;
+      ctx.setLineDash(STRAND_DASH);
+      ctx.lineWidth = D * 0.12;
+      ctx.strokeStyle = rgba(RGB_PASTA_SH, 0.5);
       ctx.stroke(path);
       ctx.setLineDash(EMPTY_DASH);
-      ctx.restore();
+    }
+
+    // TAPERED TAIL — shrinking pasta discs from pe to the tip (no alloc)
+    const denom = Math.max(1, n - 1 - pe);
+    for (let i = pe + 1; i < n; i++) {
+      const tt = (i - pe) / denom; // 0 at pe -> 1 at the very tip
+      const rr = Math.max(1, D * 0.5 * (1 - tt));
+      ctx.fillStyle = rgb(i === n - 1 ? RGB_PASTA_SH : pasta);
+      ctx.beginPath();
+      ctx.arc(sx[i], sy[i], rr, 0, TAU);
+      ctx.fill();
     }
   }
 
@@ -939,6 +1010,15 @@ export function renderFrame(
     }
     ctx.fillStyle = VIGNETTE;
     ctx.fillRect(0, 0, vw, vh);
+  }
+
+  // --- 19b. film grain (tiled noise, low alpha) — the trick that makes flat vector look premium ---
+  if (!reduce && GRAIN) {
+    ctx.save();
+    ctx.globalAlpha = 0.05;
+    ctx.fillStyle = GRAIN;
+    ctx.fillRect(0, 0, vw, vh);
+    ctx.restore();
   }
 
   // --- 20. floating "+score" popups ---

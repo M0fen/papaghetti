@@ -95,6 +95,10 @@ import {
   TOPPING_LIFE_TICKS,
   TOP_BASE,
   TOP_TARGET_PER_SERVICE,
+  CLUSTER_MIN,
+  CLUSTER_MAX,
+  CLUSTER_RADIUS,
+  CLUSTER_MIN_DIST_HEAD,
   TURN_RATE,
   WALL_SERVICE,
   KNIFE_SERVICE,
@@ -202,6 +206,34 @@ function randPosFarFromHead(w: World): void {
     if (dist2(_pos.x, _pos.y, hx, hy) >= need) return;
   }
   // Fall through with the last sample (bounded — determinism over perfect placement).
+}
+
+/** True if a POS point lies inside an active OIL or WALL obstacle (no food inside hazards). */
+function posInHazard(w: World, x: number, y: number): boolean {
+  for (let i = 0; i < w.obsCount; i++) {
+    if ((w.obsFlags[i] & OBS_FLAG.ACTIVE) === 0) continue;
+    const ty = w.obsType[i];
+    if (ty !== OBS.OIL && ty !== OBS.WALL) continue;
+    if (dist2(x, y, w.obsX[i], w.obsY[i]) < radiusSq(w.obsRadius[i])) return true;
+  }
+  return false;
+}
+
+/**
+ * Pick a cluster CENTRE into _pos: uniform in the playfield, >= CLUSTER_MIN_DIST_HEAD from the
+ * head and clear of oil/walls. Bounded rejection (determinism over perfect placement).
+ */
+function clusterCenter(w: World): void {
+  const hx = w.bodyX[0];
+  const hy = w.bodyY[0];
+  const needHead = radiusSq(CLUSTER_MIN_DIST_HEAD);
+  for (let t = 0; t < SPAWN_MAX_TRIES; t++) {
+    randPos(w);
+    if (dist2(_pos.x, _pos.y, hx, hy) < needHead) continue;
+    if (posInHazard(w, _pos.x, _pos.y)) continue;
+    return;
+  }
+  // Bounded fall-through with the last sample.
 }
 
 function pushObstacle(
@@ -619,21 +651,46 @@ export function step(w: World, input: Input): void {
   }
 
   // ---- P9 Spawning (RNG consumers; fixed draw order) ---------------------
-  // 9a. Maintain the topping target.
+  // 9a. Maintain the topping CLUSTERS. Grouped food is what makes the enredo (lasso) mechanic
+  //     usable: a single loop can now enclose a whole cluster instead of ~0 uniform toppings.
+  //     A depleted cluster is replaced by a fresh one elsewhere. All fixed-point, seeded RNG,
+  //     bounded — the draw order stays a pure function of World, so determinism holds.
   {
     const lifeTicks = fromFixedToInt(fmul(toFixed(TOPPING_LIFE_TICKS), w.mods.toppingLifeMul));
-    let tries = 0;
-    while (w.topCount < TOP_TARGET_PER_SERVICE && w.topCount < MAX_TOP && tries < SPAWN_MAX_TRIES) {
-      tries++;
-      randPos(w);
-      const kind = nextInt(w, 8);
-      const idx = w.topCount;
-      w.topX[idx] = _pos.x;
-      w.topY[idx] = _pos.y;
-      w.topKind[idx] = kind;
-      w.topFlags[idx] = kind === TOPPING.PINA ? TOP_FLAG.ALIVE | TOP_FLAG.PINA : TOP_FLAG.ALIVE;
-      w.topExpire[idx] = w.tick + lifeTicks;
-      w.topCount = idx + 1;
+    const radMaxU = fromFixedToInt(CLUSTER_RADIUS) + 1; // 0..CLUSTER_RADIUS units
+    let guard = 0;
+    // Only spawn a fresh cluster when there's room for a whole one (keeps ~CLUSTER_COUNT alive,
+    // no per-topping trickle). guard bounds the loop hard (each pass adds >= CLUSTER_MIN).
+    while (
+      w.topCount + CLUSTER_MIN <= TOP_TARGET_PER_SERVICE &&
+      w.topCount < MAX_TOP &&
+      guard < 4
+    ) {
+      guard++;
+      clusterCenter(w); // -> _pos: far from head, clear of oil/walls
+      const cx = _pos.x;
+      const cy = _pos.y;
+      const halfU = fromFixedToInt(w.usableHalf) - SPAWN_MARGIN;
+      const lim = toFixed(halfU < 1 ? 1 : halfU);
+      const size = CLUSTER_MIN + nextInt(w, CLUSTER_MAX - CLUSTER_MIN + 1);
+      for (let m = 0; m < size && w.topCount < MAX_TOP; m++) {
+        const ang = nextInt(w, 65536); // brad
+        const rad = toFixed(nextInt(w, radMaxU)); // POS radius within the cluster
+        let tx = cx + fmul(cosFixed(ang), rad);
+        let ty = cy + fmul(sinFixed(ang), rad);
+        if (tx > lim) tx = lim;
+        else if (tx < -lim) tx = -lim;
+        if (ty > lim) ty = lim;
+        else if (ty < -lim) ty = -lim;
+        const kind = nextInt(w, 8);
+        const idx = w.topCount;
+        w.topX[idx] = tx;
+        w.topY[idx] = ty;
+        w.topKind[idx] = kind;
+        w.topFlags[idx] = kind === TOPPING.PINA ? TOP_FLAG.ALIVE | TOP_FLAG.PINA : TOP_FLAG.ALIVE;
+        w.topExpire[idx] = w.tick + lifeTicks;
+        w.topCount = idx + 1;
+      }
     }
   }
 
