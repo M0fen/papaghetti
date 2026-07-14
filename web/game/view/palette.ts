@@ -34,6 +34,39 @@ export const RGB_PASTA: RGB = [232, 205, 138]; // cooked strand (dominant body c
 export const RGB_PASTA_HI: RGB = [250, 240, 200]; // lit ridge of the strand
 export const RGB_PASTA_SH: RGB = [176, 140, 74]; // shaded underside of the strand
 
+// ===========================================================================
+// VALUE-INVERTED GAME PALETTE (art-direction overhaul): the PAN is DARK and the FOOD GLOWS on
+// it (food photography). The brand crema palette above stays for the SITE/marketing, not gameplay.
+// Sacred value hierarchy: Papa > Toppings > Hebra > Obstacles > Pan > decoration. Nothing
+// decorative may exceed ~3:1 contrast against the pan. All contrast ratios measured vs #241A14.
+// ===========================================================================
+export const RGB_PAN: RGB = [36, 26, 20]; // #241A14 dark pan (the stage)
+export const RGB_PAN_RIM: RGB = [58, 42, 28]; // #3A2A1C border of the pan
+export const RGB_PAN_GLOW: RGB = [74, 51, 32]; // #4A3320 soft warm centre glow
+
+// The HEBRA (the character): amber body, thick dark outline, single cream shine.
+export const RGB_HEBRA_STROKE: RGB = [122, 62, 18]; // #7A3E12
+export const RGB_HEBRA: RGB = [242, 165, 22]; // #F2A516 (8.25:1)
+export const RGB_HEBRA_HI: RGB = [255, 233, 168]; // #FFE9A8 (14.17:1) — the ONE shine
+
+// PAPA — must be the BRIGHTEST thing on screen (draws the eye to the objective).
+export const RGB_PAPA_FRANCESA: RGB = [255, 210, 74]; // #FFD24A (11.82:1)
+export const RGB_PAPA_CRIOLLA: RGB = [150, 235, 90]; // bright green-yellow, equally luminous
+
+// DANGER reads by DARKNESS + SHAPE (a hole in the pan), never by hue.
+export const RGB_OIL: RGB = [58, 42, 24]; // #3A2A18 (1.24:1 — a dark hole)
+export const RGB_OIL_RIM: RGB = [90, 64, 32]; // #5A4020
+export const RGB_WALL: RGB = [46, 33, 24]; // #2E2118
+export const RGB_FORK: RGB = [200, 50, 30]; // #C8321E (the one true red = the boss)
+
+// Pan HEAT ramp, tied to the GLOBAL MULTIPLIER (never to time): the pan reddens as tension rises.
+const RGB_HEAT: readonly RGB[] = [
+  [36, 26, 20], // #241A14
+  [51, 32, 15], // #33200F
+  [74, 37, 16], // #4A2510
+  [107, 42, 16], // #6B2A10
+];
+
 export function rgba(c: RGB, a: number): string {
   return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 }
@@ -66,6 +99,14 @@ export function heatTint(t: number): RGB {
   return mixRgb(RGB_AMBAR, RGB_BRASA, t < 0 ? 0 : t > 1 ? 1 : t);
 }
 
+/** Pan base color for a given heat (multiplier). Dark → reddish-ember. 4-stop piecewise. */
+export function panColor(t: number): RGB {
+  const u = t < 0 ? 0 : t > 1 ? 1 : t;
+  const seg = u * (RGB_HEAT.length - 1);
+  const i = Math.min(RGB_HEAT.length - 2, Math.floor(seg));
+  return mixRgb(RGB_HEAT[i], RGB_HEAT[i + 1], seg - i);
+}
+
 // ---------------------------------------------------------------------------
 // Topping SHAPE table — colorblind-safe: SHAPE is the primary channel, color 2nd.
 // Indexed by ToppingCode: SALSA0 QUESO1 CEBOLLA2 MAIZ3 RIZADAS4 PINA5 HUEVO6 CHICHARRON7
@@ -89,15 +130,17 @@ export type ToppingStyle = {
   label: string;
 };
 
+// 8/8 legible on the dark pan now (was 1/8). Contrast vs #241A14 noted. SHAPE stays the primary
+// (colorblind) channel; the renderer bakes fill + thick stroke + a SINGLE accent shine per sprite.
 export const TOPPING_STYLES: readonly ToppingStyle[] = [
-  { shape: "disc", fill: "#C8321E", stroke: "#7C1E12", accent: "#F2A516", label: "Salsa" },
-  { shape: "square", fill: "#F2A516", stroke: "#9A6606", accent: "#FBF1DE", label: "Queso" },
-  { shape: "ring", fill: "#C9B6E4", stroke: "#6E5A8C", accent: "#FBF1DE", label: "Cebolla" },
-  { shape: "triangle", fill: "#F5D547", stroke: "#8A7314", accent: "#FBF1DE", label: "Maíz" },
-  { shape: "wave", fill: "#E8B06B", stroke: "#8A5A24", accent: "#FBF1DE", label: "Rizadas" },
-  { shape: "diamond", fill: "#B6D94C", stroke: "#5C7A1E", accent: "#F2A516", label: "Piña" },
-  { shape: "egg", fill: "#FBF1DE", stroke: "#C9B48A", accent: "#F2A516", label: "Huevo" },
-  { shape: "star", fill: "#8A4726", stroke: "#4A2413", accent: "#F2A516", label: "Chicharrón" },
+  { shape: "disc", fill: "#F0553A", stroke: "#7A1F12", accent: "#FFC9A8", label: "Salsa" }, // 4.92:1
+  { shape: "square", fill: "#F2A516", stroke: "#7A4E06", accent: "#FFE9A8", label: "Queso" }, // 8.25:1
+  { shape: "ring", fill: "#D6C4EE", stroke: "#5A4A78", accent: "#FFFFFF", label: "Cebolla" }, // 10.54:1
+  { shape: "triangle", fill: "#F7DE5E", stroke: "#7A6A14", accent: "#FFFBE0", label: "Maíz" }, // 12.62:1
+  { shape: "wave", fill: "#F0BC7A", stroke: "#7A4A20", accent: "#FFE6C8", label: "Rizadas" }, // 9.88:1
+  { shape: "diamond", fill: "#C4E45C", stroke: "#4C6A1E", accent: "#F0FFD0", label: "Piña" }, // 11.84:1
+  { shape: "egg", fill: "#FFF6E6", stroke: "#A08A62", accent: "#FFFFFF", label: "Huevo" }, // 15.88:1
+  { shape: "star", fill: "#D98E4F", stroke: "#5A3A18", accent: "#FFD9A8", label: "Chicharrón" }, // 6.43:1
 ];
 
 export function toppingStyle(kind: ToppingCode | number): ToppingStyle {

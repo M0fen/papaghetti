@@ -24,6 +24,8 @@ import {
   COSECHA_MAX,
   ALMIDON_MAX,
   SERVICE_COUNT,
+  CLUSTER_RADIUS,
+  PAPA_LIFE_TICKS,
 } from "@/game/sim/constants.ts";
 import { TOP_FLAG, OBS, OBS_FLAG, PAPA } from "@/game/sim/types.ts";
 import type { World, CardId } from "@/game/sim/types.ts";
@@ -37,15 +39,22 @@ import {
   RGB_VERDE,
   RGB_SALSA,
   RGB_SALSA_DARK,
-  RGB_SALSA_HI,
-  RGB_BRASA,
-  RGB_PASTA,
-  RGB_PASTA_HI,
-  RGB_PASTA_SH,
+  RGB_PAN,
+  RGB_PAN_RIM,
+  RGB_HEBRA,
+  RGB_HEBRA_STROKE,
+  RGB_HEBRA_HI,
+  RGB_PAPA_FRANCESA,
+  RGB_PAPA_CRIOLLA,
+  RGB_OIL,
+  RGB_OIL_RIM,
+  RGB_WALL,
+  RGB_FORK,
+  TOPPING_STYLES,
   rgba,
   rgb,
   heatColor,
-  heatTint,
+  panColor,
   tipoColor,
   mixRgb,
 } from "./palette.ts";
@@ -58,6 +67,10 @@ const TAU = Math.PI * 2;
 // Module-level scratch so the hot render loop never allocates per frame.
 const sx = new Float64Array(MAXN);
 const sy = new Float64Array(MAXN);
+// View-side cluster grouping scratch (for the "plato" under each cluster). Approximate, cheap.
+const _gsx = new Float64Array(16);
+const _gsy = new Float64Array(16);
+const _gn = new Int32Array(16);
 
 export type Rect = { x: number; y: number; w: number; h: number };
 export type Viewport = { w: number; h: number };
@@ -129,7 +142,6 @@ export type FrameState = {
 type Off = OffscreenCanvas | HTMLCanvasElement;
 
 let cachesReady = false;
-let BG_GRAD: CanvasGradient | null = null;
 let GLOW_WARM: CanvasGradient | null = null;
 let GLOW_GREEN: CanvasGradient | null = null;
 let GLOW_RED: CanvasGradient | null = null;
@@ -143,10 +155,6 @@ const ATLAS_PX = 72; // sprite canvas size
 const ATLAS_R = 24; // baked food radius inside the sprite
 const SAUCE_DASH: number[] = [6, 6]; // obstacle "salsa" ring
 const EMPTY_DASH: number[] = [];
-// Noodle dashes — 2 numbers each, rewritten per frame (no alloc). Sauce clings in PATCHES.
-const SALSA_DASH: number[] = [1, 1];
-const SPEC_DASH: number[] = [1, 1];
-const STRAND_DASH: number[] = [1, 1];
 
 function makeOffscreen(w: number, h: number): Off {
   if (typeof OffscreenCanvas !== "undefined") {
@@ -175,11 +183,6 @@ function unitGrad(
 }
 
 function initCaches(ctx: CanvasRenderingContext2D): void {
-  BG_GRAD = unitGrad(ctx, [
-    [0, "rgb(46,33,24)"],
-    [0.55, "rgb(30,22,17)"],
-    [1, "rgb(18,12,9)"],
-  ]);
   GLOW_WARM = unitGrad(ctx, [
     [0, "rgba(255,196,110,0.85)"],
     [1, "rgba(255,196,110,0)"],
@@ -246,33 +249,50 @@ function stamp(
 // Bake the 8 food sprites ONCE (shadow + volume + rim + specular baked in) so the hot
 // loop is a single drawImage per topping. Math.random here is fine: one-time, view-only.
 // ---------------------------------------------------------------------------
-function bakeSphere(
-  g: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  R: number,
-  light: string,
-  mid: string,
-  dark: string,
-): void {
-  const grad = g.createRadialGradient(cx - R * 0.34, cy - R * 0.4, R * 0.08, cx, cy, R);
-  grad.addColorStop(0, light);
-  grad.addColorStop(0.5, mid);
-  grad.addColorStop(1, dark);
-  g.fillStyle = grad;
+/** ONE accent shine (top-left) — bold sprites read at ~17px with a single highlight, never two. */
+function accentShine(g: CanvasRenderingContext2D, cx: number, cy: number, R: number, color: string): void {
+  g.fillStyle = color;
   g.beginPath();
-  g.arc(cx, cy, R, 0, TAU);
+  g.arc(cx - R * 0.3, cy - R * 0.34, R * 0.24, 0, TAU);
   g.fill();
 }
-function spec(g: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
-  g.fillStyle = "rgba(255,255,255,0.9)";
+/** Build the path for a topping SHAPE (the colorblind channel). Ring/wave/egg are special-cased. */
+function buildShapePath(g: CanvasRenderingContext2D, cx: number, cy: number, R: number, shape: string): void {
   g.beginPath();
-  g.arc(cx - R * 0.34, cy - R * 0.42, R * 0.2, 0, TAU);
-  g.fill();
-  g.fillStyle = "rgba(255,255,255,0.35)";
-  g.beginPath();
-  g.arc(cx + R * 0.28, cy + R * 0.3, R * 0.1, 0, TAU);
-  g.fill();
+  switch (shape) {
+    case "square": {
+      const s = R * 0.86;
+      const rr = R * 0.28;
+      g.moveTo(cx - s + rr, cy - s);
+      g.arcTo(cx + s, cy - s, cx + s, cy + s, rr);
+      g.arcTo(cx + s, cy + s, cx - s, cy + s, rr);
+      g.arcTo(cx - s, cy + s, cx - s, cy - s, rr);
+      g.arcTo(cx - s, cy - s, cx + s, cy - s, rr);
+      break;
+    }
+    case "triangle":
+      g.moveTo(cx, cy - R);
+      g.lineTo(cx + R * 0.92, cy + R * 0.72);
+      g.lineTo(cx - R * 0.92, cy + R * 0.72);
+      break;
+    case "diamond":
+      g.moveTo(cx, cy - R);
+      g.lineTo(cx + R, cy);
+      g.lineTo(cx, cy + R);
+      g.lineTo(cx - R, cy);
+      break;
+    case "star":
+      for (let i = 0; i < 5; i++) {
+        const a0 = -Math.PI / 2 + (i * TAU) / 5;
+        const a1 = a0 + Math.PI / 5;
+        g.lineTo(cx + Math.cos(a0) * R, cy + Math.sin(a0) * R);
+        g.lineTo(cx + Math.cos(a1) * R * 0.46, cy + Math.sin(a1) * R * 0.46);
+      }
+      break;
+    default: // disc
+      g.arc(cx, cy, R, 0, TAU);
+  }
+  g.closePath();
 }
 function contactShadow(g: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
   g.fillStyle = "rgba(0,0,0,0.26)";
@@ -289,225 +309,83 @@ function bakeAtlas(): void {
     const cx = ATLAS_PX / 2;
     const cy = ATLAS_PX / 2;
     const R = ATLAS_R;
+    const st = TOPPING_STYLES[kind];
     contactShadow(g, cx, cy, R);
     g.lineJoin = "round";
-    switch (kind) {
-      case 0: {
-        // SALSA — tomato droplet
-        bakeSphere(g, cx, cy, R, "#F58466", "#C8321E", "#7C1E12");
-        g.lineWidth = 2;
-        g.strokeStyle = "#5E150B";
+    g.lineCap = "round";
+    const lw = Math.max(2.5, R * 0.18); // thick dark outline = legible silhouette at ~17px
+    if (st.shape === "wave") {
+      // RIZADAS — curly fry: bold 3-pass tube, all colours from the style
+      const draw = (col: string, wd: number, dy: number): void => {
+        g.strokeStyle = col;
+        g.lineWidth = wd;
         g.beginPath();
-        g.arc(cx, cy, R, 0, TAU);
+        g.moveTo(cx - R, cy + dy);
+        g.bezierCurveTo(cx - R * 0.4, cy - R + dy, cx + R * 0.4, cy + R + dy, cx + R, cy + dy);
         g.stroke();
-        spec(g, cx, cy, R);
-        break;
+      };
+      draw(st.stroke, R * 0.74, 1.5);
+      draw(st.fill, R * 0.54, 0);
+      draw(st.accent, R * 0.16, -R * 0.18);
+    } else if (st.shape === "ring") {
+      // CEBOLLA — onion ring: filled disc, hole punched, thick outline + one accent arc
+      g.fillStyle = st.fill;
+      g.beginPath();
+      g.arc(cx, cy, R, 0, TAU);
+      g.fill();
+      g.globalCompositeOperation = "destination-out";
+      g.beginPath();
+      g.arc(cx, cy, R * 0.44, 0, TAU);
+      g.fill();
+      g.globalCompositeOperation = "source-over";
+      g.strokeStyle = st.stroke;
+      g.lineWidth = lw;
+      g.beginPath();
+      g.arc(cx, cy, R * 0.97, 0, TAU);
+      g.stroke();
+      g.lineWidth = Math.max(1.5, R * 0.1);
+      g.beginPath();
+      g.arc(cx, cy, R * 0.46, 0, TAU);
+      g.stroke();
+      g.strokeStyle = st.accent;
+      g.lineWidth = Math.max(2, R * 0.16);
+      g.beginPath();
+      g.arc(cx, cy, R * 0.71, Math.PI * 1.05, Math.PI * 1.5);
+      g.stroke();
+    } else if (st.shape === "egg") {
+      // HUEVO — wavy white + warm yolk + one shine
+      g.fillStyle = st.fill;
+      g.beginPath();
+      for (let k = 0; k <= 16; k++) {
+        const a = (k / 16) * TAU;
+        const wob = R * (1 + 0.16 * Math.sin(a * 3 + 0.7));
+        const px = cx + Math.cos(a) * wob;
+        const py = cy + Math.sin(a) * wob * 0.92;
+        if (k === 0) g.moveTo(px, py);
+        else g.lineTo(px, py);
       }
-      case 1: {
-        // QUESO — isometric cheese cube
-        const h = R * 0.98;
-        const w = R * 0.86;
-        // top face
-        g.fillStyle = "#FFE08A";
-        g.beginPath();
-        g.moveTo(cx, cy - h);
-        g.lineTo(cx + w, cy - h * 0.4);
-        g.lineTo(cx, cy + h * 0.2);
-        g.lineTo(cx - w, cy - h * 0.4);
-        g.closePath();
-        g.fill();
-        // left face
-        g.fillStyle = "#E0B23F";
-        g.beginPath();
-        g.moveTo(cx - w, cy - h * 0.4);
-        g.lineTo(cx, cy + h * 0.2);
-        g.lineTo(cx, cy + h);
-        g.lineTo(cx - w, cy + h * 0.35);
-        g.closePath();
-        g.fill();
-        // right face
-        g.fillStyle = "#C68C28";
-        g.beginPath();
-        g.moveTo(cx + w, cy - h * 0.4);
-        g.lineTo(cx, cy + h * 0.2);
-        g.lineTo(cx, cy + h);
-        g.lineTo(cx + w, cy + h * 0.35);
-        g.closePath();
-        g.fill();
-        g.strokeStyle = "#8A6018";
-        g.lineWidth = 1.4;
-        g.stroke();
-        // holes on the top face
-        g.fillStyle = "rgba(150,105,24,0.55)";
-        for (const [hx, hy, hr] of [
-          [cx - w * 0.28, cy - h * 0.32, 2.4],
-          [cx + w * 0.34, cy - h * 0.22, 1.8],
-          [cx, cy - h * 0.02, 2.0],
-        ] as const) {
-          g.beginPath();
-          g.ellipse(hx, hy, hr, hr * 0.6, 0, 0, TAU);
-          g.fill();
-        }
-        // top-face sheen
-        g.fillStyle = "rgba(255,255,255,0.4)";
-        g.beginPath();
-        g.ellipse(cx - w * 0.1, cy - h * 0.5, w * 0.3, h * 0.12, 0, 0, TAU);
-        g.fill();
-        break;
-      }
-      case 2: {
-        // CEBOLLA — battered onion ring
-        bakeSphere(g, cx, cy, R, "#F0C878", "#D89A46", "#A56B22");
-        // punch the hole
-        g.globalCompositeOperation = "destination-out";
-        g.beginPath();
-        g.arc(cx, cy, R * 0.46, 0, TAU);
-        g.fill();
-        g.globalCompositeOperation = "source-over";
-        g.lineWidth = 2;
-        g.strokeStyle = "#8A5A24";
-        g.beginPath();
-        g.arc(cx, cy, R, 0, TAU);
-        g.stroke();
-        g.strokeStyle = "#F6E4BE";
-        g.lineWidth = 1.4;
-        g.beginPath();
-        g.arc(cx, cy, R * 0.46, 0, TAU);
-        g.stroke();
-        // breadcrumb speckle
-        g.fillStyle = "rgba(120,74,20,0.6)";
-        for (let k = 0; k < 8; k++) {
-          const a = (k / 8) * TAU + 0.3;
-          const rr = R * 0.72;
-          g.beginPath();
-          g.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 1.4, 0, TAU);
-          g.fill();
-        }
-        break;
-      }
-      case 3: {
-        // MAIZ — corn kernel
-        g.save();
-        g.beginPath();
-        g.moveTo(cx, cy - R);
-        g.quadraticCurveTo(cx + R, cy - R * 0.2, cx + R * 0.86, cy + R * 0.72);
-        g.lineTo(cx - R * 0.86, cy + R * 0.72);
-        g.quadraticCurveTo(cx - R, cy - R * 0.2, cx, cy - R);
-        g.closePath();
-        g.clip();
-        bakeSphere(g, cx, cy, R * 1.1, "#FFF0A0", "#F5D033", "#C79A16");
-        g.restore();
-        g.fillStyle = "rgba(255,255,255,0.7)";
-        g.beginPath();
-        g.arc(cx - R * 0.2, cy - R * 0.35, R * 0.16, 0, TAU);
-        g.fill();
-        break;
-      }
-      case 4: {
-        // RIZADAS — curly fry (3-pass wavy tube)
-        const draw = (col: string, wd: number, dy: number) => {
-          g.strokeStyle = col;
-          g.lineWidth = wd;
-          g.lineCap = "round";
-          g.beginPath();
-          g.moveTo(cx - R, cy + dy);
-          g.bezierCurveTo(cx - R * 0.4, cy - R + dy, cx + R * 0.4, cy + R + dy, cx + R, cy + dy);
-          g.stroke();
-        };
-        draw("#8A5A24", R * 0.62, 1.5);
-        draw("#E8B06B", R * 0.5, 0);
-        draw("rgba(255,240,200,0.7)", R * 0.16, -R * 0.14);
-        break;
-      }
-      case 5: {
-        // PINA — pineapple diamond
-        g.save();
-        g.beginPath();
-        g.moveTo(cx, cy - R);
-        g.lineTo(cx + R, cy);
-        g.lineTo(cx, cy + R);
-        g.lineTo(cx - R, cy);
-        g.closePath();
-        g.clip();
-        bakeSphere(g, cx, cy, R * 1.2, "#E9F58A", "#B6D94C", "#7FA02E");
-        // crosshatch
-        g.strokeStyle = "rgba(120,140,40,0.7)";
-        g.lineWidth = 1.2;
-        for (let k = -2; k <= 2; k++) {
-          g.beginPath();
-          g.moveTo(cx - R, cy + k * 7);
-          g.lineTo(cx + R, cy + k * 7 - R);
-          g.stroke();
-          g.beginPath();
-          g.moveTo(cx - R, cy + k * 7);
-          g.lineTo(cx + R, cy + k * 7 + R);
-          g.stroke();
-        }
-        g.restore();
-        g.strokeStyle = "#5C7A1E";
-        g.lineWidth = 1.6;
-        g.beginPath();
-        g.moveTo(cx, cy - R);
-        g.lineTo(cx + R, cy);
-        g.lineTo(cx, cy + R);
-        g.lineTo(cx - R, cy);
-        g.closePath();
-        g.stroke();
-        break;
-      }
-      case 6: {
-        // HUEVO — fried egg (wavy white + glossy yolk)
-        g.fillStyle = "#FBF3E2";
-        g.beginPath();
-        for (let k = 0; k <= 16; k++) {
-          const a = (k / 16) * TAU;
-          const wob = R * (1 + 0.16 * Math.sin(a * 3 + 0.7));
-          const px = cx + Math.cos(a) * wob;
-          const py = cy + Math.sin(a) * wob * 0.9;
-          if (k === 0) g.moveTo(px, py);
-          else g.lineTo(px, py);
-        }
-        g.closePath();
-        g.fill();
-        g.strokeStyle = "rgba(220,196,140,0.6)";
-        g.lineWidth = 1.2;
-        g.stroke();
-        // yolk
-        bakeSphere(g, cx + R * 0.12, cy, R * 0.5, "#FFE07A", "#FFB01F", "#E07A10");
-        g.fillStyle = "rgba(255,255,255,0.95)";
-        g.beginPath();
-        g.arc(cx - R * 0.06, cy - R * 0.16, R * 0.12, 0, TAU);
-        g.fill();
-        break;
-      }
-      default: {
-        // CHICHARRON — crunchy pork rind star
-        g.save();
-        g.beginPath();
-        for (let i = 0; i < 5; i++) {
-          const a0 = -Math.PI / 2 + (i * TAU) / 5;
-          const a1 = a0 + Math.PI / 5;
-          g.lineTo(cx + Math.cos(a0) * R, cy + Math.sin(a0) * R);
-          g.lineTo(cx + Math.cos(a1) * R * 0.46, cy + Math.sin(a1) * R * 0.46);
-        }
-        g.closePath();
-        g.clip();
-        bakeSphere(g, cx, cy, R * 1.2, "#C6884E", "#8A4726", "#4A2413");
-        g.restore();
-        g.fillStyle = "rgba(60,30,16,0.7)";
-        for (let k = 0; k < 6; k++) {
-          const a = (k / 6) * TAU + 0.5;
-          const rr = R * 0.4;
-          g.beginPath();
-          g.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 1.6, 0, TAU);
-          g.fill();
-        }
-        g.fillStyle = "rgba(255,240,220,0.8)";
-        g.beginPath();
-        g.arc(cx - R * 0.24, cy - R * 0.3, R * 0.14, 0, TAU);
-        g.fill();
-        break;
-      }
+      g.closePath();
+      g.fill();
+      g.strokeStyle = st.stroke;
+      g.lineWidth = Math.max(1.5, R * 0.1);
+      g.stroke();
+      g.fillStyle = "#FFB01F"; // yolk (warm, still bright)
+      g.beginPath();
+      g.arc(cx + R * 0.1, cy, R * 0.42, 0, TAU);
+      g.fill();
+      g.strokeStyle = "#C9820E";
+      g.lineWidth = 1.4;
+      g.stroke();
+      accentShine(g, cx + R * 0.1, cy, R * 0.42, st.accent);
+    } else {
+      // disc / square / triangle / diamond / star: bold fill + thick outline + ONE shine
+      buildShapePath(g, cx, cy, R, st.shape);
+      g.fillStyle = st.fill;
+      g.fill();
+      g.strokeStyle = st.stroke;
+      g.lineWidth = lw;
+      g.stroke();
+      accentShine(g, cx, cy, R, st.accent);
     }
     ATLAS.push(c);
   }
@@ -603,21 +481,10 @@ export function renderFrame(
   const w2sy = (uy: number): number =>
     vh / 2 + (uy - cam.y) * cam.scale + cam.shakeY - cam.biasY;
 
-  // --- 1. living background: warm kitchen spotlight (cached radial) ---
-  ctx.fillStyle = "rgb(18,12,9)";
+  // --- 1. DARK PAN whose colour rides the multiplier (heat), with a soft warm centre glow ---
+  ctx.fillStyle = rgb(panColor(fs.heat01));
   ctx.fillRect(0, 0, vw, vh);
-  ctx.save();
-  ctx.translate(vw / 2, vh * 0.42);
-  ctx.scale(vw * 0.82, vh * 0.82);
-  ctx.fillStyle = BG_GRAD as CanvasGradient;
-  ctx.beginPath();
-  ctx.arc(0, 0, 1, 0, TAU);
-  ctx.fill();
-  ctx.restore();
-  if (fs.heat01 > 0.01) {
-    ctx.fillStyle = rgba(heatTint(fs.heat01), 0.05 + 0.06 * fs.heat01);
-    ctx.fillRect(0, 0, vw, vh);
-  }
+  if (!reduce) stamp(ctx, GLOW_WARM, vw / 2, vh * 0.42, Math.min(vw, vh) * 0.62, 0.08 + 0.05 * fs.heat01);
 
   // --- 3. live border (the pan) + clip playfield ---
   const halfU = w.usableHalf / F;
@@ -626,11 +493,11 @@ export function renderFrame(
   const bw = 2 * halfU * cam.scale;
   const bh = 2 * halfU * cam.scale;
   ctx.save();
-  ctx.fillStyle = rgba(RGB_ESPRESSO, 0.55);
+  ctx.fillStyle = rgba(RGB_PAN, 0.5);
   roundRect(ctx, bx, by, bw, bh, 14);
   ctx.fill();
   ctx.lineWidth = Math.max(2, 3 * (cam.scale > 0.3 ? 1 : 0.6));
-  ctx.strokeStyle = rgb(mixRgb(RGB_AMBAR, RGB_ROJO, fs.heat01));
+  ctx.strokeStyle = rgb(mixRgb(RGB_PAN_RIM, RGB_FORK, fs.heat01 * 0.7));
   roundRect(ctx, bx, by, bw, bh, 14);
   ctx.stroke();
   roundRect(ctx, bx, by, bw, bh, 14);
@@ -638,27 +505,20 @@ export function renderFrame(
 
   const parts = fs.parts;
 
-  // --- 4. viscous SAUCE TRAIL — dense glossy sauce drips (not smoke), short-lived, under the noodle ---
+  // --- 4. SAUCE TRAIL — a FAINT dark stain under the noodle. Deliberately subdued (no gloss, low
+  //        alpha) so it never competes with the salsa TOPPING (sacred hierarchy: food wins). ---
   for (let i = 0; i < parts.count; i++) {
     if (parts.type[i] !== PT_SAUCE) continue;
     const life = parts.life[i];
-    const a = Math.min(0.94, life * 1.7); // stays thick/opaque, then fades fast at the very end
+    const a = Math.min(0.3, life * 0.5); // faint residue, fades quickly
     if (a <= 0.02) continue;
     const x = w2sx(parts.px[i]);
     const y = w2sy(parts.py[i]);
-    const r = parts.size[i] * cam.scale * (0.72 + 0.28 * life); // firms up (shrinks a touch) as it sets
+    const r = parts.size[i] * cam.scale * (0.55 + 0.3 * life);
     ctx.globalAlpha = a;
-    ctx.fillStyle = rgb(RGB_SALSA_DARK); // dark sauce base = defined edge (reads pasty, not hazy)
+    ctx.fillStyle = rgb(RGB_SALSA_DARK); // dark matte stain, no highlight
     ctx.beginPath();
     ctx.arc(x, y, r, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = rgb(RGB_SALSA); // rich tomato body
-    ctx.beginPath();
-    ctx.arc(x - r * 0.12, y - r * 0.14, r * 0.8, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,176,140,0.45)"; // wet glossy highlight = viscous sheen
-    ctx.beginPath();
-    ctx.arc(x - r * 0.3, y - r * 0.34, r * 0.26, 0, TAU);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
@@ -675,18 +535,24 @@ export function renderFrame(
     const phase = ((w.obsPhase[i] & 0xffff) / F) * TAU;
     const t = w.obsType[i];
     if (t === OBS.OIL) {
-      if (!reduce) stamp(ctx, GLOW_RED, ox, oy, or, 0.55);
-      ctx.fillStyle = rgba(RGB_ROJO, 0.28);
+      // a DARK HOLE in the pan — reads as danger by DARKNESS + shape, never by colour. Slow crawl.
+      const orr = or * (1 + 0.06 * Math.sin(w.tick * 0.05 + i * 1.3));
+      ctx.fillStyle = rgb(RGB_OIL);
       ctx.beginPath();
-      ctx.arc(ox, oy, or, 0, TAU);
+      ctx.arc(ox, oy, orr, 0, TAU);
       ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = rgb(RGB_OIL_RIM);
+      ctx.beginPath();
+      ctx.arc(ox, oy, orr, 0, TAU);
+      ctx.stroke();
     } else if (t === OBS.WALL) {
-      ctx.fillStyle = rgb(RGB_ESPRESSO);
+      ctx.fillStyle = rgb(RGB_WALL);
       ctx.beginPath();
       ctx.arc(ox, oy, or, 0, TAU);
       ctx.fill();
       ctx.lineWidth = 2;
-      ctx.strokeStyle = rgb(RGB_AMBAR);
+      ctx.strokeStyle = rgb(RGB_PAN_RIM);
       ctx.stroke();
     } else if (t === OBS.SAUCE) {
       ctx.fillStyle = rgba(RGB_VERDE, 0.3);
@@ -791,17 +657,16 @@ export function renderFrame(
   // --- 7 + 8. the noodle: glossy sauce-coated body ---
   if (n >= 2) {
     const hitboxMul = w.mods.hitboxRadiusMul / F;
-    const baseW = Math.max(7, (SPACING / F) * cam.scale * 1.7);
-    const D = Math.min(42, baseW * (0.9 + 0.45 * hitboxMul));
+    const baseW = (SPACING / F) * cam.scale * 1.7; // visual width tracks the real spacing (no clamp)
+    const D = Math.max(3, Math.min(48, baseW * (0.9 + 0.45 * hitboxMul)));
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
 
     // Taper the last K nodes into a tail (kills the constant-diameter "worm" look). The main
-    // strand path stops at `pe`; the tail is drawn as shrinking pasta discs.
+    // strand path stops at `pe`; the tail is drawn as shrinking amber discs.
     const K = Math.min(12, n - 1);
     const pe = Math.max(1, n - K);
 
-    // one smoothed path over nodes [0..pe] (quadratics through midpoints), reused across strokes
     const path = new Path2D();
     path.moveTo(sx[0], sy[0]);
     for (let i = 1; i < pe; i++) {
@@ -809,87 +674,57 @@ export function renderFrame(
     }
     path.lineTo(sx[pe], sy[pe]);
 
-    // PASTA is the dominant full-width color (warmed by heat); mods tint the pasta.
-    let pasta = mixRgb(RGB_PASTA, heatColor(fs.heat01), 0.3 * fs.heat01);
-    if (w.mods.infiniteBoost) pasta = mixRgb(pasta, RGB_AMBAR, 0.4);
-    if (w.mods.smokeTrailEnabled) pasta = mixRgb(pasta, [140, 140, 140], 0.35);
-    // SAUCE is a PATCH overlay on top (darkens toward ember with heat = "reduced on the fire").
-    let salsa = mixRgb(RGB_SALSA, RGB_BRASA, 0.3 * fs.heat01);
-    if (fs.enredoFlash > 0.01) salsa = mixRgb(salsa, [255, 214, 90], fs.enredoFlash);
+    // The HEBRA (character): amber body, warmed by heat; mods tint it.
+    let body = mixRgb(RGB_HEBRA, heatColor(fs.heat01), 0.22 * fs.heat01);
+    if (w.mods.infiniteBoost) body = mixRgb(body, [255, 224, 130], 0.4);
+    if (w.mods.smokeTrailEnabled) body = mixRgb(body, [150, 150, 150], 0.35);
+    let shine = RGB_HEBRA_HI;
+    if (fs.enredoFlash > 0.01) shine = mixRgb(shine, [255, 244, 170], fs.enredoFlash);
 
     // glow (only when hot/boosting)
     if (!reduce && (fs.heat01 > 0.35 || fs.boosting)) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = rgba([255, 150, 70], 0.1 + 0.16 * fs.heat01);
+      ctx.strokeStyle = rgba([255, 170, 70], 0.1 + 0.16 * fs.heat01);
       ctx.lineWidth = D * 1.15;
       ctx.stroke(path);
       ctx.restore();
     }
-
-    // pass 0: projected shadow
+    // pass 0: projected shadow — lifts the noodle off the pan
     ctx.save();
     ctx.translate(0.16 * D, 0.28 * D);
     ctx.lineWidth = D + 4;
-    ctx.strokeStyle = rgba(RGB_ESPRESSO, 0.32);
+    ctx.strokeStyle = "rgba(0,0,0,0.34)";
     ctx.stroke(path);
     ctx.restore();
-    // pass 1: strand underside shadow (volume without a gradient)
-    ctx.save();
-    ctx.translate(0.08 * D, 0.12 * D);
-    ctx.lineWidth = D + 1;
-    ctx.strokeStyle = rgb(RGB_PASTA_SH);
+    // pass 1: thick dark OUTLINE (bold silhouette that reads instantly)
+    ctx.lineWidth = D + 3;
+    ctx.strokeStyle = rgb(RGB_HEBRA_STROKE);
     ctx.stroke(path);
-    ctx.restore();
-    // pass 2: PASTA body — full width, pale (the dominant read)
+    // pass 2: amber BODY
     ctx.lineWidth = D;
-    ctx.strokeStyle = rgb(pasta);
+    ctx.strokeStyle = rgb(body);
     ctx.stroke(path);
-    // pass 3: lit ridge of the strand (thin, offset toward the light up-left)
+    // pass 3: ONE thin SHINE, offset toward the light (up-left) — what makes it pasta, not a line
     ctx.save();
-    ctx.translate(-0.16 * D, -0.18 * D);
-    ctx.lineWidth = D * 0.3;
-    ctx.strokeStyle = rgb(mixRgb(RGB_PASTA_HI, pasta, 0.2));
+    ctx.translate(-0.2 * D, -0.22 * D);
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = D * 0.26;
+    ctx.strokeStyle = rgb(shine);
     ctx.stroke(path);
     ctx.restore();
-    // pass 4: SAUCE IN PATCHES — dashed overlay (fixed offset = clings in place, no shimmer)
-    SALSA_DASH[0] = D * 2.2;
-    SALSA_DASH[1] = D * 1.6;
-    ctx.setLineDash(SALSA_DASH);
-    ctx.lineDashOffset = 0;
-    ctx.lineWidth = D * 0.82;
-    ctx.strokeStyle = rgb(salsa);
-    ctx.stroke(path);
-    ctx.lineWidth = D * 0.4;
-    ctx.strokeStyle = rgb(RGB_SALSA_DARK); // pooling in the centre of each patch
-    ctx.stroke(path);
-    ctx.setLineDash(EMPTY_DASH);
-    // pass 5 (gated): warm sauce sheen + strand micro-texture, only over patches
-    if (!reduce && n < 1100 && cam.scale > 0.26) {
-      SPEC_DASH[0] = D * 0.9;
-      SPEC_DASH[1] = D * 3.4;
-      ctx.save();
-      ctx.translate(-0.1 * D, -0.12 * D);
-      ctx.setLineDash(SPEC_DASH);
-      ctx.lineWidth = D * 0.18;
-      ctx.strokeStyle = rgba(RGB_SALSA_HI, 0.85);
-      ctx.stroke(path);
-      ctx.restore();
-      STRAND_DASH[0] = D * 3;
-      STRAND_DASH[1] = D * 0.7;
-      ctx.setLineDash(STRAND_DASH);
-      ctx.lineWidth = D * 0.12;
-      ctx.strokeStyle = rgba(RGB_PASTA_SH, 0.5);
-      ctx.stroke(path);
-      ctx.setLineDash(EMPTY_DASH);
-    }
+    ctx.globalAlpha = 1;
 
-    // TAPERED TAIL — shrinking pasta discs from pe to the tip (no alloc)
+    // TAPERED TAIL — shrinking amber discs (dark outline + body) from pe to the tip
     const denom = Math.max(1, n - 1 - pe);
     for (let i = pe + 1; i < n; i++) {
       const tt = (i - pe) / denom; // 0 at pe -> 1 at the very tip
       const rr = Math.max(1, D * 0.5 * (1 - tt));
-      ctx.fillStyle = rgb(i === n - 1 ? RGB_PASTA_SH : pasta);
+      ctx.fillStyle = rgb(RGB_HEBRA_STROKE);
+      ctx.beginPath();
+      ctx.arc(sx[i], sy[i], rr + 1.4, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = rgb(body);
       ctx.beginPath();
       ctx.arc(sx[i], sy[i], rr, 0, TAU);
       ctx.fill();
@@ -906,13 +741,61 @@ export function renderFrame(
   }
   ctx.globalAlpha = 1;
 
-  // --- 11. food (baked sprite atlas, single drawImage each) ---
+  // --- 10b. "EL PLATO": a faint dark disc under each cluster teaches the Enredo by composition
+  //          ("surround THIS"), no tutorial text. View-side grouping into module scratch (no alloc).
+  {
+    const CR = CLUSTER_RADIUS / F; // world units
+    const join2 = CR * CR * 1.6; // group-join threshold (a bit wider than the radius)
+    let ng = 0;
+    for (let i = 0; i < w.topCount; i++) {
+      if ((w.topFlags[i] & TOP_FLAG.ALIVE) === 0) continue;
+      const wx = w.topX[i] / F;
+      const wy = w.topY[i] / F;
+      let gi = -1;
+      for (let g = 0; g < ng; g++) {
+        const dx = _gsx[g] / _gn[g] - wx;
+        const dy = _gsy[g] / _gn[g] - wy;
+        if (dx * dx + dy * dy <= join2) {
+          gi = g;
+          break;
+        }
+      }
+      if (gi < 0 && ng < 16) {
+        gi = ng++;
+        _gsx[gi] = 0;
+        _gsy[gi] = 0;
+        _gn[gi] = 0;
+      }
+      if (gi >= 0) {
+        _gsx[gi] += wx;
+        _gsy[gi] += wy;
+        _gn[gi]++;
+      }
+    }
+    const pr = CR * cam.scale;
+    for (let g = 0; g < ng; g++) {
+      if (_gn[g] < 2) continue; // a lone stray topping gets no plato
+      const cx = w2sx(_gsx[g] / _gn[g]);
+      const cy = w2sy(_gsy[g] / _gn[g]);
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, pr, 0, TAU);
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(242,165,22,0.14)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, pr, 0, TAU);
+      ctx.stroke();
+    }
+  }
+
+  // --- 11. food (baked sprite atlas, single drawImage each; visual size == real hitbox, no clamp) ---
   for (let i = 0; i < w.topCount; i++) {
     if ((w.topFlags[i] & TOP_FLAG.ALIVE) === 0) continue;
     const bob = Math.sin(w.tick * 0.12 + i * 1.7) * 2;
     const tx = w2sx(w.topX[i] / F);
     const ty = w2sy(w.topY[i] / F) + bob;
-    let r = Math.min(18, Math.max(8, (EAT_RADIUS / F) * cam.scale * 0.8));
+    let r = Math.max(2, (EAT_RADIUS / F) * cam.scale * 0.85);
     const flags = w.topFlags[i];
     if ((flags & TOP_FLAG.EXPLOSIVE) !== 0) {
       r *= 1 + 0.12 * Math.sin(w.tick * 0.3 + i);
@@ -935,10 +818,13 @@ export function renderFrame(
     const px = w2sx(w.papaX[i] / F);
     const py = w2sy(w.papaY[i] / F);
     const francesa = w.papaKind[i] === PAPA.FRANCESA;
-    const col = francesa ? RGB_AMBAR : RGB_VERDE;
-    const pulse = 1 + 0.15 * Math.sin(w.tick * 0.18 + i);
-    const pr = Math.max(9, (EAT_RADIUS / F) * cam.scale * 0.9) * pulse;
-    if (!reduce) stamp(ctx, francesa ? GLOW_WARM : GLOW_GREEN, px, py, pr * 2.2, 0.6);
+    const col = francesa ? RGB_PAPA_FRANCESA : RGB_PAPA_CRIOLLA; // the BRIGHTEST thing on the pan
+    // pulse ACCELERATES as it nears expiry (reads as urgency without any UI).
+    const life01 = Math.max(0, Math.min(1, (w.papaExpire[i] - w.tick) / PAPA_LIFE_TICKS));
+    const pulseSpeed = 0.18 + (1 - life01) * 0.55;
+    const pulse = 1 + (0.12 + 0.14 * (1 - life01)) * Math.sin(w.tick * pulseSpeed + i);
+    const pr = Math.max(3, (EAT_RADIUS / F) * cam.scale * 0.95) * pulse;
+    if (!reduce) stamp(ctx, francesa ? GLOW_WARM : GLOW_GREEN, px, py, pr * 2.4, 0.7);
     ctx.fillStyle = rgb(col);
     ctx.beginPath();
     ctx.ellipse(px, py, pr, pr * 0.78, 0, 0, TAU);
@@ -1061,7 +947,7 @@ export function renderFrame(
 function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy: number): void {
   const w = fs.world;
   const reduce = fs.reduceEffects;
-  const headR = Math.max(10, (HEAD_HITBOX / F) * fs.cam.scale * 2.1);
+  const headR = Math.max(3, (HEAD_HITBOX / F) * fs.cam.scale * 2.1);
   const hrad = (w.heading / F) * TAU;
   const st = fs.headStretch;
   const fwdx = Math.cos(hrad);
@@ -1168,13 +1054,19 @@ function drawFork(
   cam: Camera,
   reduce: boolean,
 ): void {
-  const fx = w2sx(w.fork.x / F);
-  const fy = w2sy(w.fork.y / F);
-  const fr = Math.max(14, (FORK_CAPTURE_RADIUS / F) * cam.scale);
+  const fr = Math.max(4, (FORK_CAPTURE_RADIUS / F) * cam.scale);
   const frad = (w.fork.heading / F) * TAU;
   const chase = w.fork.state === "CHASE";
-  const col: [number, number, number] =
-    chase ? [210, 60, 40] : w.fork.state === "BLOCKED" ? [110, 110, 110] : [230, 170, 60];
+  const blocked = w.fork.state === "BLOCKED";
+  // telegraphed TREMOR (motion signature): ENTER trembles hard (about to attack), CHASE shakes light.
+  const shake = blocked ? 0 : chase ? fr * 0.05 : fr * 0.1;
+  const fx = w2sx(w.fork.x / F) + Math.sin(w.tick * 0.9) * shake;
+  const fy = w2sy(w.fork.y / F) + Math.cos(w.tick * 1.1) * shake;
+  const col: readonly [number, number, number] = chase
+    ? RGB_FORK
+    : blocked
+      ? [110, 110, 110]
+      : [230, 170, 60];
   if (!reduce && chase) stamp(ctx, GLOW_RED, fx, fy, fr * 2, 0.45);
   ctx.save();
   ctx.translate(fx, fy);

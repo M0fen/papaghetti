@@ -15,11 +15,14 @@ import { FP_ONE } from "./fixed.ts";
 export const TICKS_PER_SEC = 60;
 
 // --- world / spatial pressure (center origin; playfield is [-half, +half]^2) --
-export const WORLD_HALF = 1000 * FP_ONE; // POS, initial border half-extent (±1000 u)
-export const WORLD_MIN_HALF = 300 * FP_ONE; // POS, contraction floor
-export const RAMP_INTERVAL_TICKS = 1800; // 30s: raise speed & contract border
+// The arena EXPANDS as the snake grows (slither-style): snug at the start so it isn't empty, and
+// it opens up as you get longer so clusters have room to spread out. GROW-ONLY (never retracts —
+// an enredo tail-cut must never move the border past the head). Difficulty = speed + hazards.
+export const WORLD_HALF = 360 * FP_ONE; // POS, INITIAL half-extent (snug around the young snake)
+export const WORLD_MAX_HALF = 1000 * FP_ONE; // POS, cap once the snake is huge
+export const WORLD_GROW_PER_NODE = 3 * FP_ONE; // POS, world half grows this much per body node
+export const RAMP_INTERVAL_TICKS = 1800; // 30s: raise speed (the arena no longer contracts)
 export const RAMP_SPEED_STEP = FP_ONE >> 2; // POS, +0.25 u/tick per ramp
-export const RAMP_RADIUS_CONTRACT = 20 * FP_ONE; // POS, shrink border by 20 u per ramp
 
 // --- run / service structure ---------------------------------------------
 export const SERVICE_COUNT = 8;
@@ -128,7 +131,9 @@ export const CLUSTER_COUNT = 3; // clusters kept alive
 export const CLUSTER_MIN = 4; // toppings per cluster (min)
 export const CLUSTER_MAX = 6; // toppings per cluster (max)
 export const CLUSTER_RADIUS = 70 * FP_ONE; // POS, toppings scatter within this of the cluster centre
-export const CLUSTER_MIN_DIST_HEAD = 250 * FP_ONE; // POS, a new cluster centre keeps this from the head
+export const CLUSTER_MIN_DIST_HEAD = 200 * FP_ONE; // POS, a new cluster centre keeps this from the head (findable)
+export const TOP_MIN_SEP = 30 * FP_ONE; // POS, min separation between toppings (no overlap)
+export const TOP_PLACE_TRIES = 8; // bounded rejection per topping placement (determinism)
 
 // --- pool capacities ------------------------------------------------------
 export const MAX_TOP = 64;

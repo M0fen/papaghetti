@@ -81,8 +81,10 @@ import {
   PEDIDO_TICKS,
   PINA_ALMIDON_BONUS,
   RAMP_INTERVAL_TICKS,
-  RAMP_RADIUS_CONTRACT,
   RAMP_SPEED_STEP,
+  WORLD_HALF,
+  WORLD_MAX_HALF,
+  WORLD_GROW_PER_NODE,
   RUSH_TICKS,
   SAUCE_SERVICE,
   SAUCE_TURN_FACTOR,
@@ -99,11 +101,12 @@ import {
   CLUSTER_MAX,
   CLUSTER_RADIUS,
   CLUSTER_MIN_DIST_HEAD,
+  TOP_MIN_SEP,
+  TOP_PLACE_TRIES,
   TURN_RATE,
   WALL_SERVICE,
   KNIFE_SERVICE,
   WHISK_SERVICE,
-  WORLD_MIN_HALF,
 } from "./constants.ts";
 import { MODE, PHASE, FORK_STATE, OBS, OBS_FLAG, TOPPING, TOP_FLAG, PAPA } from "./types.ts";
 import type { Input, World } from "./types.ts";
@@ -221,14 +224,21 @@ function posInHazard(w: World, x: number, y: number): boolean {
 
 /**
  * Pick a cluster CENTRE into _pos: uniform in the playfield, >= CLUSTER_MIN_DIST_HEAD from the
- * head and clear of oil/walls. Bounded rejection (determinism over perfect placement).
+ * head, clear of oil/walls, and FAR ENOUGH from the border that the WHOLE cluster fits inside
+ * (so no topping ever needs clamping onto the border — the ugly straight-line artefact). Bounded.
  */
 function clusterCenter(w: World): void {
   const hx = w.bodyX[0];
   const hy = w.bodyY[0];
   const needHead = radiusSq(CLUSTER_MIN_DIST_HEAD);
+  // Keep the centre this far (POS) from the border so centre ± CLUSTER_RADIUS stays inside.
+  const fit = w.usableHalf - CLUSTER_RADIUS - toFixed(SPAWN_MARGIN);
+  const fitU = fit > FP_ONE ? fromFixedToInt(fit) : 1;
   for (let t = 0; t < SPAWN_MAX_TRIES; t++) {
     randPos(w);
+    // Re-sample inside the fit box (randPos already used the border margin; tighten to fit box).
+    if (fromFixedToInt(_pos.x) > fitU || fromFixedToInt(_pos.x) < -fitU) continue;
+    if (fromFixedToInt(_pos.y) > fitU || fromFixedToInt(_pos.y) < -fitU) continue;
     if (dist2(_pos.x, _pos.y, hx, hy) < needHead) continue;
     if (posInHazard(w, _pos.x, _pos.y)) continue;
     return;
@@ -398,9 +408,12 @@ export function step(w: World, input: Input): void {
 
   // ---- P1 Time & difficulty ----------------------------------------------
   w.serviceTick++;
-  if (w.serviceTick % RAMP_INTERVAL_TICKS === 0) {
-    w.globalSpeedStep += RAMP_SPEED_STEP;
-    w.usableHalf = fmax(WORLD_MIN_HALF, w.usableHalf - RAMP_RADIUS_CONTRACT);
+  if (w.serviceTick % RAMP_INTERVAL_TICKS === 0) w.globalSpeedStep += RAMP_SPEED_STEP;
+  // World EXPANDS with the snake (grow-only). Never let it retract past the head (enredo cut safety).
+  {
+    let target = WORLD_HALF + w.bodyCount * WORLD_GROW_PER_NODE;
+    if (target > WORLD_MAX_HALF) target = WORLD_MAX_HALF;
+    if (target > w.usableHalf) w.usableHalf = target;
   }
 
   // Expire toppings / papa / burn / smoke (swap-remove).
@@ -657,31 +670,45 @@ export function step(w: World, input: Input): void {
   //     bounded — the draw order stays a pure function of World, so determinism holds.
   {
     const lifeTicks = fromFixedToInt(fmul(toFixed(TOPPING_LIFE_TICKS), w.mods.toppingLifeMul));
-    const radMaxU = fromFixedToInt(CLUSTER_RADIUS) + 1; // 0..CLUSTER_RADIUS units
+    const rSpanU = fromFixedToInt(CLUSTER_RADIUS); // units; sample dx,dy in [-R, +R]
+    const need2 = radiusSq(CLUSTER_RADIUS); // in-disc acceptance (uniform density, no clumping)
+    const sepSq = radiusSq(TOP_MIN_SEP); // min separation between toppings (no overlap)
     let guard = 0;
-    // Only spawn a fresh cluster when there's room for a whole one (keeps ~CLUSTER_COUNT alive,
-    // no per-topping trickle). guard bounds the loop hard (each pass adds >= CLUSTER_MIN).
-    while (
-      w.topCount + CLUSTER_MIN <= TOP_TARGET_PER_SERVICE &&
-      w.topCount < MAX_TOP &&
-      guard < 4
-    ) {
+    // MORE clusters as the snake/world grows, so the expanding arena never feels empty (density).
+    const target = Math.min(MAX_TOP - CLUSTER_MAX, TOP_TARGET_PER_SERVICE + (w.bodyCount >> 5));
+    // Only spawn a fresh cluster when there's room for a whole one (no per-topping trickle).
+    // guard bounds the loop hard (each pass adds >= CLUSTER_MIN).
+    while (w.topCount + CLUSTER_MIN <= target && w.topCount < MAX_TOP && guard < 6) {
       guard++;
-      clusterCenter(w); // -> _pos: far from head, clear of oil/walls
+      clusterCenter(w); // -> _pos: far from head, clear of oil/walls, WHOLE cluster fits inside
       const cx = _pos.x;
       const cy = _pos.y;
-      const halfU = fromFixedToInt(w.usableHalf) - SPAWN_MARGIN;
-      const lim = toFixed(halfU < 1 ? 1 : halfU);
+      const clusterStart = w.topCount; // min-sep is tested against this cluster's own toppings
       const size = CLUSTER_MIN + nextInt(w, CLUSTER_MAX - CLUSTER_MIN + 1);
       for (let m = 0; m < size && w.topCount < MAX_TOP; m++) {
-        const ang = nextInt(w, 65536); // brad
-        const rad = toFixed(nextInt(w, radMaxU)); // POS radius within the cluster
-        let tx = cx + fmul(cosFixed(ang), rad);
-        let ty = cy + fmul(sinFixed(ang), rad);
-        if (tx > lim) tx = lim;
-        else if (tx < -lim) tx = -lim;
-        if (ty > lim) ty = lim;
-        else if (ty < -lim) ty = -lim;
+        // Place ONE topping: uniform-in-disc via integer SQUARE REJECTION (no sqrt) + min-sep.
+        let placed = false;
+        let tx = cx;
+        let ty = cy;
+        for (let tr = 0; tr < TOP_PLACE_TRIES; tr++) {
+          const dx = toFixed(nextInt(w, rSpanU * 2 + 1) - rSpanU);
+          const dy = toFixed(nextInt(w, rSpanU * 2 + 1) - rSpanU);
+          if (dist2(dx, dy, 0, 0) > need2) continue; // outside the disc -> reject
+          tx = cx + dx;
+          ty = cy + dy;
+          let ok = true;
+          for (let k = clusterStart; k < w.topCount; k++) {
+            if (dist2(tx, ty, w.topX[k], w.topY[k]) < sepSq) {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) {
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) continue; // bounded tries exhausted -> this topping simply does not spawn
         const kind = nextInt(w, 8);
         const idx = w.topCount;
         w.topX[idx] = tx;

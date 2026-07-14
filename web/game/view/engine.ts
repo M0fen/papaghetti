@@ -361,11 +361,16 @@ export function mountGame(
   // Follow the head and ZOOM IN to a window (~VIEW_SPAN world-units) so the snake reads as a
   // substantial, fast creature — not a tiny dot in the whole arena. When the world contracts
   // below the view span, the full pan fits and the camera stops panning (border closes in).
-  const VIEW_SPAN = 470; // world-units across the smaller screen dimension (tighter = less empty)
+  // Legible zoom that OPENS as the snake grows (slither-style): close early so the character +
+  // a whole cluster fill the screen, wider once long so you can still see your own loop.
+  const VIEW_SPAN_MIN = 300; // start: fideo ~19px, topping ~17px radius, cluster ~98px
+  const VIEW_SPAN_MAX = 430; // long snake: still frames its own enredo loop
   const updateCamera = (): void => {
     const halfU = world.usableHalf / 65536;
     const marginU = 70;
-    const spanU = Math.min(VIEW_SPAN, 2 * (halfU + marginU));
+    const grow = Math.min(1, world.bodyCount / 220);
+    const desired = VIEW_SPAN_MIN + (VIEW_SPAN_MAX - VIEW_SPAN_MIN) * grow;
+    const spanU = Math.min(desired, 2 * (halfU + marginU));
     cam.scale = (Math.min(cssW, cssH) / spanU) * microZoom;
     const headX = world.bodyX[0] / 65536;
     const headY = world.bodyY[0] / 65536;
