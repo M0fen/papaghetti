@@ -88,7 +88,11 @@ export const PEDIDO_BONUS = 2000; // int bonus on order completion
 export const MULT_STEP = FP_ONE >> 2; // Q16.16, +0.25 to globalMult per completed pedido
 export const MULT_DECAY = FP_ONE >> 1; // Q16.16, -0.5 to globalMult on pedido fail
 export const MULT_MIN = FP_ONE; // Q16.16, global multiplier floor (1.0)
+export const MULT_MAX = 8 * FP_ONE; // Q16.16, global multiplier CAP (enredo snowball can't run away)
 export const GLOBAL_MULT_START = FP_ONE; // Q16.16, starting global multiplier
+// The SIGNATURE enredo FEEDS the score snowball: closing a loop raises the global multiplier by this
+// per enclosed topping (× the capped enclosed count), so the game's best mechanic drives its scoring.
+export const ENREDO_MULT_STEP = FP_ONE >> 3; // Q16.16 = +0.125 global mult per enclosed topping
 
 // --- pedido (orders) ------------------------------------------------------
 export const PEDIDO_TICKS = 25 * TICKS_PER_SEC; // deadline ticks

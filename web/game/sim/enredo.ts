@@ -40,11 +40,13 @@ import {
   AREA_SHIFT,
   BURN_LIFE_TICKS,
   FORK_BLOCK_TICKS,
+  ENREDO_MULT_STEP,
   GROW_PER_TOP,
   MAX_NODES,
   MAX_TOP,
   MAX_ZONE,
   MIN_LOOP_AREA_2,
+  MULT_MAX,
   MULT_STEP,
   PEDIDO_BONUS,
   PEDIDO_COOLDOWN_TICKS,
@@ -307,6 +309,11 @@ export function runEnredo(w: World): void {
       advancePedido(w, w.topKind[i]);
       w.topFlags[i] = w.topFlags[i] & ~TOP_FLAG.ALIVE; // P7 must not double-count these
     }
+
+    // The enredo FEEDS the score snowball: a bigger/chained loop raises the global multiplier
+    // (capped at MULT_MAX), so the signature mechanic drives the game's scoring engine — not just
+    // a one-off payout. Pure/deterministic (function of the enclosed count).
+    w.globalMult = fmin(MULT_MAX, w.globalMult + ENREDO_MULT_STEP * mult);
   }
 
   // 5. Card loop effects (obstacles / oil / fork enclosed by the loop).

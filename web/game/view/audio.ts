@@ -18,6 +18,14 @@ export type GameAudio = {
   pedido(): void;
   /** Papa appeared — an urgent double pip. */
   papa(): void;
+  /** Boost engaged — a quick rising whoosh (rising edge only). */
+  boost(): void;
+  /** Almidón refilled to full — a bright ready chime. */
+  abilityReady(): void;
+  /** A draft card was taken — a satisfying stamp. */
+  cardPick(): void;
+  /** Draft reroll — a quick shuffle. */
+  reroll(): void;
   /** Death — a descending thud. */
   death(): void;
   /** Layered ambience gain in [0,1] (intensity hook; smoothly crossfaded). */
@@ -102,7 +110,16 @@ export function createAudio(): GameAudio {
         ctx = new Ctor();
         master = ctx.createGain();
         master.gain.value = 0.5;
-        master.connect(ctx.destination);
+        // MASTER LIMITER — a compressor before the destination so stacked SFX never clip past 1.0
+        // (the #1 "amateur mix" tell). Fast attack, musical release.
+        const limiter = ctx.createDynamicsCompressor();
+        limiter.threshold.value = -6;
+        limiter.knee.value = 8;
+        limiter.ratio.value = 12;
+        limiter.attack.value = 0.003;
+        limiter.release.value = 0.12;
+        master.connect(limiter);
+        limiter.connect(ctx.destination);
         // Subtle layered drone (starts silent; setLayer crossfades it in).
         const drone = ctx.createOscillator();
         droneGain = ctx.createGain();
@@ -140,6 +157,25 @@ export function createAudio(): GameAudio {
       if (!ensure()) return;
       tone(300, 0.09, "square", 0.24, 0);
       tone(300, 0.09, "square", 0.24, 0.14);
+    },
+    boost(): void {
+      if (!ensure()) return;
+      glide(170, 430, 0.18, "sawtooth", 0.12);
+    },
+    abilityReady(): void {
+      if (!ensure()) return;
+      tone(1046, 0.14, "sine", 0.14, 0);
+      tone(1568, 0.16, "sine", 0.12, 0.05);
+    },
+    cardPick(): void {
+      if (!ensure()) return;
+      tone(660, 0.07, "square", 0.16, 0);
+      tone(990, 0.13, "triangle", 0.14, 0.04);
+    },
+    reroll(): void {
+      if (!ensure()) return;
+      tone(440, 0.05, "triangle", 0.12, 0);
+      tone(560, 0.06, "triangle", 0.12, 0.05);
     },
     death(): void {
       if (!ensure()) return;

@@ -82,6 +82,64 @@ const TAG_RGB: Record<string, readonly [number, number, number]> = {
 };
 const _synCounts = new Int32Array(8);
 
+// Typography — the project ships Bricolage Grotesque (display) + Manrope (body) via next/font
+// (app/layout.tsx). Canvas can't take a CSS var() in ctx.font, so we read the resolved family
+// strings from the --font-display / --font-body custom properties once. Fallbacks stay safe until
+// the webfont loads (then subsequent frames upgrade automatically).
+let FONT_DISPLAY = "system-ui, sans-serif";
+let FONT_BODY = "system-ui, sans-serif";
+let fontsResolved = false;
+function resolveFonts(): void {
+  if (fontsResolved || typeof document === "undefined") return;
+  try {
+    const cs = getComputedStyle(document.documentElement);
+    const disp = cs.getPropertyValue("--font-display").trim();
+    const body = cs.getPropertyValue("--font-body").trim();
+    if (disp) FONT_DISPLAY = `${disp}, system-ui, sans-serif`;
+    if (body) FONT_BODY = `${body}, system-ui, sans-serif`;
+    const fonts = (document as unknown as { fonts?: { load?: (s: string) => Promise<unknown> } }).fonts;
+    if (fonts && typeof fonts.load === "function" && disp && body) {
+      [`700 32px ${disp}`, `800 32px ${disp}`, `500 16px ${body}`, `700 16px ${body}`].forEach((s) => {
+        try {
+          void fonts.load!(s);
+        } catch {
+          /* ignore */
+        }
+      });
+    }
+    fontsResolved = true;
+  } catch {
+    /* keep the system-ui fallbacks */
+  }
+}
+/** Display face (Bricolage) — headings, the score, card names, big numbers. */
+function fontD(px: number, weight = 800): string {
+  return `${weight} ${px}px ${FONT_DISPLAY}`;
+}
+/** Body face (Manrope) — labels, descriptions, small print. */
+function fontB(px: number, weight = 600): string {
+  return `${weight} ${px}px ${FONT_BODY}`;
+}
+
+// Card iconography — a thematic emoji per card reads as an ICON instantly (the letter-in-a-disc was
+// the #1 draft-screen prototype tell). Distinct, on-theme glyphs.
+const CARD_ICON: Record<string, string> = {
+  al_dente: "⚡",
+  hebra_gruesa: "🍝",
+  cabello_angel: "🌀",
+  almidon_puro: "💨",
+  lazo_avido: "🪢",
+  corte_limpio: "✂️",
+  enredo_ardiente: "🔥",
+  lazo_hierro: "🔨",
+  chicharron: "🥓",
+  pina_acida: "🍍",
+  tocineta: "🍖",
+  ojo_criolla: "🥔",
+  cosecha_voraz: "🌾",
+  fuego_alto: "🌶️",
+};
+
 export type Rect = { x: number; y: number; w: number; h: number };
 export type Viewport = { w: number; h: number };
 export type Insets = { top: number; right: number; bottom: number; left: number };
@@ -144,6 +202,7 @@ export type FrameState = {
   gaze: number; // radians — where the eyes look (micro-lag toward heading)
   abilityPulse: number; // 0..1 "ready" pulse on the ability button
   picked: string[]; // card ids taken this run (build chips)
+  enredoSlam: { mult: number; t: number } | null; // the money moment: big centered "×K ENREDO!" (t 0..1)
 };
 
 // ---------------------------------------------------------------------------
@@ -162,6 +221,7 @@ let vigH = 0;
 let GRAIN: CanvasPattern | null = null; // tiled film-grain noise (makes the flat vector look "expensive")
 let IRON: CanvasPattern | null = null; // coarse cast-iron mottle (the pan is USED, not a flat colour)
 const ATLAS: Off[] = []; // baked food sprites, indexed by ToppingCode 0..7
+const PDOT: (Off | null)[] = []; // baked soft glow-dot sprites, indexed by particle type
 const ATLAS_PX = 72; // sprite canvas size
 const ATLAS_R = 24; // baked food radius inside the sprite
 const SAUCE_DASH: number[] = [6, 6]; // obstacle "salsa" ring
@@ -213,8 +273,32 @@ function initCaches(ctx: CanvasRenderingContext2D): void {
   ]);
   GRAIN = ctx.createPattern(bakeGrain(), "repeat");
   IRON = ctx.createPattern(bakeIron(), "repeat");
+  // Soft radial-dot particle sprites (per type) — replaces the axis-aligned fillRect squares that
+  // read cheap up close. One-time bake; blitted additively in the hot loop.
+  PDOT[PT_BURST] = bakeDot([240, 130, 52], 0.45);
+  PDOT[PT_SPARK] = bakeDot([255, 214, 96], 0.4);
+  PDOT[PT_VAPOR] = bakeDot([255, 240, 220], 0.55);
+  PDOT[PT_FLASH] = bakeDot([255, 255, 255], 0.5);
   bakeAtlas();
+  resolveFonts();
   cachesReady = true;
+}
+
+// A soft radial dot in `color`, fading to transparent — the shape all glow particles blit.
+function bakeDot(color: readonly [number, number, number], soft: number): Off {
+  const S = 32;
+  const c = makeOffscreen(S, S);
+  const g = offCtx(c);
+  const [r, gg, b] = color;
+  const grad = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  grad.addColorStop(0, `rgba(${r},${gg},${b},1)`);
+  grad.addColorStop(soft, `rgba(${r},${gg},${b},0.5)`);
+  grad.addColorStop(1, `rgba(${r},${gg},${b},0)`);
+  g.fillStyle = grad;
+  g.beginPath();
+  g.arc(S / 2, S / 2, S / 2, 0, TAU);
+  g.fill();
+  return c;
 }
 
 // Film grain: a 64×64 monochrome noise tile, repeated across the frame at low alpha. Baked once
@@ -1173,13 +1257,15 @@ export function renderFrame(
     }
   }
 
-  // --- 10. crumbs (source-over, over body) ---
+  // --- 10. crumbs (source-over, over body) — rounded specks, not hard squares ---
+  ctx.fillStyle = "#C9A24E";
   for (let i = 0; i < parts.count; i++) {
     if (parts.type[i] !== PT_MIGA) continue;
     ctx.globalAlpha = parts.life[i];
-    ctx.fillStyle = "#C9A24E";
     const s = parts.size[i] * cam.scale;
-    ctx.fillRect(w2sx(parts.px[i]) - s, w2sy(parts.py[i]) - s, s * 2, s * 2);
+    ctx.beginPath();
+    ctx.arc(w2sx(parts.px[i]), w2sy(parts.py[i]), s, 0, TAU);
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
 
@@ -1228,7 +1314,7 @@ export function renderFrame(
     ctx.stroke();
     if (francesa && w.papaSeq[i] >= 0) {
       ctx.fillStyle = rgb(RGB_ESPRESSO);
-      ctx.font = `bold ${Math.round(pr)}px system-ui, sans-serif`;
+      ctx.font = fontD(Math.round(pr), 800);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(String(w.papaSeq[i] + 1), px, py);
@@ -1336,7 +1422,7 @@ export function renderFrame(
       const sxp = w2sx(p.wx);
       const syp = w2sy(p.wy) - (1 - (1 - t) * (1 - t)) * 42 - 12;
       ctx.globalAlpha = a;
-      ctx.font = "bold " + (13 * sc).toFixed(0) + "px system-ui, sans-serif";
+      ctx.font = fontD(Math.round(13 * sc), 800);
       ctx.fillStyle = rgb(RGB_ESPRESSO);
       ctx.fillText(p.text, sxp + 1, syp + 1);
       ctx.fillStyle = rgb(RGB_AMBAR);
@@ -1346,6 +1432,9 @@ export function renderFrame(
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
   }
+
+  // --- 20b. ENREDO SLAM — the money moment: a big centered "¡ENREDO! ×K" celebration ---
+  if (fs.enredoSlam) drawEnredoSlam(ctx, view, fs);
 
   // --- 21. HUD ---
   drawHud(ctx, view, fs);
@@ -1799,23 +1888,22 @@ function drawAdditiveParticles(
   if (parts.count === 0) return;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  // burst
-  ctx.fillStyle = "#F0742A";
-  for (let i = 0; i < parts.count; i++) {
-    if (parts.type[i] !== PT_BURST) continue;
-    ctx.globalAlpha = parts.life[i];
-    const s = parts.size[i] * scale;
-    ctx.fillRect(w2sx(parts.px[i]) - s, w2sy(parts.py[i]) - s, s * 2, s * 2);
-  }
-  // sparks (gold)
-  ctx.fillStyle = "#FFD24A";
-  for (let i = 0; i < parts.count; i++) {
-    if (parts.type[i] !== PT_SPARK) continue;
-    ctx.globalAlpha = parts.life[i];
-    const s = parts.size[i] * scale;
-    ctx.fillRect(w2sx(parts.px[i]) - s, w2sy(parts.py[i]) - s, s * 2, s * 2);
-  }
-  // speed streaks (cream) — drawn as short lines along velocity
+  // SOFT glow dots (burst / spark / vapor / flash) — blit a baked radial sprite, not a hard square.
+  const blitDots = (type: number, alphaMul: number): void => {
+    const sprite = PDOT[type];
+    if (!sprite) return;
+    for (let i = 0; i < parts.count; i++) {
+      if (parts.type[i] !== type) continue;
+      ctx.globalAlpha = Math.min(1, parts.life[i] * alphaMul);
+      const r = parts.size[i] * scale * 2.4; // soft radius (the sprite fades to 0 at its edge)
+      ctx.drawImage(sprite as CanvasImageSource, w2sx(parts.px[i]) - r, w2sy(parts.py[i]) - r, r * 2, r * 2);
+    }
+  };
+  blitDots(PT_BURST, 1);
+  blitDots(PT_SPARK, 1);
+  blitDots(PT_VAPOR, 0.22);
+  blitDots(PT_FLASH, 1);
+  // speed streaks (cream) — short lines along velocity
   ctx.strokeStyle = "#FBF1DE";
   ctx.lineWidth = 2;
   ctx.lineCap = "round";
@@ -1828,22 +1916,6 @@ function drawAdditiveParticles(
     ctx.moveTo(x, y);
     ctx.lineTo(x - parts.vx[i] * 0.03 * scale, y - parts.vy[i] * 0.03 * scale);
     ctx.stroke();
-  }
-  // vapor (faint)
-  ctx.fillStyle = "#FFF0DC";
-  for (let i = 0; i < parts.count; i++) {
-    if (parts.type[i] !== PT_VAPOR) continue;
-    ctx.globalAlpha = parts.life[i] * 0.12;
-    const s = parts.size[i] * scale;
-    ctx.fillRect(w2sx(parts.px[i]) - s, w2sy(parts.py[i]) - s, s * 2, s * 2);
-  }
-  // white flash pops
-  ctx.fillStyle = "#FFFFFF";
-  for (let i = 0; i < parts.count; i++) {
-    if (parts.type[i] !== PT_FLASH) continue;
-    ctx.globalAlpha = parts.life[i];
-    const s = parts.size[i] * scale;
-    ctx.fillRect(w2sx(parts.px[i]) - s, w2sy(parts.py[i]) - s, s * 2, s * 2);
   }
   ctx.restore();
   ctx.globalAlpha = 1;
@@ -1931,12 +2003,12 @@ function drawHud(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState):
   ctx.textAlign = "left";
 
   ctx.fillStyle = rgb(RGB_CREMA);
-  ctx.font = "bold 30px system-ui, sans-serif";
+  ctx.font = fontD(32, 800);
   ctx.fillText(String(w.score), left, top);
 
   const mult = w.globalMult / F;
   ctx.fillStyle = rgb(heatColor(fs.heat01));
-  ctx.font = "bold 20px system-ui, sans-serif";
+  ctx.font = fontD(20, 800);
   ctx.fillText(`x${mult.toFixed(2)}`, left, top + 34);
 
   const barW = Math.min(150, view.w * 0.38);
@@ -1987,7 +2059,7 @@ function drawSynergies(ctx: CanvasRenderingContext2D, fs: FrameState, x: number,
     ctx.arc(x + 6, ry + 6, active ? 6 : 4, 0, TAU);
     ctx.fill();
     ctx.fillStyle = active ? rgb(RGB_CREMA) : rgba(RGB_CREMA, 0.7);
-    ctx.font = active ? "bold 11px system-ui, sans-serif" : "11px system-ui, sans-serif";
+    ctx.font = active ? fontB(11, 700) : fontB(11, 500);
     const stars = tier >= 2 ? " ★★" : tier >= 1 ? " ★" : "";
     ctx.fillText(`${CARD_TAG_ORDER[t]} ${cnt}${stars}`, x + 18, ry + 6);
     ctx.globalAlpha = 1;
@@ -2013,7 +2085,7 @@ function drawBar(
   roundRect(ctx, x, y, Math.max(h, wd * v), h, h / 2);
   ctx.fill();
   ctx.fillStyle = rgba(RGB_CREMA, 0.85);
-  ctx.font = "9px system-ui, sans-serif";
+  ctx.font = fontB(9, 600);
   ctx.textAlign = "right";
   ctx.fillText(label, x + wd, y - 11);
   ctx.textAlign = "left";
@@ -2029,7 +2101,7 @@ function drawPedido(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameStat
   roundRect(ctx, x, y, cardW, cardH, 8);
   ctx.fill();
   ctx.fillStyle = rgb(RGB_ESPRESSO);
-  ctx.font = "bold 10px system-ui, sans-serif";
+  ctx.font = fontB(10, 700);
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.fillText("PEDIDO", x + 10, y + 8);
@@ -2063,12 +2135,62 @@ function drawPedido(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameStat
     }
     if (i < 2) {
       ctx.fillStyle = rgb(RGB_ESPRESSO);
-      ctx.font = "12px system-ui, sans-serif";
+      ctx.font = fontB(12, 700);
       ctx.textAlign = "center";
       ctx.fillText("›", cx + slot / 2, cy - 7);
     }
   }
   ctx.textAlign = "left";
+}
+
+// ---------------------------------------------------------------------------
+// ENREDO SLAM — the celebration for the signature loop close (the trailer shot). Scales with the
+// enclosed multiplier; pop-in overshoot → hold → fade, with an expanding ring.
+// ---------------------------------------------------------------------------
+function drawEnredoSlam(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState): void {
+  const s = fs.enredoSlam;
+  if (!s) return;
+  const t = s.t;
+  const alpha = t < 0.1 ? t / 0.1 : t > 0.62 ? Math.max(0, 1 - (t - 0.62) / 0.38) : 1;
+  if (alpha <= 0.01) return;
+  const pop = t < 0.1 ? 0.55 + 0.55 * (t / 0.1) : t < 0.22 ? 1.1 - 0.1 * ((t - 0.1) / 0.12) : 1; // overshoot
+  const big = Math.min(8, s.mult);
+  const cx = view.w / 2;
+  const cy = view.h * 0.34;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // expanding shock ring
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = `rgba(255,205,110,${(0.5 * alpha).toFixed(3)})`;
+  ctx.lineWidth = 5 * pop;
+  ctx.beginPath();
+  ctx.arc(cx, cy + 8, 34 + t * (90 + big * 14), 0, TAU);
+  ctx.stroke();
+  ctx.globalCompositeOperation = "source-over";
+  // "¡ENREDO!"
+  ctx.font = fontD(Math.round((22 + big) * pop), 800);
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "rgba(38,18,6,0.85)";
+  ctx.strokeText("¡ENREDO!", cx, cy - 12);
+  ctx.fillStyle = "#FFE9A8";
+  ctx.fillText("¡ENREDO!", cx, cy - 12);
+  // "×K" — bigger with a warm gradient
+  const ms = Math.round((40 + big * 3) * pop);
+  ctx.font = fontD(ms, 800);
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(38,18,6,0.9)";
+  ctx.strokeText(`×${s.mult}`, cx, cy + ms * 0.5);
+  const g = ctx.createLinearGradient(cx - ms, cy, cx + ms, cy + ms);
+  g.addColorStop(0, "#FFD24A");
+  g.addColorStop(1, "#F0742A");
+  ctx.fillStyle = g;
+  ctx.fillText(`×${s.mult}`, cx, cy + ms * 0.5);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
 }
 
 // ---------------------------------------------------------------------------
@@ -2096,10 +2218,10 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
   ctx.textBaseline = "middle";
   const titleY = fs.insets.top + Math.max(46, view.h * 0.16);
   ctx.fillStyle = rgba(RGB_CREMA, 0.55);
-  ctx.font = "bold 12px system-ui, sans-serif";
+  ctx.font = fontB(12, 700);
   ctx.fillText(`SERVICIO ${w.service} · ELIGE TU CARTA`, view.w / 2, titleY - 16);
   ctx.fillStyle = rgb(RGB_CREMA);
-  ctx.font = "800 26px system-ui, sans-serif";
+  ctx.font = fontD(27, 800);
   ctx.fillText("¿QUÉ AÑADES AL FIDEO?", view.w / 2, titleY + 8);
 
   for (let i = 0; i < fs.draftCards.length && i < w.offerCount; i++) {
@@ -2125,25 +2247,37 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
     roundRect(ctx, r.x + 10, r.y + 12, r.w - 20, 5, 2.5);
     ctx.fill();
 
-    // emblem: a coloured disc with the card initial
+    // emblem: a coloured disc with the card's ICON (an emoji reads instantly; the old letter was
+    // the #1 draft prototype tell). The disc is lit like a rounded gem.
     const ey = r.y + 58;
     if (!fs.reduceEffects) stamp(ctx, glow, cx, ey, 34, 0.5);
-    ctx.fillStyle = rgb(tc);
+    const eg = ctx.createRadialGradient(cx - 8, ey - 9, 4, cx, ey, 24);
+    eg.addColorStop(0, rgb(mixRgb(tc, [255, 255, 255], 0.35)));
+    eg.addColorStop(0.7, rgb(tc));
+    eg.addColorStop(1, rgb(mixRgb(tc, RGB_ESPRESSO, 0.5)));
+    ctx.fillStyle = eg;
     ctx.beginPath();
     ctx.arc(cx, ey, 24, 0, TAU);
     ctx.fill();
-    ctx.fillStyle = "rgba(28,18,12,0.9)";
-    ctx.font = "800 26px system-ui, sans-serif";
-    ctx.fillText(card.nombre.charAt(0).toUpperCase(), cx, ey + 1);
+    ctx.strokeStyle = "rgba(255,236,190,0.6)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, ey, 23, Math.PI * 0.9, Math.PI * 1.7);
+    ctx.stroke();
+    ctx.font = "26px system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.fillText(CARD_ICON[id] ?? "🍥", cx, ey + 1);
+    ctx.textBaseline = "alphabetic";
 
     // tipo label
     ctx.fillStyle = rgb(tc);
-    ctx.font = "bold 10px system-ui, sans-serif";
+    ctx.font = fontB(10, 700);
+    ctx.textBaseline = "middle";
     ctx.fillText(TIPO_LABEL[card.tipo] ?? card.tipo, cx, r.y + 92);
 
     // name
     ctx.fillStyle = rgb(RGB_CREMA);
-    ctx.font = "800 17px system-ui, sans-serif";
+    ctx.font = fontD(18, 800);
     const nameLines = wrapText(ctx, card.nombre, r.w - 22);
     let ty = r.y + 116;
     for (const ln of nameLines) {
@@ -2166,10 +2300,10 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
     ctx.textAlign = "left";
     const line = (mark: string, col: readonly [number, number, number], text: string): void => {
       ctx.fillStyle = rgb(col);
-      ctx.font = "bold 13px system-ui, sans-serif";
+      ctx.font = fontB(14, 800);
       ctx.fillText(mark, r.x + 14, ty);
       ctx.fillStyle = rgba(RGB_CREMA, 0.9);
-      ctx.font = "13px system-ui, sans-serif";
+      ctx.font = fontB(13, 500);
       const lines = wrapText(ctx, text, r.w - 44);
       for (const ln of lines) {
         if (ty > r.y + r.h - 16) break;
@@ -2194,7 +2328,7 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
     roundRect(ctx, r.x, r.y, r.w, r.h, r.h / 2);
     ctx.stroke();
     ctx.fillStyle = rgb(RGB_AMBAR);
-    ctx.font = "bold 15px system-ui, sans-serif";
+    ctx.font = fontD(15, 700);
     ctx.fillText(`↻ REROLL · ${w.rerollLeft}`, r.x + r.w / 2, r.y + r.h / 2);
   }
   ctx.textAlign = "left";

@@ -98,9 +98,18 @@ export function mountGame(
   let microZoom = 1;
   let enredoFlash = 0;
   let heat01 = 0;
-  let hitStop = 0;
+  let hitStopMs = 0; // TIME-based freeze window (ms) — a real hit-stop that survives 120/144Hz
   let eatStreak = 0;
   let lastEatTick = -999;
+  // Death BEAT: on death we hold a view-only sequence (juice keeps drawing) before handing off to the
+  // results screen — otherwise onGameOver fires on the death tick and the burst/shake/thud never draw.
+  let dying = false;
+  let dyingUntil = 0;
+  // ENREDO SLAM (the money moment): the enclosed multiplier of the last loop + its age, for a big
+  // centered celebration scaled by the catch.
+  let enredoSlamMult = 0;
+  let enredoSlamAge = 0;
+  let boostPrev = false;
 
   // Character juice (view-only, dt-normalized in frame()).
   let mouthOpen = 0;
@@ -259,9 +268,11 @@ export function mountGame(
       const rr = controller.consumeReroll();
       if (rr === 1 && world.rerollLeft > 0) {
         input.reroll = 1;
+        audio.reroll();
       } else if (pick >= 0 && pick < world.offerCount) {
         input.cardPick = pick;
         cardsPicked.push(CARD_POOL[world.offerIds[pick]]);
+        audio.cardPick();
       }
     }
 
@@ -288,7 +299,7 @@ export function mountGame(
       lastEatTick = world.tick;
       audio.eat(eatStreak);
       if (shakeMag < 1) shakeMag = 1;
-      if (hitStop < 1) hitStop = 1;
+      if (hitStopMs < 40) hitStopMs = 40; // a crisp bite freeze
       // character reaction (burst spawned once per FRAME, not per step — see frame())
       eatBurstPending++;
       mouthOpen = 1;
@@ -301,19 +312,24 @@ export function mountGame(
     const topDrop = trkTop - world.topCount;
     const eatenDelta = world.toppingsEaten - trkEaten;
     const enclosed = topDrop - eatenDelta;
+    let enredoThisStep = false;
     if (bodyCut || (enclosed >= 2 && scoreDelta > TOP_BASE * 2)) {
       const mult = Math.max(1, Math.min(enclosed, world.mods.loopCap));
       if (mult > bestEnredo) bestEnredo = mult;
-      shakeMag = Math.max(shakeMag, 4);
-      microZoom = 1.06;
+      enredoThisStep = true;
+      enredoSlamMult = mult; // the SLAM: a big centered "¡ENREDO ×K!" celebration
+      enredoSlamAge = 0;
+      shakeMag = Math.max(shakeMag, 4 + mult);
+      microZoom = 1.06 + 0.02 * Math.min(mult, 8); // punch scales with the catch
       enredoFlash = 1;
-      hitStop = Math.max(hitStop, 2);
+      hitStopMs = Math.max(hitStopMs, 90 + Math.min(mult, 8) * 12); // bigger loop → longer slow-mo
       sparkPending++;
       audio.enredo();
     }
 
-    // pedido complete: globalMult only rises on completion
-    if (world.globalMult > trkMult) {
+    // pedido complete: globalMult rises on completion (the enredo ALSO raises it now, so gate the
+    // pedido cue on it NOT being an enredo tick — else every loop plays the pedido confirm).
+    if (world.globalMult > trkMult && !enredoThisStep) {
       shakeMag = Math.max(shakeMag, 8);
       audio.pedido();
     }
@@ -321,14 +337,19 @@ export function mountGame(
     // papa appear
     if (world.papaCount > trkPapa) audio.papa();
 
-    // death
+    // death — DO NOT finish() on the death tick (that cuts to results before any juice draws).
+    // Enter a view-only death BEAT: the sim is already frozen (phase DEAD), so we hold, play the
+    // burst/shake/thud + a punch-zoom, and hand off to the results screen after ~800ms.
     if (world.phase === PHASE.DEAD && trkPhase !== PHASE.DEAD) {
       shakeMag = Math.max(shakeMag, 14);
       deathBurstPending = 1;
       flashHead = 1;
       headStretch = 0.8;
+      microZoom = 1.14; // punch-zoom toward the head on the kill
+      hitStopMs = Math.max(hitStopMs, 140); // a beat of slow-mo on death
       audio.death();
-      finish();
+      dying = true;
+      dyingUntil = performance.now() + 820;
     }
 
     // roll trackers
@@ -421,27 +442,37 @@ export function mountGame(
     let dt = now - last;
     last = now;
     if (dt > 250) dt = 250; // clamp huge stalls
-    acc += dt;
 
+    // TIME-BASED hit-stop: freeze the sim for a ms window (view-only, replay-safe — the tick sequence
+    // is unchanged, we just don't advance ticks during the freeze). Also freeze while the death beat
+    // plays. This is what gives eat/enredo/death their crunch and survives 120/144Hz.
+    const frozen = hitStopMs > 0 || dying;
+    if (hitStopMs > 0) hitStopMs -= dt;
     let steps = 0;
-    while (acc >= FIXED_MS && steps < MAX_STEPS && !ended) {
-      doStep();
-      acc -= FIXED_MS;
-      steps++;
+    if (!frozen && !ended) {
+      acc += dt;
+      while (acc >= FIXED_MS && steps < MAX_STEPS && !ended) {
+        doStep();
+        acc -= FIXED_MS;
+        steps++;
+        if (hitStopMs > 0 || dying) break; // an event this step triggers an immediate freeze
+      }
+    } else {
+      acc = 0; // don't fast-forward when the freeze lifts
     }
 
-    // interpolation alpha; hit-stop holds the latest discrete frame
-    let alpha = acc / FIXED_MS;
-    if (hitStop > 0) {
-      alpha = 1;
-      hitStop--;
-    }
+    // death beat hand-off: hold the view-only death sequence, THEN show the results screen.
+    if (dying && !ended && now >= dyingUntil) finish();
+
+    // interpolation alpha; a frozen frame holds the latest discrete state
+    const alpha = frozen ? 1 : acc / FIXED_MS;
 
     // ---- decay juice — dt-NORMALIZED so 60 / 120 / 144 Hz feel identical ----
     const dtS = dt / 1000;
     const dpow = (base: number): number => Math.pow(base, dt / 16.6667);
     shakeMag *= dpow(0.86);
     enredoFlash *= dpow(0.9);
+    enredoSlamAge += dt; // ENREDO SLAM popup lifetime (ms)
     microZoom += (1 - microZoom) * (1 - dpow(0.85));
     mouthOpen *= dpow(0.82);
     flashHead *= dpow(0.6);
@@ -458,9 +489,15 @@ export function mountGame(
     dg = Math.atan2(Math.sin(dg), Math.cos(dg));
     gaze += dg * Math.min(1, 0.22 * (dt / 16.6667));
 
-    // ability "ready" pulse when almidón refills to full
-    if (world.almidon >= ALMIDON_MAX && prevAlm < ALMIDON_MAX) abilityPulse = 1;
+    // ability "ready" pulse + chime when almidón refills to full
+    if (world.almidon >= ALMIDON_MAX && prevAlm < ALMIDON_MAX) {
+      abilityPulse = 1;
+      audio.abilityReady();
+    }
     prevAlm = world.almidon;
+    // boost whoosh on the rising edge (a silent core action until now)
+    if (input.boost && !boostPrev && world.phase === PHASE.PLAY) audio.boost();
+    boostPrev = input.boost;
 
     // ---- view-only particle sim + spawns (WORLD units; never touches /sim) ----
     const hxw = world.bodyX[0] / 65536;
@@ -591,6 +628,10 @@ export function mountGame(
       gaze,
       abilityPulse,
       picked: cardsPicked,
+      enredoSlam:
+        !reduceEffects && enredoSlamMult > 0 && enredoSlamAge < 1100
+          ? { mult: enredoSlamMult, t: enredoSlamAge / 1100 }
+          : null,
     };
     renderFrame(ctx, { w: cssW, h: cssH }, fs);
 
