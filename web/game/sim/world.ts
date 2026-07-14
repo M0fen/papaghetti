@@ -24,8 +24,8 @@ import {
   MAX_SMOKE,
   MAX_TOP,
   MAX_ZONE,
-  SERVICE_MAX_TICKS,
-  SERVICE_MIN_TICKS,
+  SERVICE_JITTER_TICKS,
+  serviceLenBase,
   SPACING,
   START_NODES,
   WORLD_HALF,
@@ -183,8 +183,8 @@ export function createWorld(seed: number, mode: ModeName): World {
   w.crumbHead = P - 1;
   w.crumbCount = P;
 
-  // First RNG consumers: draw this service's length. Everything downstream is step()'s.
-  w.serviceLen = SERVICE_MIN_TICKS + nextInt(w, SERVICE_MAX_TICKS - SERVICE_MIN_TICKS + 1);
+  // First RNG consumers: draw this service's length (short early → the first card comes fast).
+  w.serviceLen = serviceLenBase(w.service) + nextInt(w, SERVICE_JITTER_TICKS + 1);
 
   // NOTE (skeleton): initial toppings / pedido / obstacles for service 1 are populated
   // by step.ts service-init on the first PLAY ticks so RNG draw order stays owned by step().

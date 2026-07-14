@@ -26,8 +26,14 @@ export const RAMP_SPEED_STEP = FP_ONE >> 2; // POS, +0.25 u/tick per ramp
 
 // --- run / service structure ---------------------------------------------
 export const SERVICE_COUNT = 8;
-export const SERVICE_MIN_TICKS = 60 * TICKS_PER_SEC; // 3600 (60s)
-export const SERVICE_MAX_TICKS = 90 * TICKS_PER_SEC; // 5400 (90s)
+// Services RAMP in length: SHORT early so the first cards (the roguelite hook, the central theme)
+// come fast (service 1 ≈ 18-30s), longer later. serviceLenBase is pure integer arithmetic (no RNG).
+export const SERVICE_BASE_TICKS = 18 * TICKS_PER_SEC; // service-1 base (18s)
+export const SERVICE_GROW_TICKS = 8 * TICKS_PER_SEC; // +8s per later service
+export const SERVICE_JITTER_TICKS = 12 * TICKS_PER_SEC; // + RNG 0..12s
+export function serviceLenBase(service: number): number {
+  return SERVICE_BASE_TICKS + (service - 1) * SERVICE_GROW_TICKS;
+}
 export const RUSH_TICKS = 60 * TICKS_PER_SEC; // RUSH mode: single 60s run, no drafts
 export const FORK_SERVICE_MODULO = 3; // fork appears on service % 3 == 0 (and s8)
 
@@ -122,17 +128,17 @@ export const FORK_BLOCK_TICKS = 5 * TICKS_PER_SEC; // stun when enclosed by an e
 export const FORK_ENTER_MARGIN = 40 * FP_ONE; // POS, distance inside border to reach CHASE
 
 // --- spawning -------------------------------------------------------------
-export const TOP_TARGET_PER_SERVICE = 14; // maintained topping count (~3 clusters worth)
+// Food should feel FREE (scattered organically) but the map NUTRIDO (dense). We still seed food in
+// LOOSE pockets (so the enredo lasso can enclose a worthwhile catch) but the pockets are wide and
+// numerous enough that they read as free-standing food, not "a plate". No plato is drawn.
+export const TOP_TARGET_PER_SERVICE = 22; // maintained topping count (nourished map)
 export const SPAWN_MAX_TRIES = 8; // bounded rejection sampling (determinism)
-// BUG FIX: toppings used to spawn UNIFORMLY in a 4M-u² world → the smallest possible loop enclosed
-// 0.011 toppings, so every enredo came out empty (net punishment) and the signature mechanic was
-// unusable. Toppings now spawn in CLUSTERS so a loop can actually enclose a feast. Papa stays loose.
-export const CLUSTER_COUNT = 3; // clusters kept alive
-export const CLUSTER_MIN = 4; // toppings per cluster (min)
-export const CLUSTER_MAX = 6; // toppings per cluster (max)
-export const CLUSTER_RADIUS = 70 * FP_ONE; // POS, toppings scatter within this of the cluster centre
-export const CLUSTER_MIN_DIST_HEAD = 200 * FP_ONE; // POS, a new cluster centre keeps this from the head (findable)
-export const TOP_MIN_SEP = 30 * FP_ONE; // POS, min separation between toppings (no overlap)
+export const CLUSTER_COUNT = 3; // (legacy) reference count; real count scales with size in step
+export const CLUSTER_MIN = 3; // toppings per loose pocket (min)
+export const CLUSTER_MAX = 5; // toppings per loose pocket (max)
+export const CLUSTER_RADIUS = 120 * FP_ONE; // POS, WIDE scatter → reads as free food, not a tight clump
+export const CLUSTER_MIN_DIST_HEAD = 160 * FP_ONE; // POS, keep from head but findable fast
+export const TOP_MIN_SEP = 26 * FP_ONE; // POS, min separation between toppings (no overlap)
 export const TOP_PLACE_TRIES = 8; // bounded rejection per topping placement (determinism)
 
 // --- pool capacities ------------------------------------------------------

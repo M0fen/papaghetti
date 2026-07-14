@@ -89,8 +89,8 @@ import {
   SAUCE_SERVICE,
   SAUCE_TURN_FACTOR,
   SERVICE_COUNT,
-  SERVICE_MAX_TICKS,
-  SERVICE_MIN_TICKS,
+  SERVICE_JITTER_TICKS,
+  serviceLenBase,
   SMOKE_LIFE_TICKS,
   SPACING,
   SPAWN_MAX_TRIES,
@@ -376,7 +376,7 @@ function forkInSmoke(w: World): boolean {
 function advanceService(w: World): void {
   w.service++;
   w.serviceTick = 0;
-  w.serviceLen = SERVICE_MIN_TICKS + nextInt(w, SERVICE_MAX_TICKS - SERVICE_MIN_TICKS + 1);
+  w.serviceLen = serviceLenBase(w.service) + nextInt(w, SERVICE_JITTER_TICKS + 1);
   w.phase = PHASE.PLAY;
 }
 

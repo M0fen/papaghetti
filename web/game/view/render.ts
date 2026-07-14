@@ -67,10 +67,6 @@ const TAU = Math.PI * 2;
 // Module-level scratch so the hot render loop never allocates per frame.
 const sx = new Float64Array(MAXN);
 const sy = new Float64Array(MAXN);
-// View-side cluster grouping scratch (for the "plato" under each cluster). Approximate, cheap.
-const _gsx = new Float64Array(16);
-const _gsy = new Float64Array(16);
-const _gn = new Int32Array(16);
 
 export type Rect = { x: number; y: number; w: number; h: number };
 export type Viewport = { w: number; h: number };
@@ -741,54 +737,6 @@ export function renderFrame(
   }
   ctx.globalAlpha = 1;
 
-  // --- 10b. "EL PLATO": a faint dark disc under each cluster teaches the Enredo by composition
-  //          ("surround THIS"), no tutorial text. View-side grouping into module scratch (no alloc).
-  {
-    const CR = CLUSTER_RADIUS / F; // world units
-    const join2 = CR * CR * 1.6; // group-join threshold (a bit wider than the radius)
-    let ng = 0;
-    for (let i = 0; i < w.topCount; i++) {
-      if ((w.topFlags[i] & TOP_FLAG.ALIVE) === 0) continue;
-      const wx = w.topX[i] / F;
-      const wy = w.topY[i] / F;
-      let gi = -1;
-      for (let g = 0; g < ng; g++) {
-        const dx = _gsx[g] / _gn[g] - wx;
-        const dy = _gsy[g] / _gn[g] - wy;
-        if (dx * dx + dy * dy <= join2) {
-          gi = g;
-          break;
-        }
-      }
-      if (gi < 0 && ng < 16) {
-        gi = ng++;
-        _gsx[gi] = 0;
-        _gsy[gi] = 0;
-        _gn[gi] = 0;
-      }
-      if (gi >= 0) {
-        _gsx[gi] += wx;
-        _gsy[gi] += wy;
-        _gn[gi]++;
-      }
-    }
-    const pr = CR * cam.scale;
-    for (let g = 0; g < ng; g++) {
-      if (_gn[g] < 2) continue; // a lone stray topping gets no plato
-      const cx = w2sx(_gsx[g] / _gn[g]);
-      const cy = w2sy(_gsy[g] / _gn[g]);
-      ctx.fillStyle = "rgba(0,0,0,0.22)";
-      ctx.beginPath();
-      ctx.arc(cx, cy, pr, 0, TAU);
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "rgba(242,165,22,0.14)";
-      ctx.beginPath();
-      ctx.arc(cx, cy, pr, 0, TAU);
-      ctx.stroke();
-    }
-  }
-
   // --- 11. food (baked sprite atlas, single drawImage each; visual size == real hitbox, no clamp) ---
   for (let i = 0; i < w.topCount; i++) {
     if ((w.topFlags[i] & TOP_FLAG.ALIVE) === 0) continue;
@@ -1389,67 +1337,130 @@ function drawPedido(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameStat
 // ---------------------------------------------------------------------------
 // DRAFT overlay
 // ---------------------------------------------------------------------------
+const TIPO_LABEL: Record<string, string> = { ING: "INGREDIENTE", REC: "RECETA", MAL: "PICANTE" };
+
+/** Split a card's effect text into its buff (before " pero ") and debuff (after). */
+function splitEffect(txt: string): { buff: string; debuff: string } {
+  const idx = txt.indexOf(" pero ");
+  if (idx < 0) return { buff: txt.replace(/\.$/, ""), debuff: "" };
+  return {
+    buff: txt.slice(0, idx).replace(/[,;]\s*$/, ""),
+    debuff: txt.slice(idx + 6).replace(/\.$/, ""),
+  };
+}
+
 function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState): void {
   const w = fs.world;
-  ctx.fillStyle = rgba(RGB_ESPRESSO, 0.72);
+  // Dim the field to a warm dark, focus the centre.
+  ctx.fillStyle = "rgba(18,12,8,0.82)";
   ctx.fillRect(0, 0, view.w, view.h);
 
-  ctx.fillStyle = rgb(RGB_CREMA);
-  ctx.font = "bold 22px system-ui, sans-serif";
   ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.fillText("ELIGE UNA CARTA", view.w / 2, fs.insets.top + view.h * 0.3);
+  ctx.textBaseline = "middle";
+  const titleY = fs.insets.top + Math.max(46, view.h * 0.16);
+  ctx.fillStyle = rgba(RGB_CREMA, 0.55);
+  ctx.font = "bold 12px system-ui, sans-serif";
+  ctx.fillText(`SERVICIO ${w.service} · ELIGE TU CARTA`, view.w / 2, titleY - 16);
+  ctx.fillStyle = rgb(RGB_CREMA);
+  ctx.font = "800 26px system-ui, sans-serif";
+  ctx.fillText("¿QUÉ AÑADES AL FIDEO?", view.w / 2, titleY + 8);
 
   for (let i = 0; i < fs.draftCards.length && i < w.offerCount; i++) {
     const r = fs.draftCards[i];
     const id = CARD_POOL[w.offerIds[i]];
     const card = CARDS[id];
     const tc = tipoColor(card.tipo);
-    ctx.fillStyle = rgb(RGB_CREMA);
-    roundRect(ctx, r.x, r.y, r.w, r.h, 12);
+    const glow = card.tipo === "ING" ? GLOW_GREEN : card.tipo === "MAL" ? GLOW_RED : GLOW_WARM;
+    const cx = r.x + r.w / 2;
+
+    if (!fs.reduceEffects) stamp(ctx, glow, cx, r.y + r.h * 0.32, r.w * 0.85, 0.16);
+
+    // card body (warm dark) + rarity border
+    ctx.fillStyle = "rgba(40,29,21,0.98)";
+    roundRect(ctx, r.x, r.y, r.w, r.h, 16);
     ctx.fill();
     ctx.lineWidth = 3;
     ctx.strokeStyle = rgb(tc);
-    roundRect(ctx, r.x, r.y, r.w, r.h, 12);
+    roundRect(ctx, r.x, r.y, r.w, r.h, 16);
     ctx.stroke();
+    // top accent bar
     ctx.fillStyle = rgb(tc);
-    roundRect(ctx, r.x, r.y, r.w, 26, 12);
+    roundRect(ctx, r.x + 10, r.y + 12, r.w - 20, 5, 2.5);
     ctx.fill();
+
+    // emblem: a coloured disc with the card initial
+    const ey = r.y + 58;
+    if (!fs.reduceEffects) stamp(ctx, glow, cx, ey, 34, 0.5);
+    ctx.fillStyle = rgb(tc);
+    ctx.beginPath();
+    ctx.arc(cx, ey, 24, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "rgba(28,18,12,0.9)";
+    ctx.font = "800 26px system-ui, sans-serif";
+    ctx.fillText(card.nombre.charAt(0).toUpperCase(), cx, ey + 1);
+
+    // tipo label
+    ctx.fillStyle = rgb(tc);
+    ctx.font = "bold 10px system-ui, sans-serif";
+    ctx.fillText(TIPO_LABEL[card.tipo] ?? card.tipo, cx, r.y + 92);
+
+    // name
     ctx.fillStyle = rgb(RGB_CREMA);
-    ctx.font = "bold 12px system-ui, sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText(card.tipo, r.x + 10, r.y + 7);
-    ctx.fillStyle = rgb(RGB_ESPRESSO);
-    ctx.font = "bold 16px system-ui, sans-serif";
-    const nameLines = wrapText(ctx, card.nombre, r.w - 20);
-    let ty = r.y + 36;
+    ctx.font = "800 17px system-ui, sans-serif";
+    const nameLines = wrapText(ctx, card.nombre, r.w - 22);
+    let ty = r.y + 116;
     for (const ln of nameLines) {
-      ctx.fillText(ln, r.x + 10, ty);
-      ty += 19;
+      ctx.fillText(ln, cx, ty);
+      ty += 20;
     }
-    ctx.fillStyle = rgba(RGB_ESPRESSO, 0.85);
-    ctx.font = "12px system-ui, sans-serif";
-    const bodyLines = wrapText(ctx, card.texto, r.w - 20);
-    ty += 4;
-    for (const ln of bodyLines) {
-      if (ty > r.y + r.h - 14) break;
-      ctx.fillText(ln, r.x + 10, ty);
-      ty += 15;
-    }
+
+    // divider
+    ty += 6;
+    ctx.strokeStyle = rgba(RGB_CREMA, 0.14);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(r.x + 14, ty);
+    ctx.lineTo(r.x + r.w - 14, ty);
+    ctx.stroke();
+    ty += 14;
+
+    // buff / debuff, left-aligned with a coloured bullet
+    const eff = splitEffect(card.texto);
+    ctx.textAlign = "left";
+    const line = (mark: string, col: readonly [number, number, number], text: string): void => {
+      ctx.fillStyle = rgb(col);
+      ctx.font = "bold 13px system-ui, sans-serif";
+      ctx.fillText(mark, r.x + 14, ty);
+      ctx.fillStyle = rgba(RGB_CREMA, 0.9);
+      ctx.font = "13px system-ui, sans-serif";
+      const lines = wrapText(ctx, text, r.w - 44);
+      for (const ln of lines) {
+        if (ty > r.y + r.h - 16) break;
+        ctx.fillText(ln, r.x + 32, ty);
+        ty += 17;
+      }
+      ty += 6;
+    };
+    line("＋", RGB_VERDE, eff.buff);
+    if (eff.debuff) line("－", RGB_ROJO, eff.debuff);
+    ctx.textAlign = "center";
   }
 
+  // reroll: dark pill with amber border
   if (fs.rerollRect) {
     const r = fs.rerollRect;
-    ctx.fillStyle = rgb(RGB_AMBAR);
+    ctx.fillStyle = "rgba(40,29,21,0.98)";
     roundRect(ctx, r.x, r.y, r.w, r.h, r.h / 2);
     ctx.fill();
-    ctx.fillStyle = rgb(RGB_ESPRESSO);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = rgb(RGB_AMBAR);
+    roundRect(ctx, r.x, r.y, r.w, r.h, r.h / 2);
+    ctx.stroke();
+    ctx.fillStyle = rgb(RGB_AMBAR);
     ctx.font = "bold 15px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`REROLL (${w.rerollLeft})`, r.x + r.w / 2, r.y + r.h / 2);
-    ctx.textBaseline = "top";
+    ctx.fillText(`↻ REROLL · ${w.rerollLeft}`, r.x + r.w / 2, r.y + r.h / 2);
   }
   ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
   void PALETTE;
 }
