@@ -153,7 +153,7 @@ export const TOPPING_STYLES: readonly ToppingStyle[] = [
   { shape: "ring", fill: "#D6C4EE", stroke: "#5A4A78", accent: "#FFFFFF", label: "Cebolla" }, // 10.54:1
   { shape: "triangle", fill: "#F7DE5E", stroke: "#7A6A14", accent: "#FFFBE0", label: "Maíz" }, // 12.62:1
   { shape: "wave", fill: "#F0BC7A", stroke: "#7A4A20", accent: "#FFE6C8", label: "Rizadas" }, // 9.88:1
-  { shape: "diamond", fill: "#C4E45C", stroke: "#4C6A1E", accent: "#F0FFD0", label: "Piña" }, // 11.84:1
+  { shape: "diamond", fill: "#F2C230", stroke: "#8A5A12", accent: "#FFE79A", label: "Piña" }, // golden pineapple body
   { shape: "egg", fill: "#FFF6E6", stroke: "#A08A62", accent: "#FFFFFF", label: "Huevo" }, // 15.88:1
   { shape: "star", fill: "#D98E4F", stroke: "#5A3A18", accent: "#FFD9A8", label: "Chicharrón" }, // 6.43:1
 ];

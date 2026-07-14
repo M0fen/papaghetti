@@ -80,7 +80,7 @@ export const LOOP_CAP = 10; // default enclosed-count multiplier cap
 // --- collision radii (POS / Q16.16) --------------------------------------
 export const EAT_RADIUS = 12 * FP_ONE; // topping / papa collect radius (before hitboxMul)
 export const HEAD_HITBOX = 6 * FP_ONE; // head radius for oil / fork / border death
-export const FORK_CAPTURE_RADIUS = 18 * FP_ONE; // fork wrap/contact kill radius
+export const FORK_CAPTURE_RADIUS = 15 * FP_ONE; // fork wrap/contact kill radius (NERFED, was 18)
 
 // --- scoring --------------------------------------------------------------
 export const TOP_BASE = 100; // int base points per topping
@@ -114,10 +114,12 @@ export const FRANCESA_LINE_LEN = 4; // sticks in a francesa sequence
 export const TOPPING_LIFE_TICKS = 12 * TICKS_PER_SEC; // base lifetime (before toppingLifeMul)
 export const CHICHARRON_EVERY = 5; // Chicharrón Crocante explosion cadence
 
-// --- oil ------------------------------------------------------------------
-export const OIL_START_RADIUS = 20 * FP_ONE; // POS
-export const OIL_GROW = FP_ONE >> 3; // POS, +0.125 u/tick base (before oilGrowthMul)
-export const OIL_MAX_RADIUS = 200 * FP_ONE; // POS, growth clamp
+// --- oil (grease) ---------------------------------------------------------
+// NERFED (was: start 20, grow 0.125, max 200) — grease was too punishing: it grew fast and swallowed
+// the arena. Now it starts smaller, creeps slower, and caps lower so it pressures without dominating.
+export const OIL_START_RADIUS = 17 * FP_ONE; // POS
+export const OIL_GROW = 5898; // POS, ~+0.09 u/tick (was 0.125) — slower creep
+export const OIL_MAX_RADIUS = 150 * FP_ONE; // POS, lower growth clamp
 export const OIL_SERVICE = 3; // boiling oil first appears
 
 // --- obstacle schedule anchors (which service introduces what) -----------
@@ -127,9 +129,13 @@ export const SAUCE_SERVICE = 6;
 export const WHISK_SERVICE = 7;
 
 // --- fork boss ------------------------------------------------------------
-export const FORK_SPEED = 5 * FP_ONE; // POS, units/tick
-export const FORK_TURN_RATE = 500; // brads/tick
-export const FORK_BLOCK_TICKS = 5 * TICKS_PER_SEC; // stun when enclosed by an enredo
+// NERFED (was: speed 5 == the snake's base, turn 500, capture 18, block 5s) — the fork matched the
+// snake's speed so it was inescapable without boosting, and its kill radius was generous. Now it is
+// SLOWER than base speed (you can out-run it flat-out), turns wider (jukeable), has a smaller kill
+// radius, and stays stunned LONGER when you enredo it (rewards the counterplay).
+export const FORK_SPEED = 214958; // POS, ~4.28 u/tick (was 5.0) — slower than BASE_SPEED
+export const FORK_TURN_RATE = 410; // brads/tick (was 500) — wider turns, easier to shake
+export const FORK_BLOCK_TICKS = 7 * TICKS_PER_SEC; // stun when enclosed by an enredo (was 5s)
 export const FORK_ENTER_MARGIN = 40 * FP_ONE; // POS, distance inside border to reach CHASE
 
 // --- spawning -------------------------------------------------------------

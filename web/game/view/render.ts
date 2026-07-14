@@ -222,6 +222,9 @@ let GRAIN: CanvasPattern | null = null; // tiled film-grain noise (makes the fla
 let IRON: CanvasPattern | null = null; // coarse cast-iron mottle (the pan is USED, not a flat colour)
 const ATLAS: Off[] = []; // baked food sprites, indexed by ToppingCode 0..7
 const PDOT: (Off | null)[] = []; // baked soft glow-dot sprites, indexed by particle type
+let PLATE_SPRITE: Off | null = null; // baked ceramic dish (rim + deep well) — blitted, never re-gradiented
+const PLATE_PX = 256;
+const PLATE_R = 118; // baked plate radius inside the sprite
 const ATLAS_PX = 72; // sprite canvas size
 const ATLAS_R = 24; // baked food radius inside the sprite
 const SAUCE_DASH: number[] = [6, 6]; // obstacle "salsa" ring
@@ -279,9 +282,84 @@ function initCaches(ctx: CanvasRenderingContext2D): void {
   PDOT[PT_SPARK] = bakeDot([255, 214, 96], 0.4);
   PDOT[PT_VAPOR] = bakeDot([255, 240, 220], 0.55);
   PDOT[PT_FLASH] = bakeDot([255, 255, 255], 0.5);
+  PLATE_SPRITE = bakePlate();
   bakeAtlas();
   resolveFonts();
   cachesReady = true;
+}
+
+// A ceramic DISH baked once (rim/ala + deep recessed well/hondo, one up-left light). Blitting it
+// per plate kills all the per-frame gradient churn AND lets the well look genuinely deep (a bowl
+// that CONTAINS food), which per-plate gradients couldn't afford. Contact shadow + amber state ring
+// + gold flash are drawn live at blit time (cheap).
+function bakePlate(): Off {
+  const c = makeOffscreen(PLATE_PX, PLATE_PX);
+  const g = offCtx(c);
+  const cx = PLATE_PX / 2;
+  const cy = PLATE_PX / 2;
+  const R = PLATE_R;
+  const wr = R * 0.78; // the well (hondo)
+  const P = Math.PI;
+  // RIM disc (raised ala), lit up-left
+  const rg = g.createRadialGradient(cx - R * 0.34, cy - R * 0.4, R * 0.2, cx, cy, R);
+  rg.addColorStop(0, rgb(mixRgb(RGB_PLATE_RIM, [255, 240, 210], 0.18)));
+  rg.addColorStop(0.7, rgb(RGB_PLATE_RIM));
+  rg.addColorStop(1, rgb(mixRgb(RGB_PLATE_RIM, RGB_PLATE_LO, 0.55)));
+  g.fillStyle = rg;
+  g.beginPath();
+  g.arc(cx, cy, R, 0, TAU);
+  g.fill();
+  // rim bevel: up-left lit arc + down-right shadow arc (the relief)
+  g.lineWidth = R * 0.07;
+  g.strokeStyle = "rgba(255,236,200,0.32)";
+  g.beginPath();
+  g.arc(cx, cy, R * 0.95, P * 0.85, P * 1.7);
+  g.stroke();
+  g.strokeStyle = "rgba(0,0,0,0.36)";
+  g.beginPath();
+  g.arc(cx, cy, R * 0.95, P * 1.7, P * 2.85);
+  g.stroke();
+  // WELL (recessed hondo) — darker dish with a deep radial so it reads as a bowl that holds food
+  const wg = g.createRadialGradient(cx - wr * 0.28, cy - wr * 0.32, wr * 0.12, cx, cy, wr);
+  wg.addColorStop(0, rgb(mixRgb(RGB_PLATE, [255, 235, 200], 0.05)));
+  wg.addColorStop(0.68, rgb(RGB_PLATE));
+  wg.addColorStop(1, rgb(mixRgb(RGB_PLATE, RGB_PLATE_LO, 0.9)));
+  g.fillStyle = wg;
+  g.beginPath();
+  g.arc(cx, cy, wr, 0, TAU);
+  g.fill();
+  // DEEP inner shadow where the rim steps down into the well (all around, stronger up-left near wall)
+  g.lineWidth = R * 0.1;
+  g.strokeStyle = "rgba(0,0,0,0.26)";
+  g.beginPath();
+  g.arc(cx, cy, wr, 0, TAU);
+  g.stroke();
+  g.lineWidth = R * 0.06;
+  g.strokeStyle = "rgba(0,0,0,0.36)";
+  g.beginPath();
+  g.arc(cx, cy, wr, P * 0.75, P * 1.8);
+  g.stroke();
+  // lit far inner wall (the down-right side of the well catches the light)
+  g.lineWidth = R * 0.05;
+  g.strokeStyle = "rgba(255,236,200,0.16)";
+  g.beginPath();
+  g.arc(cx, cy, wr * 0.98, P * 1.8, P * 2.8);
+  g.stroke();
+  // glaze sheen on the rim (up-left)
+  g.lineWidth = R * 0.035;
+  g.strokeStyle = "rgba(255,248,230,0.5)";
+  g.beginPath();
+  g.arc(cx, cy, R * 0.9, P * 1.05, P * 1.5);
+  g.stroke();
+  // faint glazed floor highlight (the bottom of the well catches a little light)
+  const fl = g.createRadialGradient(cx - wr * 0.2, cy - wr * 0.24, 0, cx, cy, wr * 0.7);
+  fl.addColorStop(0, "rgba(255,240,210,0.07)");
+  fl.addColorStop(1, "rgba(255,240,210,0)");
+  g.fillStyle = fl;
+  g.beginPath();
+  g.arc(cx, cy, wr * 0.7, 0, TAU);
+  g.fill();
+  return c;
 }
 
 // A soft radial dot in `color`, fading to transparent — the shape all glow particles blit.
@@ -668,7 +746,7 @@ function bakeAtlas(): void {
       g.beginPath();
       g.ellipse(cx, cy + R * 0.16, R * 0.8, R * 0.92, 0, 0, TAU);
       g.clip();
-      g.strokeStyle = "rgba(120,140,40,0.7)";
+      g.strokeStyle = "rgba(150,104,26,0.7)"; // golden-brown crosshatch on the yellow body
       g.lineWidth = 1.3;
       for (let k = -3; k <= 3; k++) {
         g.beginPath();
@@ -796,21 +874,24 @@ export function draftLayout(
   hasReroll: boolean,
   insets: Insets,
 ): { cards: Rect[]; reroll: Rect | null } {
-  const padX = 20 + insets.left;
-  const padR = 20 + insets.right;
-  const gap = 12;
+  const padX = 18 + insets.left;
+  const padR = 18 + insets.right;
+  const gap = 10;
   const n = Math.max(1, count);
-  const areaTop = vh * 0.44;
-  const areaBottom = vh - insets.bottom - (hasReroll ? 78 : 22);
+  const areaTop = vh * 0.4;
+  const areaBottom = vh - insets.bottom - (hasReroll ? 72 : 20);
+  const avail = areaBottom - areaTop;
   const totalW = vw - padX - padR;
   const cw = (totalW - gap * (n - 1)) / n;
-  const ch = Math.max(96, areaBottom - areaTop);
+  // COMPACT cards (TFT-style) — capped tight to the content so they don't stretch with empty space.
+  const ch = Math.max(200, Math.min(avail, cw * 2.3, 288));
+  const y0 = areaTop + Math.max(0, (avail - ch) * 0.5); // centre vertically in the area
   const cards: Rect[] = [];
   for (let i = 0; i < n; i++) {
-    cards.push({ x: padX + i * (cw + gap), y: areaTop, w: cw, h: ch });
+    cards.push({ x: padX + i * (cw + gap), y: y0, w: cw, h: ch });
   }
   const reroll: Rect | null = hasReroll
-    ? { x: vw / 2 - 78, y: areaBottom + 14, w: 156, h: 50 }
+    ? { x: vw / 2 - 78, y: y0 + ch + 16, w: 156, h: 46 }
     : null;
   return { cards, reroll };
 }
@@ -920,43 +1001,79 @@ export function renderFrame(
     const phase = ((w.obsPhase[i] & 0xffff) / F) * TAU;
     const t = w.obsType[i];
     if (t === OBS.OIL) {
-      // OILY MIRROR: a deep dark pool that reads as danger by DARKNESS + shape (never by colour),
-      // with a MOVING elongated specular streak (the "espejo/aceitoso" material) that slowly drifts.
-      const orr = or * (1 + 0.06 * Math.sin(w.tick * 0.05 + i * 1.3));
+      // GREASE STAIN — an irregular oily splotch soaking into the pan, NOT a clean disc ("plate").
+      // The lobed outline is seeded by the obstacle index (stable shape); a feather makes it soak in;
+      // a drifting specular sells the oily material; satellite droplets read as splatter. Danger reads
+      // by DARKNESS + irregular SHAPE + a warm pulse that follows the blob (never a circle).
+      const orr = or * (1 + 0.03 * Math.sin(w.tick * 0.05 + i * 1.3));
+      const s1 = i * 1.7;
+      const s2 = i * 3.1 + 1.2;
+      const s3 = i * 0.9 + 2.4;
+      const blob = (rad: number): void => {
+        ctx.beginPath();
+        const N = 24;
+        for (let k = 0; k <= N; k++) {
+          const a = (k / N) * TAU;
+          const wob = rad * (1 + 0.22 * Math.sin(a * 3 + s1) + 0.12 * Math.sin(a * 5 + s2) + 0.06 * Math.sin(a * 7 + s3));
+          const px = ox + Math.cos(a) * wob;
+          const py = oy + Math.sin(a) * wob * 0.9; // slightly squashed puddle
+          if (k === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+      };
+      // soft feather (the stain soaking into the iron)
+      const fg = ctx.createRadialGradient(ox, oy, orr * 0.55, ox, oy, orr * 1.4);
+      fg.addColorStop(0, "rgba(9,5,3,0.55)");
+      fg.addColorStop(1, "rgba(9,5,3,0)");
+      ctx.fillStyle = fg;
+      blob(orr * 1.3);
+      ctx.fill();
+      // body (dark oily gradient, lit up-left)
       const og = ctx.createRadialGradient(ox - orr * 0.3, oy - orr * 0.34, orr * 0.1, ox, oy, orr);
       og.addColorStop(0, rgb(RGB_OIL_RIM));
       og.addColorStop(0.5, rgb(RGB_OIL));
       og.addColorStop(1, "rgba(8,5,3,1)");
       ctx.fillStyle = og;
-      ctx.beginPath();
-      ctx.arc(ox, oy, orr, 0, TAU);
+      blob(orr);
       ctx.fill();
+      // drifting specular sheen (oily material) + satellite droplets (splatter)
       if (!reduce) {
         const dphase = w.tick * 0.03 + i * 2.1;
-        const sxo = ox + Math.cos(dphase) * orr * 0.26;
-        const syo = oy + Math.sin(dphase * 0.7) * orr * 0.16 - orr * 0.22;
+        const sxo = ox + Math.cos(dphase) * orr * 0.24;
+        const syo = oy + Math.sin(dphase * 0.7) * orr * 0.14 - orr * 0.2;
         ctx.save();
         ctx.translate(sxo, syo);
         ctx.rotate(-0.7);
-        const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, orr * 0.5);
-        sg.addColorStop(0, "rgba(255,222,150,0.5)");
+        const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, orr * 0.46);
+        sg.addColorStop(0, "rgba(255,222,150,0.45)");
         sg.addColorStop(1, "rgba(255,222,150,0)");
         ctx.fillStyle = sg;
         ctx.scale(1, 0.3);
         ctx.beginPath();
-        ctx.arc(0, 0, orr * 0.5, 0, TAU);
+        ctx.arc(0, 0, orr * 0.46, 0, TAU);
         ctx.fill();
         ctx.restore();
+        ctx.fillStyle = rgb(RGB_OIL);
+        for (let d = 0; d < 3; d++) {
+          const da = s1 + d * 2.3;
+          const dd = orr * (1.12 + 0.14 * d);
+          const dx = ox + Math.cos(da) * dd;
+          const dy = oy + Math.sin(da) * dd * 0.9;
+          const dr = orr * (0.09 + 0.05 * ((d + i) % 3));
+          ctx.beginPath();
+          ctx.arc(dx, dy, dr, 0, TAU);
+          ctx.fill();
+        }
       }
-      // warm rim on the up-left lip (light-based edge, not a flat contour)
-      const rimG = ctx.createLinearGradient(ox - orr, oy - orr, ox + orr * 0.2, oy + orr * 0.2);
-      rimG.addColorStop(0, "rgba(255,210,150,0.4)");
-      rimG.addColorStop(0.5, "rgba(255,210,150,0)");
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = rimG;
-      ctx.beginPath();
-      ctx.arc(ox, oy, orr, 0, TAU);
-      ctx.stroke();
+      // danger pulse that FOLLOWS the stain (readability channel; never a clean circle)
+      if (lethal) {
+        const pulse = 0.5 + 0.5 * Math.sin(w.tick * 0.2 + i);
+        ctx.lineWidth = 2.2;
+        ctx.strokeStyle = `rgba(255,150,90,${(0.2 + 0.28 * pulse).toFixed(3)})`;
+        blob(orr * 1.02);
+        ctx.stroke();
+      }
     } else if (t === OBS.WALL) {
       // a chunky iron lump: volume gradient (lit up-left) + warm rim, no flat outline.
       const wg = ctx.createRadialGradient(ox - or * 0.34, oy - or * 0.4, or * 0.1, ox, oy, or);
@@ -1031,8 +1148,9 @@ export function renderFrame(
       }
       ctx.restore();
     }
-    // LETHAL: non-hue channel (white pulse) so hazards stay readable under the warm wash.
-    if (lethal) {
+    // LETHAL: non-hue channel (white pulse) so hazards stay readable under the warm wash. OIL draws
+    // its own stain-following pulse above (a circle here would re-impose the "plate" disc look).
+    if (lethal && t !== OBS.OIL) {
       const pulse = 0.55 + 0.45 * Math.sin(w.tick * 0.2 + i);
       ctx.lineWidth = 2.5;
       ctx.strokeStyle = `rgba(255,255,255,${(0.35 + 0.4 * pulse).toFixed(3)})`;
@@ -1101,10 +1219,15 @@ export function renderFrame(
     const K = Math.min(12, n - 1);
     const pe = Math.max(1, n - K);
 
+    // Node LOD: a long snake gets stroked 5-7× per frame — cap the path point count with a stride so
+    // a 400-node snake costs ~the same as a 180-node one (the curve stays smooth). No culling (a loop
+    // can re-enter the view), so the strand is always continuous.
+    const stride = n > 190 ? Math.ceil(n / 180) : 1;
     const path = new Path2D();
     path.moveTo(sx[0], sy[0]);
-    for (let i = 1; i < pe; i++) {
-      path.quadraticCurveTo(sx[i], sy[i], (sx[i] + sx[i + 1]) * 0.5, (sy[i] + sy[i + 1]) * 0.5);
+    for (let i = stride; i < pe; i += stride) {
+      const nx = i + stride < pe ? i + stride : pe;
+      path.quadraticCurveTo(sx[i], sy[i], (sx[i] + sx[nx]) * 0.5, (sy[i] + sy[nx]) * 0.5);
     }
     path.lineTo(sx[pe], sy[pe]);
 
@@ -1155,7 +1278,7 @@ export function renderFrame(
     if (!reduce && cam.scale > 0.45) {
       ctx.strokeStyle = rgba(RGB_HEBRA_STROKE, 0.26);
       ctx.lineWidth = Math.max(1, D * 0.06);
-      const seg = 3;
+      const seg = Math.max(3, stride * 2); // thin the ticks out on a long (strided) snake
       const th = D * 0.44;
       for (let i = seg; i < pe; i += seg) {
         const tx = sx[i + 1] - sx[i - 1];
@@ -1742,7 +1865,7 @@ function drawPlates(
   reduce: boolean,
 ): void {
   updatePlates(w);
-  const bevel = 1 - Math.min(1, enredoFlash * 1.4); // loop-close → bevel collapses to flat
+  if (!PLATE_SPRITE) return;
   for (let p = 0; p < _plates.length; p++) {
     const pl = _plates[p];
     if (pl.life <= 0.001) continue;
@@ -1752,60 +1875,17 @@ function drawPlates(
     if (rp < 7) continue;
     const breathe = reduce ? 1 : 1 + 0.009 * Math.sin(w.tick * 0.03 + pl.phase);
     const rr = rp * breathe;
-    const wr = rr * 0.8; // the WELL (hondo)
     ctx.save();
     ctx.globalAlpha = pl.life;
-    // 1. contact shadow (down-right, soft) — lifts the plate off the pan
+    // 1. contact shadow (down-right, soft) — lifts the dish off the pan
     ctx.fillStyle = rgba(RGB_PLATE_LO, 0.5);
     ctx.beginPath();
-    ctx.ellipse(cxp + rr * 0.05 + 2, cyp + rr * 0.08 + 4, rr * 1.05, rr * 0.98, 0, 0, TAU);
+    ctx.ellipse(cxp + rr * 0.05 + 2, cyp + rr * 0.09 + 4, rr * 1.06, rr * 0.98, 0, 0, TAU);
     ctx.fill();
-    // 2. RIM disc (the raised ala), lit up-left
-    const rg = ctx.createRadialGradient(cxp - rr * 0.34, cyp - rr * 0.4, rr * 0.2, cxp, cyp, rr);
-    rg.addColorStop(0, rgb(mixRgb(RGB_PLATE_RIM, [255, 240, 210], 0.16)));
-    rg.addColorStop(0.7, rgb(RGB_PLATE_RIM));
-    rg.addColorStop(1, rgb(mixRgb(RGB_PLATE_RIM, RGB_PLATE_LO, 0.5)));
-    ctx.fillStyle = rg;
-    ctx.beginPath();
-    ctx.arc(cxp, cyp, rr, 0, TAU);
-    ctx.fill();
-    // 3. rim BEVEL: up-left lit arc + down-right shadow arc (the relief)
-    ctx.lineWidth = Math.max(2, rr * 0.08);
-    ctx.strokeStyle = `rgba(255,236,200,${(0.3 * bevel).toFixed(3)})`;
-    ctx.beginPath();
-    ctx.arc(cxp, cyp, rr * 0.95, Math.PI * 0.85, Math.PI * 1.7);
-    ctx.stroke();
-    ctx.strokeStyle = `rgba(0,0,0,${(0.34 * bevel).toFixed(3)})`;
-    ctx.beginPath();
-    ctx.arc(cxp, cyp, rr * 0.95, Math.PI * 1.7, Math.PI * 2.85);
-    ctx.stroke();
-    // 4. WELL (recessed hondo): darker dish + an inner shadow where the rim steps down
-    const wg = ctx.createRadialGradient(cxp - wr * 0.3, cyp - wr * 0.34, wr * 0.2, cxp, cyp, wr);
-    wg.addColorStop(0, rgb(RGB_PLATE));
-    wg.addColorStop(1, rgb(mixRgb(RGB_PLATE, RGB_PLATE_LO, 0.7)));
-    ctx.fillStyle = wg;
-    ctx.beginPath();
-    ctx.arc(cxp, cyp, wr, 0, TAU);
-    ctx.fill();
-    // the rim casts a shadow onto the NEAR (up-left) inner wall; the FAR (down-right) wall is lit
-    ctx.lineWidth = Math.max(1.5, rr * 0.06);
-    ctx.strokeStyle = `rgba(0,0,0,${(0.32 * bevel).toFixed(3)})`;
-    ctx.beginPath();
-    ctx.arc(cxp, cyp, wr, Math.PI * 0.8, Math.PI * 1.75);
-    ctx.stroke();
-    ctx.strokeStyle = `rgba(255,236,200,${(0.12 * bevel).toFixed(3)})`;
-    ctx.beginPath();
-    ctx.arc(cxp, cyp, wr, Math.PI * 1.75, Math.PI * 2.8);
-    ctx.stroke();
-    // 5. glaze sheen on the rim (up-left)
-    if (!reduce) {
-      ctx.lineWidth = Math.max(1, rr * 0.04);
-      ctx.strokeStyle = `rgba(255,248,230,${(0.5 * bevel).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(cxp, cyp, rr * 0.9, Math.PI * 1.05, Math.PI * 1.5);
-      ctx.stroke();
-    }
-    // 6. amber "food remaining" ring on the rim — dims as the pocket empties (NOT the size)
+    // 2. the baked ceramic DISH (rim + deep well) — a single blit, zero per-frame gradient churn
+    const dsize = (rr / PLATE_R) * PLATE_PX;
+    ctx.drawImage(PLATE_SPRITE as CanvasImageSource, cxp - dsize / 2, cyp - dsize / 2, dsize, dsize);
+    // 3. amber "food remaining" ring on the rim — dims as the pocket empties (NOT the size)
     const full = pl.fullFood > 0 ? Math.min(1, pl.food / pl.fullFood) : 0;
     if (full > 0.01) {
       ctx.lineWidth = Math.max(1.5, rr * 0.05);
@@ -1814,9 +1894,9 @@ function drawPlates(
       ctx.arc(cxp, cyp, rr * 0.99, 0, TAU);
       ctx.stroke();
     }
-    // 7. loop-close gold flash
+    // 4. loop-close gold flash (celebration)
     if (enredoFlash > 0.01) {
-      ctx.fillStyle = rgba([255, 210, 84], 0.2 * enredoFlash);
+      ctx.fillStyle = rgba([255, 210, 84], 0.22 * enredoFlash);
       ctx.beginPath();
       ctx.arc(cxp, cyp, rr, 0, TAU);
       ctx.fill();
@@ -2231,86 +2311,121 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
     const tc = tipoColor(card.tipo);
     const glow = card.tipo === "ING" ? GLOW_GREEN : card.tipo === "MAL" ? GLOW_RED : GLOW_WARM;
     const cx = r.x + r.w / 2;
+    const ft = 3.5; // rarity-frame thickness
+    const rad = 15;
 
-    if (!fs.reduceEffects) stamp(ctx, glow, cx, r.y + r.h * 0.32, r.w * 0.85, 0.16);
+    if (!fs.reduceEffects) stamp(ctx, glow, cx, r.y + r.h * 0.3, r.w * 0.9, 0.15);
 
-    // card body (warm dark) + rarity border
-    ctx.fillStyle = "rgba(40,29,21,0.98)";
-    roundRect(ctx, r.x, r.y, r.w, r.h, 16);
+    // drop shadow
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    roundRect(ctx, r.x + 2, r.y + 5, r.w, r.h, rad);
     ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = rgb(tc);
-    roundRect(ctx, r.x, r.y, r.w, r.h, 16);
-    ctx.stroke();
-    // top accent bar
-    ctx.fillStyle = rgb(tc);
-    roundRect(ctx, r.x + 10, r.y + 12, r.w - 20, 5, 2.5);
+    // RARITY FRAME (metallic gradient) — the "marco bonito"
+    const fg = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+    fg.addColorStop(0, rgb(mixRgb(tc, [255, 255, 255], 0.5)));
+    fg.addColorStop(0.5, rgb(tc));
+    fg.addColorStop(1, rgb(mixRgb(tc, RGB_ESPRESSO, 0.4)));
+    ctx.fillStyle = fg;
+    roundRect(ctx, r.x, r.y, r.w, r.h, rad);
     ctx.fill();
-
-    // emblem: a coloured disc with the card's ICON (an emoji reads instantly; the old letter was
-    // the #1 draft prototype tell). The disc is lit like a rounded gem.
-    const ey = r.y + 58;
-    if (!fs.reduceEffects) stamp(ctx, glow, cx, ey, 34, 0.5);
-    const eg = ctx.createRadialGradient(cx - 8, ey - 9, 4, cx, ey, 24);
-    eg.addColorStop(0, rgb(mixRgb(tc, [255, 255, 255], 0.35)));
-    eg.addColorStop(0.7, rgb(tc));
-    eg.addColorStop(1, rgb(mixRgb(tc, RGB_ESPRESSO, 0.5)));
-    ctx.fillStyle = eg;
-    ctx.beginPath();
-    ctx.arc(cx, ey, 24, 0, TAU);
+    // inner PANEL (warm dark, lighter at top)
+    const pg = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+    pg.addColorStop(0, "rgb(52,38,29)");
+    pg.addColorStop(1, "rgb(27,19,13)");
+    ctx.fillStyle = pg;
+    roundRect(ctx, r.x + ft, r.y + ft, r.w - 2 * ft, r.h - 2 * ft, rad - 3);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,236,190,0.6)";
+    // top sheen inside the panel
+    ctx.fillStyle = "rgba(255,240,210,0.05)";
+    roundRect(ctx, r.x + ft, r.y + ft, r.w - 2 * ft, r.h * 0.4, rad - 3);
+    ctx.fill();
+    // corner accents (rarity ticks) — top corners
+    ctx.strokeStyle = rgba(mixRgb(tc, [255, 255, 255], 0.3), 0.9);
     ctx.lineWidth = 2;
+    const cc = 11;
     ctx.beginPath();
-    ctx.arc(cx, ey, 23, Math.PI * 0.9, Math.PI * 1.7);
+    ctx.moveTo(r.x + ft + 4, r.y + ft + 4 + cc);
+    ctx.lineTo(r.x + ft + 4, r.y + ft + 4);
+    ctx.lineTo(r.x + ft + 4 + cc, r.y + ft + 4);
     ctx.stroke();
-    ctx.font = "26px system-ui, sans-serif";
-    ctx.textBaseline = "middle";
-    ctx.fillText(CARD_ICON[id] ?? "🍥", cx, ey + 1);
-    ctx.textBaseline = "alphabetic";
+    ctx.beginPath();
+    ctx.moveTo(r.x + r.w - ft - 4, r.y + ft + 4 + cc);
+    ctx.lineTo(r.x + r.w - ft - 4, r.y + ft + 4);
+    ctx.lineTo(r.x + r.w - ft - 4 - cc, r.y + ft + 4);
+    ctx.stroke();
 
-    // tipo label
-    ctx.fillStyle = rgb(tc);
-    ctx.font = fontB(10, 700);
+    // TOP BANNER — the tipo (RECETA / INGREDIENTE / PICANTE)
+    ctx.fillStyle = rgba(tc, 0.16);
+    roundRect(ctx, r.x + ft + 6, r.y + ft + 5, r.w - 2 * (ft + 6), 19, 6);
+    ctx.fill();
+    ctx.fillStyle = rgb(mixRgb(tc, [255, 255, 255], 0.25));
+    ctx.font = fontB(9.5, 800);
+    ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(TIPO_LABEL[card.tipo] ?? card.tipo, cx, r.y + 92);
+    ctx.fillText(TIPO_LABEL[card.tipo] ?? card.tipo, cx, r.y + ft + 15);
 
-    // name
+    // MEDALLION — the icon in a lit gem (framed)
+    const medR = Math.min(r.w * 0.25, 28);
+    const my = r.y + 36 + medR;
+    if (!fs.reduceEffects) stamp(ctx, glow, cx, my, medR + 12, 0.45);
+    ctx.fillStyle = rgb(mixRgb(tc, RGB_ESPRESSO, 0.35)); // outer ring
+    ctx.beginPath();
+    ctx.arc(cx, my, medR + 3, 0, TAU);
+    ctx.fill();
+    const gg = ctx.createRadialGradient(cx - medR * 0.34, my - medR * 0.4, medR * 0.14, cx, my, medR);
+    gg.addColorStop(0, rgb(mixRgb(tc, [255, 255, 255], 0.42)));
+    gg.addColorStop(0.7, rgb(tc));
+    gg.addColorStop(1, rgb(mixRgb(tc, RGB_ESPRESSO, 0.5)));
+    ctx.fillStyle = gg;
+    ctx.beginPath();
+    ctx.arc(cx, my, medR, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,240,205,0.7)"; // up-left rim
+    ctx.lineWidth = Math.max(1.5, medR * 0.1);
+    ctx.beginPath();
+    ctx.arc(cx, my, medR * 0.94, Math.PI * 0.9, Math.PI * 1.7);
+    ctx.stroke();
+    ctx.font = `${Math.round(medR * 1.15)}px system-ui, sans-serif`;
+    ctx.fillText(CARD_ICON[id] ?? "🍥", cx, my + 1);
+
+    // NAME
+    const nameSize = Math.min(17, Math.max(13, r.w * 0.145));
     ctx.fillStyle = rgb(RGB_CREMA);
-    ctx.font = fontD(18, 800);
-    const nameLines = wrapText(ctx, card.nombre, r.w - 22);
-    let ty = r.y + 116;
+    ctx.font = fontD(nameSize, 800);
+    const nameLines = wrapText(ctx, card.nombre, r.w - 18).slice(0, 2);
+    let ty = my + medR + 16;
     for (const ln of nameLines) {
       ctx.fillText(ln, cx, ty);
-      ty += 20;
+      ty += nameSize + 3;
     }
 
-    // divider
-    ty += 6;
-    ctx.strokeStyle = rgba(RGB_CREMA, 0.14);
-    ctx.lineWidth = 1;
+    // rarity DIVIDER
+    ty += 2;
+    ctx.strokeStyle = rgba(tc, 0.5);
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(r.x + 14, ty);
-    ctx.lineTo(r.x + r.w - 14, ty);
+    ctx.moveTo(r.x + 15, ty);
+    ctx.lineTo(r.x + r.w - 15, ty);
     ctx.stroke();
-    ty += 14;
+    ty += 13;
 
-    // buff / debuff, left-aligned with a coloured bullet
+    // EFFECTS — compact + / − lines
     const eff = splitEffect(card.texto);
     ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
     const line = (mark: string, col: readonly [number, number, number], text: string): void => {
       ctx.fillStyle = rgb(col);
-      ctx.font = fontB(14, 800);
-      ctx.fillText(mark, r.x + 14, ty);
-      ctx.fillStyle = rgba(RGB_CREMA, 0.9);
-      ctx.font = fontB(13, 500);
-      const lines = wrapText(ctx, text, r.w - 44);
+      ctx.font = fontB(13, 800);
+      ctx.fillText(mark, r.x + 12, ty);
+      ctx.fillStyle = rgba(RGB_CREMA, 0.88);
+      ctx.font = fontB(12, 500);
+      const lines = wrapText(ctx, text, r.w - 40);
       for (const ln of lines) {
-        if (ty > r.y + r.h - 16) break;
-        ctx.fillText(ln, r.x + 32, ty);
-        ty += 17;
+        if (ty > r.y + r.h - 13) break;
+        ctx.fillText(ln, r.x + 27, ty);
+        ty += 16;
       }
-      ty += 6;
+      ty += 5;
     };
     line("＋", RGB_VERDE, eff.buff);
     if (eff.debuff) line("－", RGB_ROJO, eff.debuff);
