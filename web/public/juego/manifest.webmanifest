@@ -1,0 +1,20 @@
+{
+  "id": "/juego",
+  "name": "EL ENREDO",
+  "short_name": "EL ENREDO",
+  "description": "Un juego de cocina.",
+  "start_url": "/juego",
+  "scope": "/juego",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1E1611",
+  "theme_color": "#1E1611",
+  "icons": [
+    {
+      "src": "/juego/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
