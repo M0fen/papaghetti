@@ -19,7 +19,6 @@
 import {
   SPACING,
   EAT_RADIUS,
-  HEAD_HITBOX,
   FORK_CAPTURE_RADIUS,
   COSECHA_MAX,
   ALMIDON_MAX,
@@ -51,7 +50,6 @@ import {
   RGB_PAPA_FRANCESA,
   RGB_PAPA_CRIOLLA,
   RGB_OIL,
-  RGB_OIL_RIM,
   RGB_WALL,
   RGB_FORK,
   TOPPING_STYLES,
@@ -1001,77 +999,97 @@ export function renderFrame(
     const phase = ((w.obsPhase[i] & 0xffff) / F) * TAU;
     const t = w.obsType[i];
     if (t === OBS.OIL) {
-      // GREASE STAIN — an irregular oily splotch soaking into the pan, NOT a clean disc ("plate").
-      // The lobed outline is seeded by the obstacle index (stable shape); a feather makes it soak in;
-      // a drifting specular sells the oily material; satellite droplets read as splatter. Danger reads
-      // by DARKNESS + irregular SHAPE + a warm pulse that follows the blob (never a circle).
+      // GREASE PUDDLE — a FLAT, WET oily stain soaking into the pan. It must read as LIQUID, not a
+      // lit 3D lump (form-light = rock): the body is flat + dark, and the "oil" comes entirely from
+      // GLOSSY REFLECTIONS on the surface (a drifting sheen + sharp glints + wet droplets), clipped
+      // to the puddle. Smooth lobed outline (a spread puddle, not a lumpy rock), seeded by the index.
       const orr = or * (1 + 0.03 * Math.sin(w.tick * 0.05 + i * 1.3));
       const s1 = i * 1.7;
       const s2 = i * 3.1 + 1.2;
-      const s3 = i * 0.9 + 2.4;
-      const blob = (rad: number): void => {
+      const blob = (rad: number, sq: number): void => {
         ctx.beginPath();
-        const N = 24;
+        const N = 26;
         for (let k = 0; k <= N; k++) {
           const a = (k / N) * TAU;
-          const wob = rad * (1 + 0.22 * Math.sin(a * 3 + s1) + 0.12 * Math.sin(a * 5 + s2) + 0.06 * Math.sin(a * 7 + s3));
+          const wob = rad * (1 + 0.16 * Math.sin(a * 2 + s1) + 0.08 * Math.sin(a * 3 + s2)); // gentle, smooth
           const px = ox + Math.cos(a) * wob;
-          const py = oy + Math.sin(a) * wob * 0.9; // slightly squashed puddle
+          const py = oy + Math.sin(a) * wob * sq;
           if (k === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         }
         ctx.closePath();
       };
-      // soft feather (the stain soaking into the iron)
-      const fg = ctx.createRadialGradient(ox, oy, orr * 0.55, ox, oy, orr * 1.4);
-      fg.addColorStop(0, "rgba(9,5,3,0.55)");
-      fg.addColorStop(1, "rgba(9,5,3,0)");
+      // soft feather edge (the stain soaking into the iron)
+      const fg = ctx.createRadialGradient(ox, oy, orr * 0.5, ox, oy, orr * 1.45);
+      fg.addColorStop(0, "rgba(8,5,3,0.5)");
+      fg.addColorStop(1, "rgba(8,5,3,0)");
       ctx.fillStyle = fg;
-      blob(orr * 1.3);
+      blob(orr * 1.32, 0.8);
       ctx.fill();
-      // body (dark oily gradient, lit up-left)
-      const og = ctx.createRadialGradient(ox - orr * 0.3, oy - orr * 0.34, orr * 0.1, ox, oy, orr);
-      og.addColorStop(0, rgb(RGB_OIL_RIM));
-      og.addColorStop(0.5, rgb(RGB_OIL));
-      og.addColorStop(1, "rgba(8,5,3,1)");
+      // FLAT dark body — darkest at the CENTRE (deep pool), thin translucent rim. NO up-left light.
+      const og = ctx.createRadialGradient(ox, oy, 0, ox, oy, orr);
+      og.addColorStop(0, "rgba(10,7,4,1)");
+      og.addColorStop(0.75, rgb(RGB_OIL));
+      og.addColorStop(1, "rgba(18,12,8,0.9)");
       ctx.fillStyle = og;
-      blob(orr);
+      blob(orr, 0.82);
       ctx.fill();
-      // drifting specular sheen (oily material) + satellite droplets (splatter)
       if (!reduce) {
+        // reflections live ON the liquid → clip to the puddle
+        ctx.save();
+        blob(orr, 0.82);
+        ctx.clip();
+        // big drifting SHEEN (the kitchen light reflected on the wet surface)
         const dphase = w.tick * 0.03 + i * 2.1;
-        const sxo = ox + Math.cos(dphase) * orr * 0.24;
-        const syo = oy + Math.sin(dphase * 0.7) * orr * 0.14 - orr * 0.2;
+        const sxo = ox + Math.cos(dphase) * orr * 0.28;
+        const syo = oy - orr * 0.26 + Math.sin(dphase * 0.7) * orr * 0.12;
         ctx.save();
         ctx.translate(sxo, syo);
-        ctx.rotate(-0.7);
-        const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, orr * 0.46);
-        sg.addColorStop(0, "rgba(255,222,150,0.45)");
-        sg.addColorStop(1, "rgba(255,222,150,0)");
+        ctx.rotate(-0.6);
+        const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, orr * 0.55);
+        sg.addColorStop(0, "rgba(255,226,160,0.55)");
+        sg.addColorStop(1, "rgba(255,226,160,0)");
         ctx.fillStyle = sg;
-        ctx.scale(1, 0.3);
+        ctx.scale(1, 0.26);
         ctx.beginPath();
-        ctx.arc(0, 0, orr * 0.46, 0, TAU);
+        ctx.arc(0, 0, orr * 0.55, 0, TAU);
         ctx.fill();
         ctx.restore();
-        ctx.fillStyle = rgb(RGB_OIL);
+        // sharp WET glints — small hard highlights, the unmistakable tell of a liquid
+        ctx.fillStyle = "rgba(255,240,195,0.85)";
+        for (let d = 0; d < 3; d++) {
+          const ga = s1 * 1.3 + d * 2.2;
+          const gd = orr * (0.28 + 0.2 * d);
+          const gx = ox + Math.cos(ga) * gd;
+          const gy = oy + Math.sin(ga) * gd * 0.7 - orr * 0.08;
+          ctx.beginPath();
+          ctx.arc(gx, gy, orr * (0.05 + 0.02 * (d % 2)), 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore(); // end clip
+        // satellite droplets (splatter) — dark wet beads with a tiny glint
         for (let d = 0; d < 3; d++) {
           const da = s1 + d * 2.3;
-          const dd = orr * (1.12 + 0.14 * d);
+          const dd = orr * (1.1 + 0.14 * d);
           const dx = ox + Math.cos(da) * dd;
-          const dy = oy + Math.sin(da) * dd * 0.9;
-          const dr = orr * (0.09 + 0.05 * ((d + i) % 3));
+          const dy = oy + Math.sin(da) * dd * 0.8;
+          const dr = orr * (0.08 + 0.04 * ((d + i) % 3));
+          ctx.fillStyle = "rgba(10,7,4,0.95)";
           ctx.beginPath();
           ctx.arc(dx, dy, dr, 0, TAU);
           ctx.fill();
+          ctx.fillStyle = "rgba(255,235,180,0.5)";
+          ctx.beginPath();
+          ctx.arc(dx - dr * 0.3, dy - dr * 0.3, dr * 0.35, 0, TAU);
+          ctx.fill();
         }
       }
-      // danger pulse that FOLLOWS the stain (readability channel; never a clean circle)
+      // danger pulse that FOLLOWS the stain (readability; never a clean circle)
       if (lethal) {
         const pulse = 0.5 + 0.5 * Math.sin(w.tick * 0.2 + i);
         ctx.lineWidth = 2.2;
-        ctx.strokeStyle = `rgba(255,150,90,${(0.2 + 0.28 * pulse).toFixed(3)})`;
-        blob(orr * 1.02);
+        ctx.strokeStyle = `rgba(255,140,80,${(0.18 + 0.26 * pulse).toFixed(3)})`;
+        blob(orr * 1.02, 0.82);
         ctx.stroke();
       }
     } else if (t === OBS.WALL) {
@@ -1274,12 +1292,13 @@ export function renderFrame(
     ctx.strokeStyle = rgb(RGB_HEBRA_STROKE);
     ctx.stroke(path);
     ctx.restore();
-    // pass 2b: SEGMENT definition — faint cross-ticks so it reads as a spaghetti strand, not a hose
-    if (!reduce && cam.scale > 0.45) {
-      ctx.strokeStyle = rgba(RGB_HEBRA_STROKE, 0.26);
-      ctx.lineWidth = Math.max(1, D * 0.06);
-      const seg = Math.max(3, stride * 2); // thin the ticks out on a long (strided) snake
-      const th = D * 0.44;
+    // pass 2b: VERY faint surface variation (NOT worm-like segment rings — those read as a caterpillar,
+    // not spaghetti). Kept low-alpha and short so the tube stays a smooth glossy strand.
+    if (!reduce && cam.scale > 0.5) {
+      ctx.strokeStyle = rgba(RGB_HEBRA_STROKE, 0.1);
+      ctx.lineWidth = Math.max(1, D * 0.05);
+      const seg = Math.max(4, stride * 3); // sparse
+      const th = D * 0.3; // short — doesn't span the strand (no segment ring)
       for (let i = seg; i < pe; i += seg) {
         const tx = sx[i + 1] - sx[i - 1];
         const ty = sy[i + 1] - sy[i - 1];
@@ -1299,12 +1318,20 @@ export function renderFrame(
     ctx.strokeStyle = rgb(ridge);
     ctx.stroke(path);
     ctx.restore();
-    // pass 4: thin SPECULAR filo, offset up-left the most
+    // pass 4: SPECULAR filo (up-left) — a sharp, bright wet-pasta highlight (the "acabado")
     ctx.save();
     ctx.translate(-0.24 * D, -0.26 * D);
-    ctx.globalAlpha = 0.85;
-    ctx.lineWidth = D * 0.2;
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = D * 0.16;
     ctx.strokeStyle = rgb(shine);
+    ctx.stroke(path);
+    ctx.restore();
+    // pass 4b: a THIN near-white gloss core, offset furthest — the glossy sauced finish
+    ctx.save();
+    ctx.translate(-0.28 * D, -0.3 * D);
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = Math.max(1, D * 0.07);
+    ctx.strokeStyle = "rgba(255,252,242,1)";
     ctx.stroke(path);
     ctx.restore();
     ctx.globalAlpha = 1;
@@ -1575,7 +1602,13 @@ export function renderFrame(
 function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy: number): void {
   const w = fs.world;
   const reduce = fs.reduceEffects;
-  const headR = Math.max(3, (HEAD_HITBOX / F) * fs.cam.scale * 2.1);
+  // The head must read as the rounded TIP of the SPAGHETTI STRAND, not a bulbous worm head. Size it
+  // off the NOODLE WIDTH (same body-diameter formula the noodle pass uses) so it's barely wider than
+  // the strand, and shape it as an ELONGATED tip along the heading with SMALL eyes near the point.
+  const hitboxMul = w.mods.hitboxRadiusMul / F;
+  const baseW = (SPACING / F) * fs.cam.scale * 1.7;
+  const D = Math.max(3, Math.min(48, baseW * (0.9 + 0.45 * hitboxMul)));
+  const headR = Math.max(3, D * 0.58);
   const hrad = (w.heading / F) * TAU;
   const st = fs.headStretch;
   const fwdx = Math.cos(hrad);
@@ -1583,59 +1616,58 @@ function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy:
   const perpx = -fwdy;
   const perpy = fwdx;
 
-  if (!reduce) stamp(ctx, GLOW_WARM, hx, hy, headR * 2.2, 0.3);
+  if (!reduce) stamp(ctx, GLOW_WARM, hx, hy, headR * 2.0, 0.26);
 
-  // The head is the noodle TIP: a bright, sauce-glossy pasta knob lit by the SAME up-left light as
-  // everything else. The squash-stretch tilts along the heading (ellipse rotation), but the LIGHTING
-  // is screen-fixed (gradients in screen space) so the lit side never spins with the turn.
+  // colour matches the strand (heat/boost/smoke tints), a touch brighter (a fresh sauced tip)
   let mid = mixRgb(RGB_HEBRA, heatColor(fs.heat01), 0.22 * fs.heat01);
-  mid = mixRgb(mid, [255, 240, 190], 0.34); // a touch brighter than the body
+  mid = mixRgb(mid, [255, 240, 190], 0.3);
   if (w.mods.infiniteBoost) mid = mixRgb(mid, [255, 224, 130], 0.4);
   if (w.mods.smokeTrailEnabled) mid = mixRgb(mid, [150, 150, 150], 0.28);
   const light = mixRgb(mid, [255, 250, 215], 0.6);
-  const rx = headR * 1.12 * st; // along heading
-  const ry = headR / st; // across
+  // ELONGATED along the heading, ≈ the strand width across → the end of a noodle, not a round head.
+  const rx = headR * 1.4 * st;
+  const ry = (headR * 0.9) / st;
   const headPath = (): void => {
     ctx.beginPath();
     ctx.ellipse(hx, hy, rx, ry, hrad, 0, TAU);
   };
 
-  // AO under the head (down-right) — floats above the pan like the food
+  // AO under the tip
   if (!reduce) {
-    ctx.fillStyle = "rgba(0,0,0,0.26)";
+    ctx.fillStyle = "rgba(0,0,0,0.24)";
     ctx.beginPath();
-    ctx.ellipse(hx + headR * 0.16, hy + headR * 0.52, headR * 1.02, headR * 0.5, 0, 0, TAU);
+    ctx.ellipse(hx + headR * 0.14, hy + headR * 0.5, headR * 1.0, headR * 0.46, 0, 0, TAU);
     ctx.fill();
   }
-  // FORM: volume gradient, light core up-left
-  const vg = ctx.createRadialGradient(hx - headR * 0.4, hy - headR * 0.46, headR * 0.12, hx, hy, headR * 1.22);
+  // FORM: screen-fixed up-left volume gradient (lighting never spins with the turn)
+  const vg = ctx.createRadialGradient(hx - headR * 0.38, hy - headR * 0.44, headR * 0.1, hx, hy, headR * 1.25);
   vg.addColorStop(0, rgb(light));
   vg.addColorStop(0.55, rgb(mid));
   vg.addColorStop(1, rgb(RGB_HEBRA_STROKE));
   headPath();
   ctx.fillStyle = vg;
   ctx.fill();
-  // SHADOW edge (down-right, own dark) — not a black outline
+  // shadow edge (down-right, own dark)
   const sg = ctx.createLinearGradient(hx + headR, hy + headR, hx - headR * 0.2, hy - headR * 0.2);
   sg.addColorStop(0, rgb(RGB_HEBRA_STROKE));
   sg.addColorStop(0.5, "rgba(0,0,0,0)");
   headPath();
-  ctx.lineWidth = Math.max(2, headR * 0.18);
+  ctx.lineWidth = Math.max(1.5, headR * 0.16);
   ctx.strokeStyle = sg;
   ctx.stroke();
-  // RIM light (up-left) — the light-based edge that replaces the old flat outline
+  // rim light (up-left)
   const rg = ctx.createLinearGradient(hx - headR, hy - headR, hx + headR * 0.2, hy + headR * 0.2);
-  rg.addColorStop(0, "rgba(255,236,190,0.95)");
+  rg.addColorStop(0, "rgba(255,236,190,0.9)");
   rg.addColorStop(0.5, "rgba(255,236,190,0)");
   headPath();
-  ctx.lineWidth = Math.max(1.4, headR * 0.13);
+  ctx.lineWidth = Math.max(1.2, headR * 0.12);
   ctx.strokeStyle = rg;
   ctx.stroke();
-  // glossy SPECULAR (sauce-coated), up-left
+  // sharp glossy specular (wet pasta)
   if (!reduce) {
-    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.beginPath();
-    ctx.ellipse(hx - headR * 0.34, hy - headR * 0.4, headR * 0.26, headR * 0.15, hrad, 0, TAU);
+    ctx.ellipse(hx - headR * 0.32, hy - headR * 0.36, headR * 0.2, headR * 0.11, hrad, 0, TAU);
     ctx.fill();
   }
   if (fs.flashHead > 0.05) {
@@ -1644,11 +1676,11 @@ function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy:
     ctx.fill();
   }
 
-  // mouth — forward-facing, opens when eating (screen space, orientation-correct)
-  const mx = hx + fwdx * headR * 0.58;
-  const my = hy + fwdy * headR * 0.58;
+  // mouth — small, forward, subtle
+  const mx = hx + fwdx * headR * 0.52;
+  const my = hy + fwdy * headR * 0.52;
   if (fs.mouthOpen > 0.05) {
-    const mr = headR * 0.3 * fs.mouthOpen + 2;
+    const mr = headR * 0.22 * fs.mouthOpen + 1.5;
     ctx.fillStyle = "#4A1010";
     ctx.beginPath();
     ctx.arc(mx, my, mr, 0, TAU);
@@ -1658,56 +1690,42 @@ function drawHead(ctx: CanvasRenderingContext2D, fs: FrameState, hx: number, hy:
     ctx.arc(mx + fwdx * mr * 0.3, my + fwdy * mr * 0.3, mr * 0.45, 0, TAU);
     ctx.fill();
   } else {
-    ctx.lineWidth = 2.4;
+    ctx.lineWidth = Math.max(1.3, headR * 0.1);
     ctx.lineCap = "round";
     ctx.strokeStyle = rgb(mixRgb(RGB_HEBRA_STROKE, RGB_ESPRESSO, 0.3));
     ctx.beginPath();
-    ctx.moveTo(mx - perpx * headR * 0.24, my - perpy * headR * 0.24);
+    ctx.moveTo(mx - perpx * headR * 0.16, my - perpy * headR * 0.16);
     ctx.quadraticCurveTo(
-      mx + fwdx * headR * 0.16,
-      my + fwdy * headR * 0.16,
-      mx + perpx * headR * 0.24,
-      my + perpy * headR * 0.24,
+      mx + fwdx * headR * 0.1,
+      my + fwdy * headR * 0.1,
+      mx + perpx * headR * 0.16,
+      my + perpy * headR * 0.16,
     );
     ctx.stroke();
   }
 
-  // BIG googly eyes — little spheres seated in sockets, looking toward gaze (the "alive" charm)
+  // SMALL eyes near the tip — subtle dot-eyes (keeps the charm without turning the noodle into a worm)
   const gaze = fs.gaze;
+  const er = headR * 0.3;
   for (const side of [-1, 1]) {
-    const ex = hx + fwdx * headR * 0.24 + perpx * side * headR * 0.46;
-    const ey = hy + fwdy * headR * 0.24 + perpy * side * headR * 0.46;
-    const er = headR * 0.5;
-    // socket shadow (down-right) so the eye sits in the face, not stuck on top
-    ctx.fillStyle = "rgba(58,32,16,0.32)";
+    const ex = hx + fwdx * headR * 0.34 + perpx * side * headR * 0.32;
+    const ey = hy + fwdy * headR * 0.34 + perpy * side * headR * 0.32;
+    // tiny socket shadow so the eye sits in the tip
+    ctx.fillStyle = "rgba(58,32,16,0.28)";
     ctx.beginPath();
-    ctx.ellipse(ex + er * 0.14, ey + er * 0.18, er * 1.04, er * 0.98, 0, 0, TAU);
+    ctx.ellipse(ex + er * 0.12, ey + er * 0.16, er * 1.02, er * 0.96, 0, 0, TAU);
     ctx.fill();
-    // white sphere + warm rim (up-left), no flat ring
     stamp(ctx, EYE_GRAD, ex, ey, er, 1);
-    const eg = ctx.createLinearGradient(ex - er, ey - er, ex + er * 0.2, ey + er * 0.2);
-    eg.addColorStop(0, "rgba(255,240,205,0.7)");
-    eg.addColorStop(0.5, "rgba(255,240,205,0)");
-    ctx.lineWidth = Math.max(1, er * 0.12);
-    ctx.strokeStyle = eg;
-    ctx.beginPath();
-    ctx.arc(ex, ey, er * 0.95, 0, TAU);
-    ctx.stroke();
-    // pupil toward gaze + a bold catchlight up-left and a faint secondary down-right
-    const pr = er * 0.56;
-    const px = ex + Math.cos(gaze) * er * 0.32;
-    const py = ey + Math.sin(gaze) * er * 0.32;
+    const pr = er * 0.62;
+    const px = ex + Math.cos(gaze) * er * 0.28;
+    const py = ey + Math.sin(gaze) * er * 0.28;
     ctx.fillStyle = rgb(RGB_ESPRESSO);
     ctx.beginPath();
     ctx.arc(px, py, pr, 0, TAU);
     ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.98)";
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
     ctx.beginPath();
-    ctx.arc(px - pr * 0.34, py - pr * 0.44, pr * 0.38, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.beginPath();
-    ctx.arc(px + pr * 0.32, py + pr * 0.34, pr * 0.16, 0, TAU);
+    ctx.arc(px - pr * 0.34, py - pr * 0.42, pr * 0.4, 0, TAU);
     ctx.fill();
   }
 }
