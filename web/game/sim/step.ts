@@ -37,8 +37,10 @@ import {
   ALMIDON_DRAIN,
   ALMIDON_GAIN,
   ALMIDON_MAX,
+  BANISH_COST,
   BASE_SPEED,
   BOOST_MULT,
+  LOCK_COST,
   BURN_LIFE_TICKS,
   CRUMB_CAP,
   START_NODES,
@@ -306,14 +308,18 @@ function initService(w: World): void {
   w.francesaNext = 0;
 
   const s = w.service;
-  if (s >= OIL_SERVICE) spawnObstacleSet(w, OBS.OIL, OIL_SPAWN_COUNT, OIL_START_RADIUS, true);
+  // Olla a Presión: extra grease puddles per service.
+  if (s >= OIL_SERVICE) {
+    spawnObstacleSet(w, OBS.OIL, OIL_SPAWN_COUNT + w.mods.oilExtraCount, OIL_START_RADIUS, true);
+  }
   if (s >= WALL_SERVICE) spawnObstacleSet(w, OBS.WALL, WALL_SPAWN_COUNT, WALL_RADIUS, false);
   if (s >= KNIFE_SERVICE) spawnObstacleSet(w, OBS.KNIFE, KNIFE_SPAWN_COUNT, KNIFE_RADIUS, false);
   if (s >= SAUCE_SERVICE) spawnObstacleSet(w, OBS.SAUCE, SAUCE_SPAWN_COUNT, SAUCE_RADIUS, false);
   if (s >= WHISK_SERVICE) spawnObstacleSet(w, OBS.WHISK, WHISK_SPAWN_COUNT, WHISK_RADIUS, false);
 
   // Fork boss appears on every FORK_SERVICE_MODULO-th service and on the final service.
-  if (s % FORK_SERVICE_MODULO === 0 || s === SERVICE_COUNT) {
+  // Duelo (pacto): the boss hunts EVERY service.
+  if (w.mods.forkAlways || s % FORK_SERVICE_MODULO === 0 || s === SERVICE_COUNT) {
     const f = w.fork;
     f.active = 1;
     f.state = FORK_STATE.ENTER;
@@ -390,10 +396,29 @@ export function step(w: World, input: Input): void {
     return;
   }
   if (w.phase === PHASE.DRAFT) {
-    if (input.reroll > 0 && w.rerollLeft > 0) {
+    // Draft economy (F1) — ONE action per tick, priority: banish > reroll > lock > pick.
+    // banish/lock SPEND the cosecha meter (which also sets the next draft's tier: real tradeoff).
+    if (
+      input.banishPick >= 0 &&
+      input.banishPick < w.offerCount &&
+      w.cosecha >= BANISH_COST
+    ) {
+      w.cosecha -= BANISH_COST;
+      w.banished[w.offerIds[input.banishPick]] = 1;
+      w.rerollUsed++; // folds into the draft seed → fresh deterministic offer
+      generateOffer(w);
+    } else if (input.reroll > 0 && w.rerollLeft > 0) {
       w.rerollUsed++;
       w.rerollLeft--;
       generateOffer(w);
+    } else if (
+      input.lockPick >= 0 &&
+      input.lockPick < w.offerCount &&
+      w.lockedCard < 0 &&
+      w.cosecha >= LOCK_COST
+    ) {
+      w.cosecha -= LOCK_COST;
+      w.lockedCard = w.offerIds[input.lockPick]; // guaranteed in slot 0 of the NEXT draft
     } else if (input.cardPick >= 0 && input.cardPick < w.offerCount) {
       pickCard(w, input.cardPick);
       advanceService(w);
@@ -439,6 +464,11 @@ export function step(w: World, input: Input): void {
     }
   }
 
+  // Sofrito's price: the global multiplier DECAYS — chain enredos or lose the snowball.
+  if (w.mods.multDecayPerTick > 0) {
+    w.globalMult = fmax(MULT_MIN, w.globalMult - w.mods.multDecayPerTick);
+  }
+
   // Pedido deadline: miss -> lose a multiplier step (never death), set cooldown.
   if (w.pedido.active !== 0 && w.tick >= w.pedido.expire) {
     w.globalMult = fmax(MULT_MIN, w.globalMult - MULT_DECAY);
@@ -477,7 +507,11 @@ export function step(w: World, input: Input): void {
   const hasFuel = w.almidon > 0 || w.mods.infiniteBoost;
   if (wantBoost && hasFuel) {
     speed = fmul(speed, BOOST_MULT);
-    if (!w.mods.infiniteBoost) w.almidon = fmax(0, w.almidon - ALMIDON_DRAIN);
+    if (!w.mods.infiniteBoost) {
+      w.almidon = fmax(0, w.almidon - fmul(ALMIDON_DRAIN, w.mods.boostDrainMul));
+    }
+    // Bechamel / Flambé Perpetuo: boosting IS a scoring engine.
+    if (w.mods.boostScorePerTick > 0) w.score += w.mods.boostScorePerTick;
   }
   if (w.mods.cannotBrake && speed < baseSpeed) speed = baseSpeed;
 
@@ -562,21 +596,47 @@ export function step(w: World, input: Input): void {
       }
       if (dist2(hx, hy, w.topX[i], w.topY[i]) < eatR2) {
         const kind = w.topKind[i];
-        // Score: base * toppingScore * (pineapple) * globalMult * globalScore.
+        const tx = w.topX[i];
+        const ty = w.topY[i];
+        // Score: base * toppingScore * (pineapple) * (length build) * globalMult * globalScore.
         let val = toFixed(TOP_BASE);
         val = fmul(val, w.mods.toppingScoreMul);
         if (kind === TOPPING.PINA && w.mods.pineappleEnabled) {
           val = fmul(val, w.mods.pineappleValueMul);
           w.almidon = fmin(ALMIDON_MAX, w.almidon + PINA_ALMIDON_BONUS);
         }
+        // EL FIDEO INFINITO (C5): length itself multiplies the plate (+5%/25 nodes, capped).
+        if (w.mods.scorePerLenMul > 0) {
+          let steps = (w.bodyCount / 25) | 0;
+          if (steps > 20) steps = 20;
+          val = fmul(val, FP_ONE + w.mods.scorePerLenMul * steps);
+        }
         val = fmul(val, w.globalMult);
         val = fmul(val, w.mods.globalScoreMul);
         w.score += fromFixedToInt(val);
 
-        w.almidon = fmin(ALMIDON_MAX, w.almidon + ALMIDON_GAIN);
-        w.growPending += GROW_PER_TOP;
+        // Hambre de Papa flips the fuel source: toppings stop giving almidón.
+        if (w.mods.toppingsGiveAlmidon) {
+          w.almidon = fmin(ALMIDON_MAX, w.almidon + ALMIDON_GAIN);
+        }
+        w.growPending += GROW_PER_TOP + w.mods.growPerTopBonus;
         w.toppingsEaten++;
         advancePedido(w, kind);
+
+        // Hilo Dorado: every Nth topping drops a criolla WHERE IT DIED (no RNG — pure position).
+        if (
+          w.mods.papaOnEatEvery > 0 &&
+          w.toppingsEaten % w.mods.papaOnEatEvery === 0 &&
+          w.papaCount < MAX_PAPA
+        ) {
+          const pi = w.papaCount;
+          w.papaX[pi] = tx;
+          w.papaY[pi] = ty;
+          w.papaKind[pi] = PAPA.CRIOLLA;
+          w.papaSeq[pi] = -1;
+          w.papaExpire[pi] = w.tick + fromFixedToInt(fmul(toFixed(PAPA_LIFE_TICKS), w.mods.papaLifeMul));
+          w.papaCount = pi + 1;
+        }
 
         // Chicharrón cadence: every Nth topping explodes — clears nearby oil + bonus.
         if (
@@ -612,6 +672,13 @@ export function step(w: World, input: Input): void {
       if (dist2(hx, hy, w.papaX[i], w.papaY[i]) < eatR2) {
         if (w.papaKind[i] === PAPA.CRIOLLA) {
           w.cosecha = fmin(COSECHA_MAX, w.cosecha + fmul(COSECHA_UNIT, w.mods.cosechaGainMul));
+          // Hambre de Papa: la papa es el combustible del boost… y ORO (score × mult).
+          if (w.mods.papaAlmidonGain > 0) {
+            w.almidon = fmin(ALMIDON_MAX, w.almidon + w.mods.papaAlmidonGain);
+          }
+          if (w.mods.papaScoreBonus > 0) {
+            w.score += fromFixedToInt(fmul(toFixed(w.mods.papaScoreBonus), w.globalMult));
+          }
           swapRemovePapa(w, i);
           continue;
         }
@@ -628,6 +695,16 @@ export function step(w: World, input: Input): void {
         }
       }
       i++;
+    }
+
+    // COCINA INFERNAL (C2): riding a burn zone scores per tick — the burn field IS the build.
+    if (w.mods.burnScorePerTick > 0) {
+      for (let b = 0; b < w.burnCount; b++) {
+        if (dist2(hx, hy, w.burnX[b], w.burnY[b]) < radiusSq(w.burnR[b])) {
+          w.score += w.mods.burnScorePerTick;
+          break; // one zone per tick — overlapping zones don't multiply
+        }
+      }
     }
   }
 
@@ -726,8 +803,14 @@ export function step(w: World, input: Input): void {
     }
   }
 
-  // 9b. Papa (service-gated). Criolla from s3; francesa line from s5.
-  if (w.service >= PAPA_CRIOLLA_SERVICE && w.papaCount < MAX_PAPA && w.serviceTick % PAPA_CRIOLLA_EVERY === 0) {
+  // 9b. Papa (service-gated). Criolla from s3; francesa line from s5. Rate scales with
+  //     papaRateMul (Perejil / LA HUERTA): every = PAPA_CRIOLLA_EVERY / papaRateMul, floor 40.
+  let papaEvery = PAPA_CRIOLLA_EVERY;
+  if (w.mods.papaRateMul !== FP_ONE) {
+    papaEvery = fromFixedToInt(fdiv(toFixed(PAPA_CRIOLLA_EVERY), w.mods.papaRateMul));
+    if (papaEvery < 40) papaEvery = 40;
+  }
+  if (w.service >= PAPA_CRIOLLA_SERVICE && w.papaCount < MAX_PAPA && w.serviceTick % papaEvery === 0) {
     const life = fromFixedToInt(fmul(toFixed(PAPA_LIFE_TICKS), w.mods.papaLifeMul));
     const danger = w.mods.papaOnlyInDanger || w.service >= PAPA_DANGER_SERVICE;
     let px = 0;
@@ -809,11 +892,22 @@ export function step(w: World, input: Input): void {
   // ---- P10 Fork AI --------------------------------------------------------
   if (w.fork.active !== 0) {
     const f = w.fork;
+    // Duelo danger-pay: dancing NEAR the hunting boss trickles score (tension → reward).
+    if (
+      w.mods.forkNearScorePerTick > 0 &&
+      f.state === FORK_STATE.CHASE &&
+      dist2(w.bodyX[0], w.bodyY[0], f.x, f.y) < radiusSq(200 * FP_ONE)
+    ) {
+      w.score += w.mods.forkNearScorePerTick;
+    }
     if (f.state === FORK_STATE.BLOCKED) {
       if (f.blocked > 0) f.blocked--;
       if (f.blocked <= 0) f.state = FORK_STATE.CHASE;
     } else {
       let fspeed = FORK_SPEED;
+      // Duelo: the boss circles cautiously (a duel, not a hunt) — 85% speed. Gives the lasso
+      // counter-play real room, and the pact stays survivable with it active EVERY service.
+      if (w.mods.forkAlways) fspeed = fmul(fspeed, 55706); // ×0.85
       if (forkInSmoke(w)) fspeed = fmul(fspeed, w.mods.forkSmokeSlowMul);
       const hx = w.bodyX[0];
       const hy = w.bodyY[0];

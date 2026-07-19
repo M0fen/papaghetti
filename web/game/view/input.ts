@@ -49,9 +49,17 @@ export type SteerController = {
   setAngle(brads: number): void;
   setHeading(brads: number): void;
   setInsets(insets: Insets): void;
-  setDraft(active: boolean, cards: Rect[], reroll: Rect | null): void;
+  setDraft(
+    active: boolean,
+    cards: Rect[],
+    reroll: Rect | null,
+    locks?: Rect[],
+    banishes?: Rect[],
+  ): void;
   consumeDraftPick(): number;
   consumeReroll(): 0 | 1;
+  consumeLockPick(): number;
+  consumeBanishPick(): number;
   /** Current joystick geometry for the HUD ring (null when not steering by touch). */
   getSteer(): { ox: number; oy: number; x: number; y: number } | null;
   destroy(): void;
@@ -89,8 +97,12 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
   let draftActive = false;
   let draftCards: Rect[] = [];
   let draftReroll: Rect | null = null;
+  let draftLocks: Rect[] = [];
+  let draftBanishes: Rect[] = [];
   let pendingPick = -1;
   let pendingReroll: 0 | 1 = 0;
+  let pendingLock = -1;
+  let pendingBanish = -1;
   let curInsets: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
   const localXY = (e: PointerEvent | MouseEvent): [number, number] => {
@@ -197,9 +209,25 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
     }
     const p = pointers.get(e.pointerId);
     if (p && draftActive && p.moved <= TAP_SLOP_PX) {
-      if (draftReroll && pointInRect(p.x, p.y, draftReroll)) {
+      let hit = false;
+      // lock/banish buttons first (small targets; may sit inside the card footprint)
+      for (let i = 0; i < draftLocks.length && !hit; i++) {
+        if (pointInRect(p.x, p.y, draftLocks[i])) {
+          pendingLock = i;
+          hit = true;
+        }
+      }
+      for (let i = 0; i < draftBanishes.length && !hit; i++) {
+        if (pointInRect(p.x, p.y, draftBanishes[i])) {
+          pendingBanish = i;
+          hit = true;
+        }
+      }
+      if (!hit && draftReroll && pointInRect(p.x, p.y, draftReroll)) {
         pendingReroll = 1;
-      } else {
+        hit = true;
+      }
+      if (!hit) {
         for (let i = 0; i < draftCards.length; i++) {
           if (pointInRect(p.x, p.y, draftCards[i])) {
             pendingPick = i;
@@ -327,13 +355,23 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
     setInsets(insets: Insets): void {
       curInsets = insets;
     },
-    setDraft(active: boolean, cards: Rect[], reroll: Rect | null): void {
+    setDraft(
+      active: boolean,
+      cards: Rect[],
+      reroll: Rect | null,
+      locks?: Rect[],
+      banishes?: Rect[],
+    ): void {
       draftActive = active;
       draftCards = cards;
       draftReroll = reroll;
+      draftLocks = locks ?? [];
+      draftBanishes = banishes ?? [];
       if (!active) {
         pendingPick = -1;
         pendingReroll = 0;
+        pendingLock = -1;
+        pendingBanish = -1;
       }
     },
     consumeDraftPick(): number {
@@ -344,6 +382,16 @@ export function createSteer(canvas: HTMLCanvasElement): SteerController {
     consumeReroll(): 0 | 1 {
       const v = pendingReroll;
       pendingReroll = 0;
+      return v;
+    },
+    consumeLockPick(): number {
+      const v = pendingLock;
+      pendingLock = -1;
+      return v;
+    },
+    consumeBanishPick(): number {
+      const v = pendingBanish;
+      pendingBanish = -1;
       return v;
     },
     getSteer(): { ox: number; oy: number; x: number; y: number } | null {

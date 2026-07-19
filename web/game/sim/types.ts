@@ -58,6 +58,10 @@ export type PapaCode = (typeof PAPA)[keyof typeof PAPA];
 export const CARD_TIPO = { ING: "ING", REC: "REC", MAL: "MAL" } as const;
 export type CardTipo = (typeof CARD_TIPO)[keyof typeof CARD_TIPO];
 
+// Card rarity — biases the draft offer (weights scale with the cosecha tier). MAL pacts are épica.
+export const CARD_RAREZA = { COMUN: "COMUN", RARA: "RARA", EPICA: "EPICA" } as const;
+export type CardRareza = (typeof CARD_RAREZA)[keyof typeof CARD_RAREZA];
+
 // Card TAGS drive TFT-style synergies: having N cards of a tag activates a tier. A card can carry
 // 1-2 tags. FUEGO=quema, GRASA=cuerpo/boost, LAZO=enredo, VELOZ=maniobra, COSECHA=papa/economía.
 export const CARD_TAG = {
@@ -84,7 +88,26 @@ export type CardId =
   | "tocineta"
   | "ojo_criolla"
   | "cosecha_voraz"
-  | "fuego_alto";
+  | "fuego_alto"
+  // --- expansion (F1): comunes ---
+  | "mantequilla"
+  | "queso_curado"
+  | "caldo_largo"
+  | "semola_fina"
+  | "perejil_fresco"
+  | "aceite_oliva"
+  // --- expansion (F1): raras ---
+  | "doble_racion"
+  | "reduccion"
+  | "sofrito"
+  | "hilo_dorado"
+  | "enredo_doble"
+  | "bechamel"
+  // --- expansion (F1): pactos MAL (épica) ---
+  | "a_ciegas"
+  | "olla_presion"
+  | "hambre_de_papa"
+  | "duelo";
 
 // Cosecha tier -> draft width.
 export type CosechaLevel = "low" | "mid" | "high" | "max";
@@ -141,6 +164,36 @@ export type Modifiers = {
 
   // oil
   oilGrowthMul: number; // Q16.16
+
+  // --- F1 expansion: the fields the BUILD system plays with -----------------
+  // growth / body (Snake DNA: length is a resource)
+  growPerTopBonus: number; // int, extra nodes per topping (on top of GROW_PER_TOP)
+  scorePerLenMul: number; // Q16.16 extra topping-score per 25 body nodes (0 = off)
+  // almidón economy (Hambre de Papa flips the fuel source)
+  toppingsGiveAlmidon: boolean; // default true
+  papaAlmidonGain: number; // Q16.16 almidón per papa collected (0 = none)
+  // papa cadence
+  papaRateMul: number; // Q16.16 multiplier on papa spawn RATE (2.0 = twice as often)
+  papaOnEatEvery: number; // int; every Nth topping drops a criolla where it died (0 = off)
+  papaScoreBonus: number; // int score per criolla collected (× globalMult) — LA HUERTA's engine
+  // boost as a build (velocity builds)
+  boostScorePerTick: number; // int score per boosting tick
+  boostDrainMul: number; // Q16.16 on ALMIDON_DRAIN
+  // enredo mult flow (cards modify the snowball: step, cap, chain)
+  enredoMultStepMul: number; // Q16.16 on ENREDO_MULT_STEP
+  multCapBonus: number; // Q16.16 added to MULT_MAX
+  multDecayPerTick: number; // Q16.16 globalMult decay per tick (0 = none; sofrito's price)
+  enredoChainMul: number; // Q16.16 on the mult gain of a CHAINED enredo (within the window)
+  // burn zones as a score field (glass-cannon build)
+  burnScorePerTick: number; // int score per tick while the head is inside a burn zone
+  burnOilBonus: number; // int flat score per oil puddle burned by an enredo
+  // pacts
+  visionNarrow: boolean; // A Ciegas: view renders a fog outside a head radius (view-only read)
+  forkAlways: boolean; // Duelo: a boss is active EVERY service
+  forkBlockBonus: number; // int score when an enredo blocks the boss
+  forkBlockPapas: number; // int criollas dropped at the blocked boss
+  forkNearScorePerTick: number; // int score/tick while the hunting boss is within ~150u ("bailar paga")
+  oilExtraCount: number; // int extra oil puddles per service (Olla a Presión)
 };
 
 // ===========================================================================
@@ -152,6 +205,10 @@ export type Input = {
   boost: boolean;
   cardPick: number; // -1 in PLAY; else 0..offerCount-1 in DRAFT
   reroll: number; // 0 normally; >0 requests a reroll this DRAFT tick
+  // draft economy (F1): both are -1 in PLAY / when unused. Paid with cosecha; priority in
+  // step P0 is banish > reroll > lock > pick (one action per DRAFT tick).
+  lockPick: number; // slot 0..offerCount-1 to LOCK for the next draft
+  banishPick: number; // slot 0..offerCount-1 to BANISH from this run's pool
 };
 
 // ===========================================================================
@@ -295,10 +352,18 @@ export type World = {
   mods: Modifiers;
 
   // build: cards taken so far, in pick order (each one "rides" a body segment). Mods are REBUILT
-  // from this list + synergies on every pick, so the effect is a pure function of the build.
+  // from this list + combos + synergies on every pick, so the effect is a pure function of the build.
   pickedCards: Int8Array; // CARD_POOL indices, length MAX_PICKS
   pickedCount: number;
   synergyTier: Int8Array; // active tier per tag (index = CARD_TAG_ORDER), 0/1/2 — view + effects
+
+  // draft economy (F1)
+  banished: Int8Array; // per pool index: 1 = banished from this run's offers
+  lockedCard: number; // pool index guaranteed in slot 0 of the NEXT draft; -1 = none
+
+  // enredo chain (the build-explosion arc): consecutive loop-closes within the chain window
+  lastEnredoTick: number; // tick of the last catching enredo (very negative at start)
+  enredoChain: number; // current chain length (1 = no chain yet)
 
   // draft buffer (meaningful only while phase === DRAFT)
   offerIds: Int8Array; // pool indices into CARD_POOL, length MAX_OFFERS

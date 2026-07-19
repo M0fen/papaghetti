@@ -16,25 +16,31 @@ import { fmul, ONE } from "./fixed.ts";
 import { makeRng, nextInt } from "./rng.ts";
 import { CHICHARRON_EVERY, COSECHA_MAX, PINA_TUG_MAG } from "./constants.ts";
 import { CARD_TIPO, CARD_TAG_ORDER } from "./types.ts";
-import type { CardId, CardTipo, CardTag, CosechaLevel, Modifiers, World } from "./types.ts";
+import type { CardId, CardRareza, CardTipo, CardTag, CosechaLevel, Modifiers, World } from "./types.ts";
 import { initModifiers } from "./world.ts";
 
 // ===========================================================================
 // Q16.16 multiplier constants (the frozen table from the contract).
 // M_1xx == round(1.xx * 65536); M_0xx == round(0.xx * 65536). No floats leak past here.
 // ===========================================================================
+const M_110 = 72090; // +10%
 const M_112 = 73400; // +12%
 const M_115 = 75366; // +15%
 const M_120 = 78643; // +20%
 const M_125 = 81920; // +25%
 const M_130 = 85197; // +30%
+const M_133 = 87163; // +33%
 const M_135 = 88474; // +35%
+const M_140 = 91750; // +40%
 const M_150 = 98304; // +50%
 const M_160 = 104858; // +60%
+const M_175 = 114688; // +75%
 const M_200 = 131072; // x2
+const M_250 = 163840; // x2.5
 const M_075 = 49152; // -25%
 const M_070 = 45875; // -30% (0.70 => expires 30% faster)
 const M_060 = 39322; // -40% (0.60)
+const M_090 = 58982; // -10% (0.90)
 
 /**
  * Resolve the enredo cap fields from the two flags so the outcome depends on WHICH cards
@@ -242,6 +248,175 @@ export const CARDS: { [K in CardId]: Card } = {
       mods.oilGrowthMul = fmul(mods.oilGrowthMul, M_200);
     },
   },
+
+  // ======================= F1 EXPANSION: COMUNES (ING) =======================
+  mantequilla: {
+    id: "mantequilla",
+    tipo: CARD_TIPO.ING,
+    nombre: "Mantequilla",
+    texto: "+10% velocidad base.",
+    apply: (mods, _w) => {
+      mods.baseSpeedMul = fmul(mods.baseSpeedMul, M_110);
+    },
+  },
+  queso_curado: {
+    id: "queso_curado",
+    tipo: CARD_TIPO.ING,
+    nombre: "Queso Curado",
+    texto: "+20% puntos por topping.",
+    apply: (mods, _w) => {
+      mods.toppingScoreMul = fmul(mods.toppingScoreMul, M_120);
+    },
+  },
+  caldo_largo: {
+    id: "caldo_largo",
+    tipo: CARD_TIPO.ING,
+    nombre: "Caldo Largo",
+    texto: "+1 de crecimiento por topping.",
+    apply: (mods, _w) => {
+      mods.growPerTopBonus += 1;
+    },
+  },
+  semola_fina: {
+    id: "semola_fina",
+    tipo: CARD_TIPO.ING,
+    nombre: "Sémola Fina",
+    texto: "+10% giro y hitbox 10% menor.",
+    apply: (mods, _w) => {
+      mods.turnRateMul = fmul(mods.turnRateMul, M_110);
+      mods.hitboxRadiusMul = fmul(mods.hitboxRadiusMul, M_090);
+    },
+  },
+  perejil_fresco: {
+    id: "perejil_fresco",
+    tipo: CARD_TIPO.ING,
+    nombre: "Perejil Fresco",
+    texto: "La papa dura 40% más y aparece un tercio más seguido.",
+    apply: (mods, _w) => {
+      mods.papaLifeMul = fmul(mods.papaLifeMul, M_140);
+      mods.papaRateMul = fmul(mods.papaRateMul, M_133);
+    },
+  },
+  aceite_oliva: {
+    id: "aceite_oliva",
+    tipo: CARD_TIPO.ING,
+    nombre: "Aceite de Oliva",
+    texto: "La grasa crece 30% más lento.",
+    apply: (mods, _w) => {
+      mods.oilGrowthMul = fmul(mods.oilGrowthMul, M_070);
+    },
+  },
+
+  // ======================== F1 EXPANSION: RARAS (REC) ========================
+  doble_racion: {
+    id: "doble_racion",
+    tipo: CARD_TIPO.REC,
+    nombre: "Doble Ración",
+    texto: "+3 de crecimiento por topping, pero los toppings duran 25% menos.",
+    apply: (mods, _w) => {
+      mods.growPerTopBonus += 3;
+      mods.toppingLifeMul = fmul(mods.toppingLifeMul, M_075);
+    },
+  },
+  reduccion: {
+    id: "reduccion",
+    tipo: CARD_TIPO.REC,
+    nombre: "Reducción",
+    texto: "Cap del enredo +5, pero el área mínima del lazo crece 50%.",
+    apply: (mods, _w) => {
+      mods.loopCap += 5;
+      mods.minLoopAreaMul = fmul(mods.minLoopAreaMul, M_150);
+    },
+  },
+  sofrito: {
+    id: "sofrito",
+    tipo: CARD_TIPO.REC,
+    nombre: "Sofrito",
+    texto: "El enredo alimenta el multiplicador al doble y su tope sube, pero el multiplicador DECAE.",
+    apply: (mods, _w) => {
+      mods.enredoMultStepMul = fmul(mods.enredoMultStepMul, M_200);
+      mods.multCapBonus += 2 * ONE;
+      mods.multDecayPerTick += 65; // ~0.06/s — juega en cadena o piérdelo
+    },
+  },
+  hilo_dorado: {
+    id: "hilo_dorado",
+    tipo: CARD_TIPO.REC,
+    nombre: "Hilo Dorado",
+    texto: "Cada 8º topping suelta una papa criolla donde murió.",
+    apply: (mods, _w) => {
+      mods.papaOnEatEvery = 8;
+    },
+  },
+  enredo_doble: {
+    id: "enredo_doble",
+    tipo: CARD_TIPO.REC,
+    nombre: "Enredo Doble",
+    texto: "Un enredo encadenado (en 5s del anterior) alimenta el multiplicador al doble.",
+    apply: (mods, _w) => {
+      mods.enredoChainMul = fmul(mods.enredoChainMul, M_200);
+    },
+  },
+  bechamel: {
+    id: "bechamel",
+    tipo: CARD_TIPO.REC,
+    nombre: "Bechamel",
+    texto: "Boostear da +2 puntos por tick, pero drena 50% más almidón.",
+    apply: (mods, _w) => {
+      mods.boostScorePerTick += 2;
+      mods.boostDrainMul = fmul(mods.boostDrainMul, M_150);
+    },
+  },
+
+  // ================== F1 EXPANSION: PACTOS MAL (épica) =======================
+  // Debuff fuerte + upside enorme: el combustible de las builds rotas.
+  a_ciegas: {
+    id: "a_ciegas",
+    tipo: CARD_TIPO.MAL,
+    nombre: "A Ciegas",
+    texto: "+75% puntaje global, pero tu visión se reduce a la luz de la sartén.",
+    apply: (mods, _w) => {
+      mods.visionNarrow = true; // view-only fog outside a head radius
+      mods.globalScoreMul = fmul(mods.globalScoreMul, M_175);
+    },
+  },
+  olla_presion: {
+    id: "olla_presion",
+    tipo: CARD_TIPO.MAL,
+    nombre: "Olla a Presión",
+    texto: "+60% puntaje y quemar grasa paga 500, pero la grasa crece x2.5 y hay un charco extra.",
+    apply: (mods, _w) => {
+      mods.oilGrowthMul = fmul(mods.oilGrowthMul, M_250);
+      mods.oilExtraCount += 1;
+      mods.globalScoreMul = fmul(mods.globalScoreMul, M_160);
+      mods.burnOilBonus += 500;
+    },
+  },
+  hambre_de_papa: {
+    id: "hambre_de_papa",
+    tipo: CARD_TIPO.MAL,
+    nombre: "Hambre de Papa",
+    texto: "Los toppings ya NO dan almidón; la papa da +30 de almidón, doble cosecha y dura 50% más.",
+    apply: (mods, _w) => {
+      mods.toppingsGiveAlmidon = false;
+      mods.papaAlmidonGain += 30 * ONE;
+      mods.papaScoreBonus += 500; // la papa es ORO: paga puntos (× mult) — el motor de LA HUERTA
+      mods.cosechaGainMul = fmul(mods.cosechaGainMul, M_200);
+      mods.papaLifeMul = fmul(mods.papaLifeMul, M_150);
+    },
+  },
+  duelo: {
+    id: "duelo",
+    tipo: CARD_TIPO.MAL,
+    nombre: "Duelo",
+    texto: "El jefe acecha SIEMPRE, pero bailarle cerca paga puntos y enredarlo paga 2000 × multiplicador.",
+    apply: (mods, _w) => {
+      mods.forkAlways = true;
+      mods.forkBlockBonus += 2000;
+      mods.forkBlockPapas += 2;
+      mods.forkNearScorePerTick += 8; // danger-pay: la presencia del jefe gotea puntos
+    },
+  },
 };
 
 // ===========================================================================
@@ -263,6 +438,23 @@ export const CARD_POOL: CardId[] = [
   "ojo_criolla",
   "cosecha_voraz",
   "fuego_alto",
+  // F1 expansion — APPENDED ONLY (existing indices are frozen: replays/RETO depend on them).
+  "mantequilla",
+  "queso_curado",
+  "caldo_largo",
+  "semola_fina",
+  "perejil_fresco",
+  "aceite_oliva",
+  "doble_racion",
+  "reduccion",
+  "sofrito",
+  "hilo_dorado",
+  "enredo_doble",
+  "bechamel",
+  "a_ciegas",
+  "olla_presion",
+  "hambre_de_papa",
+  "duelo",
 ];
 
 /** Registry index of a card id (position within CARD_POOL). */
@@ -296,6 +488,91 @@ export const CARD_TAGS: Record<CardId, CardTag[]> = {
   ojo_criolla: ["COSECHA"],
   cosecha_voraz: ["COSECHA"],
   fuego_alto: ["FUEGO"],
+  // F1 expansion
+  mantequilla: ["VELOZ", "GRASA"],
+  queso_curado: ["GRASA"],
+  caldo_largo: ["GRASA"],
+  semola_fina: ["VELOZ"],
+  perejil_fresco: ["COSECHA"],
+  aceite_oliva: ["FUEGO"],
+  doble_racion: ["GRASA"],
+  reduccion: ["LAZO"],
+  sofrito: ["LAZO", "FUEGO"],
+  hilo_dorado: ["COSECHA"],
+  enredo_doble: ["LAZO"],
+  bechamel: ["VELOZ", "GRASA"],
+  a_ciegas: ["VELOZ"],
+  olla_presion: ["FUEGO"],
+  hambre_de_papa: ["COSECHA"],
+  duelo: ["LAZO"],
+};
+
+// Rarity biases the draft offer (weights per cosecha tier live in generateOffer).
+export const CARD_RAREZAS: Record<CardId, CardRareza> = {
+  al_dente: "COMUN",
+  hebra_gruesa: "COMUN",
+  ojo_criolla: "COMUN",
+  mantequilla: "COMUN",
+  queso_curado: "COMUN",
+  caldo_largo: "COMUN",
+  semola_fina: "COMUN",
+  perejil_fresco: "COMUN",
+  aceite_oliva: "COMUN",
+  cabello_angel: "RARA",
+  lazo_avido: "RARA",
+  corte_limpio: "RARA",
+  enredo_ardiente: "RARA",
+  chicharron: "RARA",
+  pina_acida: "RARA",
+  tocineta: "RARA",
+  cosecha_voraz: "RARA",
+  fuego_alto: "RARA",
+  doble_racion: "RARA",
+  reduccion: "RARA",
+  sofrito: "RARA",
+  hilo_dorado: "RARA",
+  enredo_doble: "RARA",
+  bechamel: "RARA",
+  almidon_puro: "EPICA",
+  lazo_hierro: "EPICA",
+  a_ciegas: "EPICA",
+  olla_presion: "EPICA",
+  hambre_de_papa: "EPICA",
+  duelo: "EPICA",
+};
+
+// Flag/cadence cards are UNIQUE: once taken they leave the offer pool (repeat picks were dead choices).
+export const CARD_UNIQUE: Record<CardId, boolean> = {
+  al_dente: false,
+  hebra_gruesa: false,
+  cabello_angel: false,
+  almidon_puro: true,
+  lazo_avido: true,
+  corte_limpio: true,
+  enredo_ardiente: true,
+  lazo_hierro: true,
+  chicharron: true,
+  pina_acida: true,
+  tocineta: true,
+  ojo_criolla: false,
+  cosecha_voraz: true,
+  fuego_alto: false,
+  mantequilla: false,
+  queso_curado: false,
+  caldo_largo: false,
+  semola_fina: false,
+  perejil_fresco: false,
+  aceite_oliva: false,
+  doble_racion: false,
+  reduccion: false,
+  sofrito: true,
+  hilo_dorado: true,
+  enredo_doble: true,
+  bechamel: true,
+  a_ciegas: true,
+  olla_presion: true,
+  hambre_de_papa: true,
+  duelo: true,
 };
 
 // Tier thresholds: >=2 tags = tier 1, >=3 = tier 2 (tier 2 also keeps the tier-1 effect).
@@ -338,10 +615,73 @@ function applySynergies(mods: Modifiers, counts: Int32Array, tierOut: Int8Array)
   }
 }
 
+// ===========================================================================
+// TRANSFORMATIVE COMBOS + THE 5 DESIGNED "BROKEN BUILDS" (F1 — the clip fuel).
+//
+// Balance philosophy is INVERTED (Vampire-Survivors model): individually-controlled cards that in
+// certain COMBINATIONS break the screen — and the game CELEBRATES it. These are the ~5 intended
+// broken builds, each reachable by a different path, each visually distinct. DO NOT flatten them,
+// DO NOT announce them in the UI (the player discovers them):
+//
+//  1. LA HUERTA (COSECHA): hambre_de_papa + cosecha_voraz (+perejil_fresco, hilo_dorado, ojo_criolla)
+//     → C1 fires: papa everywhere, infinite draft economy. Screen fills with glowing criollas.
+//  2. COCINA INFERNAL (FUEGO, glass cannon): olla_presion + fuego_alto (+enredo_ardiente, sofrito)
+//     → C2 fires: you farm the very grease that hunts you; burn zones become score fields of embers.
+//  3. FLAMBÉ PERPETUO (VELOZ): almidon_puro + bechamel (+cabello_angel, semola_fina, mantequilla)
+//     → C3 fires: infinite boost that SCORES per tick. Perpetual speedlines; pure velocity.
+//  4. CADENA PERFECTA (LAZO): enredo_doble + lazo_avido (+sofrito, reduccion)
+//     → C4 fires: chained enredos feed the mult ×4 with a raised cap; sofrito punishes stopping.
+//  5. EL FIDEO INFINITO (GRASA — the most Snake of all): caldo_largo + doble_racion (+hebra_gruesa,
+//     queso_curado) → C5 fires: LENGTH multiplies score. The screen fills with noodle.
+//
+// SNAKE-DNA AUDIT (móvil central): none of these erase eat-to-grow, the body, or the tail's
+// tension — every build still reads as "la culebrita, pero mejor". a_ciegas is an input handicap
+// (view fog), never a sim change. Keep it that way for any future card.
+// ===========================================================================
+
+/** True if the build (picked set) contains the card id. Pure over the set. */
+function makeHas(w: World): (id: CardId) => boolean {
+  return (id: CardId): boolean => {
+    const idx = CARD_POOL.indexOf(id);
+    for (let i = 0; i < w.pickedCount; i++) if (w.pickedCards[i] === idx) return true;
+    return false;
+  };
+}
+
+/**
+ * Layer TRANSFORMATIVE pair-combos onto mods. Pure function of the picked SET (order-independent
+ * by construction — it runs after all card applies, keyed only on membership).
+ */
+function applyCombos(mods: Modifiers, has: (id: CardId) => boolean): void {
+  // C1 LA HUERTA: papa fever — twice the papa, twice the papa-fuel, twice the papa-gold.
+  if (has("cosecha_voraz") && has("hambre_de_papa")) {
+    mods.papaRateMul = fmul(mods.papaRateMul, M_200);
+    mods.papaAlmidonGain = fmul(mods.papaAlmidonGain, M_200);
+    mods.papaScoreBonus *= 2;
+  }
+  // C2 COCINA INFERNAL: the burn field itself scores while you ride it.
+  if (has("fuego_alto") && has("olla_presion")) {
+    mods.burnScorePerTick += 30;
+  }
+  // C3 FLAMBÉ PERPETUO: boosting becomes the scoring engine.
+  if (has("almidon_puro") && has("bechamel")) {
+    mods.boostScorePerTick += 4; // 2 (bechamel) + 4 = 6/tick
+    mods.baseSpeedMul = fmul(mods.baseSpeedMul, M_110);
+  }
+  // C4 CADENA PERFECTA: chains feed ×4.
+  if (has("enredo_doble") && has("lazo_avido")) {
+    mods.enredoChainMul = fmul(mods.enredoChainMul, M_200);
+  }
+  // C5 EL FIDEO INFINITO: +5% topping score per 25 body nodes (clamped in step).
+  if (has("caldo_largo") && has("doble_racion")) {
+    mods.scorePerLenMul = 3277;
+  }
+}
+
 // Scratch tag-count buffer — rebuildMods runs only on a draft pick, never per tick.
 const _tagCounts = new Int32Array(CARD_TAG_ORDER.length);
 
-/** Rebuild w.mods from scratch: neutral → every picked card's apply() → synergies. Pure over the build. */
+/** Rebuild w.mods from scratch: neutral → every picked card's apply() → combos → synergies. Pure over the build. */
 export function rebuildMods(w: World): void {
   Object.assign(w.mods, initModifiers());
   _tagCounts.fill(0);
@@ -354,6 +694,7 @@ export function rebuildMods(w: World): void {
       if (idx >= 0) _tagCounts[idx]++;
     }
   }
+  applyCombos(w.mods, makeHas(w));
   applySynergies(w.mods, _tagCounts, w.synergyTier);
 }
 
@@ -419,8 +760,9 @@ export function draftShape(level: CosechaLevel): {
 }
 
 // Module-level draft scratch — reused every call, zero per-draft allocation.
-const scratchIdx = new Int8Array(14); // shuffled copy of CARD_POOL indices
-const recMalPos = new Int8Array(14); // positions in scratchIdx whose card is REC or MAL
+const eligibleIdx = new Int8Array(32); // candidate pool indices for the current slot
+const eligibleW = new Int32Array(32); // per-candidate rarity weight
+const offeredMark = new Int8Array(32); // 1 = already placed in this offer
 
 /** True when a card's taxonomy is REC (rojo) or MAL (negro) — the guaranteed-slot subset. */
 function isRecMal(id: CardId): boolean {
@@ -428,45 +770,100 @@ function isRecMal(id: CardId): boolean {
   return t === CARD_TIPO.REC || t === CARD_TIPO.MAL;
 }
 
+// Rarity weight per cosecha tier (comun / rara / epica). Higher cosecha → better odds.
+const RARITY_W: Record<CosechaLevel, [number, number, number]> = {
+  low: [100, 30, 7],
+  mid: [100, 38, 12],
+  high: [100, 48, 18],
+  max: [100, 56, 26],
+};
+
+function rarityWeight(id: CardId, level: CosechaLevel): number {
+  const r = CARD_RAREZAS[id];
+  const wts = RARITY_W[level];
+  return r === "COMUN" ? wts[0] : r === "RARA" ? wts[1] : wts[2];
+}
+
+/** True if pool index i may be offered: not banished, not already offered, not a taken UNIQUE. */
+function isEligible(w: World, i: number): boolean {
+  if (w.banished[i] !== 0) return false;
+  if (offeredMark[i] !== 0) return false;
+  const id = CARD_POOL[i];
+  if (CARD_UNIQUE[id]) {
+    for (let p = 0; p < w.pickedCount; p++) if (w.pickedCards[p] === i) return false;
+  }
+  return true;
+}
+
 /**
  * Populate w.offerIds / w.offerCount / w.rerollLeft for the current draft.
- * Uses a LOCAL rng seeded from draftSeed (does NOT consume the gameplay RNG), and a
- * partial Fisher-Yates over a copy of the pool indices. When guaranteedRecMal, offer
- * slot 0 is drawn from the REC∪MAL subset first, then the remaining slots shuffle the
- * rest of the pool (distinct cards). Pure & input-count-independent (RETO DIARIO).
+ * LOCAL rng from draftSeed (never the gameplay stream). RARITY-WEIGHTED sampling without
+ * replacement (weights scale with the cosecha tier), honouring: BANISHED cards never appear,
+ * UNIQUE cards already taken never re-appear, a LOCKED card takes slot 0 (consumed), and the
+ * max-tier guaranteedRecMal slot draws from the REC∪MAL subset. Deterministic & pure.
  */
 export function generateOffer(w: World): void {
   const rng = makeRng(draftSeed(w.seed0, w.service, w.rerollUsed));
   const level = cosechaLevel(w.cosecha, COSECHA_MAX);
   const shape = draftShape(level);
   const n = CARD_POOL.length;
-
-  // Fresh identity permutation into scratch.
-  for (let i = 0; i < n; i++) scratchIdx[i] = i;
+  offeredMark.fill(0);
 
   let filled = 0;
-  if (shape.guaranteedRecMal) {
-    // Collect current REC/MAL positions, pick one, swap it into slot 0 (frozen thereafter).
-    let m = 0;
-    for (let i = 0; i < n; i++) {
-      if (isRecMal(CARD_POOL[scratchIdx[i]])) recMalPos[m++] = i;
+
+  // 0. LOCKED card (draft economy): goes straight into slot 0, lock consumed (one draft).
+  if (w.lockedCard >= 0) {
+    const li = w.lockedCard;
+    w.lockedCard = -1;
+    if (isEligible(w, li)) {
+      w.offerIds[0] = li;
+      offeredMark[li] = 1;
+      filled = 1;
     }
-    const pick = recMalPos[nextInt(rng, m)];
-    const t = scratchIdx[0];
-    scratchIdx[0] = scratchIdx[pick];
-    scratchIdx[pick] = t;
-    filled = 1;
   }
 
-  // Partial Fisher-Yates for the remaining offer slots: pick from the unshuffled tail.
-  for (let s = filled; s < shape.count; s++) {
-    const j = s + nextInt(rng, n - s);
-    const t = scratchIdx[s];
-    scratchIdx[s] = scratchIdx[j];
-    scratchIdx[j] = t;
+  // Weighted draw for one slot over a filtered candidate set; returns pool idx or -1.
+  const draw = (recMalOnly: boolean): number => {
+    let m = 0;
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+      if (!isEligible(w, i)) continue;
+      const id = CARD_POOL[i];
+      if (recMalOnly && !isRecMal(id)) continue;
+      const wt = rarityWeight(id, level);
+      eligibleIdx[m] = i;
+      eligibleW[m] = wt;
+      total += wt;
+      m++;
+    }
+    if (m === 0) return -1;
+    let r = nextInt(rng, total);
+    for (let k = 0; k < m; k++) {
+      r -= eligibleW[k];
+      if (r < 0) return eligibleIdx[k];
+    }
+    return eligibleIdx[m - 1];
+  };
+
+  // 1. Guaranteed REC/MAL slot at max tier (first non-locked slot).
+  if (shape.guaranteedRecMal && filled < shape.count) {
+    const pick = draw(true);
+    if (pick >= 0) {
+      w.offerIds[filled] = pick;
+      offeredMark[pick] = 1;
+      filled++;
+    }
   }
 
-  for (let s = 0; s < shape.count; s++) w.offerIds[s] = scratchIdx[s];
-  w.offerCount = shape.count;
+  // 2. Remaining slots: rarity-weighted over the whole eligible pool.
+  while (filled < shape.count) {
+    const pick = draw(false);
+    if (pick < 0) break; // pool exhausted (heavy banish/unique late-run) — offer fewer
+    w.offerIds[filled] = pick;
+    offeredMark[pick] = 1;
+    filled++;
+  }
+
+  w.offerCount = filled > 0 ? filled : 0;
   w.rerollLeft = shape.rerolls;
 }

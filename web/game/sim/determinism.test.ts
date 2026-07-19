@@ -108,6 +108,11 @@ function hashWorld(w: World): number {
   h = mix(h, w.pickedCount);
   for (let i = 0; i < w.pickedCount; i++) h = mix(h, w.pickedCards[i]);
   for (let i = 0; i < w.synergyTier.length; i++) h = mix(h, w.synergyTier[i]);
+  // draft economy + enredo chain (F1)
+  h = mix(h, w.lockedCard);
+  for (let i = 0; i < w.banished.length; i++) h = mix(h, w.banished[i]);
+  h = mix(h, w.lastEnredoTick);
+  h = mix(h, w.enredoChain);
   const m = w.mods;
   const b = (v: boolean) => (v ? 1 : 0);
   h = mix(h, m.turnRateMul);
@@ -136,6 +141,28 @@ function hashWorld(w: World): number {
   h = mix(h, m.cosechaGainMul);
   h = mix(h, b(m.papaOnlyInDanger));
   h = mix(h, m.oilGrowthMul);
+  // F1 expansion mods
+  h = mix(h, m.growPerTopBonus);
+  h = mix(h, m.scorePerLenMul);
+  h = mix(h, b(m.toppingsGiveAlmidon));
+  h = mix(h, m.papaAlmidonGain);
+  h = mix(h, m.papaRateMul);
+  h = mix(h, m.papaOnEatEvery);
+  h = mix(h, m.papaScoreBonus);
+  h = mix(h, m.boostScorePerTick);
+  h = mix(h, m.boostDrainMul);
+  h = mix(h, m.enredoMultStepMul);
+  h = mix(h, m.multCapBonus);
+  h = mix(h, m.multDecayPerTick);
+  h = mix(h, m.enredoChainMul);
+  h = mix(h, m.burnScorePerTick);
+  h = mix(h, m.burnOilBonus);
+  h = mix(h, b(m.visionNarrow));
+  h = mix(h, b(m.forkAlways));
+  h = mix(h, m.forkBlockBonus);
+  h = mix(h, m.forkBlockPapas);
+  h = mix(h, m.forkNearScorePerTick);
+  h = mix(h, m.oilExtraCount);
   return h >>> 0;
 }
 
@@ -146,9 +173,12 @@ function makeInput(w: World, r: { rng: number }): Input {
   if (w.phase === PHASE.DRAFT) {
     const reroll = (u & 7) === 0 ? 1 : 0;
     const cardPick = w.offerCount > 0 ? (u >>> 3) % w.offerCount : -1;
-    return { angle: 0, boost: false, cardPick, reroll };
+    // Exercise the draft ECONOMY too (lock/banish are inputs; replay must cover them).
+    const lockPick = (u >>> 5) % 11 === 0 && w.offerCount > 0 ? (u >>> 8) % w.offerCount : -1;
+    const banishPick = (u >>> 6) % 13 === 0 && w.offerCount > 0 ? (u >>> 9) % w.offerCount : -1;
+    return { angle: 0, boost: false, cardPick, reroll, lockPick, banishPick };
   }
-  return { angle: u & 0xffff, boost: (u & 0x10000) !== 0, cardPick: -1, reroll: 0 };
+  return { angle: u & 0xffff, boost: (u & 0x10000) !== 0, cardPick: -1, reroll: 0, lockPick: -1, banishPick: -1 };
 }
 
 // ===========================================================================
@@ -214,8 +244,8 @@ test("long run with drafts replays identically", () => {
     const u = nextU32(inRng);
     const inp: Input =
       a.phase === PHASE.DRAFT
-        ? { angle: 0, boost: false, cardPick: a.offerCount > 0 ? u % a.offerCount : -1, reroll: 0 }
-        : { angle, boost: (u & 1) !== 0, cardPick: -1, reroll: 0 };
+        ? { angle: 0, boost: false, cardPick: a.offerCount > 0 ? u % a.offerCount : -1, reroll: 0, lockPick: -1, banishPick: -1 }
+        : { angle, boost: (u & 1) !== 0, cardPick: -1, reroll: 0, lockPick: -1, banishPick: -1 };
     log.push(inp);
     step(a, inp);
   }

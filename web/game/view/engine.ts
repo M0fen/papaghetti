@@ -13,7 +13,14 @@ import { createWorld, step } from "@/game/sim/index.ts";
 import type { World, Input } from "@/game/sim/index.ts";
 import { PHASE } from "@/game/sim/types.ts";
 import { CARD_POOL } from "@/game/sim/cards.ts";
-import { TICKS_PER_SEC, COSECHA_MAX, ALMIDON_MAX, TOP_BASE } from "@/game/sim/constants.ts";
+import {
+  TICKS_PER_SEC,
+  COSECHA_MAX,
+  ALMIDON_MAX,
+  TOP_BASE,
+  LOCK_COST,
+  BANISH_COST,
+} from "@/game/sim/constants.ts";
 import { createSteer } from "./input.ts";
 import type { SteerController } from "./input.ts";
 import { createAudio } from "./audio.ts";
@@ -44,7 +51,7 @@ export type RunResult = {
   victory: boolean;
   bestEnredo: number;
   cardsPicked: string[];
-  inputLog: Array<{ t: number; a: number; b: 0 | 1; c: number; r: 0 | 1 }>;
+  inputLog: Array<{ t: number; a: number; b: 0 | 1; c: number; r: 0 | 1; l: number; k: number }>;
 };
 
 export type HudSnapshot = {
@@ -89,7 +96,14 @@ export function mountGame(
   const prevBodyX = new Int32Array(MAXN);
   const prevBodyY = new Int32Array(MAXN);
   let prevBodyCount = 0;
-  const input: Input = { angle: world.heading, boost: false, cardPick: -1, reroll: 0 };
+  const input: Input = {
+    angle: world.heading,
+    boost: false,
+    cardPick: -1,
+    reroll: 0,
+    lockPick: -1,
+    banishPick: -1,
+  };
 
   const cam: Camera = { x: 0, y: 0, scale: 1, biasY: 0, shakeX: 0, shakeY: 0 };
 
@@ -263,12 +277,23 @@ export function mountGame(
     input.boost = controller.readBoost();
     input.cardPick = -1;
     input.reroll = 0;
+    input.lockPick = -1;
+    input.banishPick = -1;
     if (world.phase === PHASE.DRAFT) {
       const pick = controller.consumeDraftPick();
       const rr = controller.consumeReroll();
-      if (rr === 1 && world.rerollLeft > 0) {
+      const lk = controller.consumeLockPick();
+      const bn = controller.consumeBanishPick();
+      // mirror the sim's P0 priority: banish > reroll > lock > pick
+      if (bn >= 0 && bn < world.offerCount && world.cosecha >= BANISH_COST) {
+        input.banishPick = bn;
+        audio.reroll();
+      } else if (rr === 1 && world.rerollLeft > 0) {
         input.reroll = 1;
         audio.reroll();
+      } else if (lk >= 0 && lk < world.offerCount && world.cosecha >= LOCK_COST && world.lockedCard < 0) {
+        input.lockPick = lk;
+        audio.cardPick();
       } else if (pick >= 0 && pick < world.offerCount) {
         input.cardPick = pick;
         cardsPicked.push(CARD_POOL[world.offerIds[pick]]);
@@ -283,6 +308,8 @@ export function mountGame(
       b: input.boost ? 1 : 0,
       c: input.cardPick,
       r: input.reroll as 0 | 1,
+      l: input.lockPick,
+      k: input.banishPick,
     });
 
     step(world, input);
@@ -587,11 +614,15 @@ export function mountGame(
     // draft layout (shared with input hit-testing)
     let draftCards: Rect[] = [];
     let rerollRect: Rect | null = null;
+    let lockRects: Rect[] = [];
+    let banishRects: Rect[] = [];
     if (world.phase === PHASE.DRAFT) {
       const layout = draftLayout(cssW, cssH, world.offerCount, world.rerollLeft > 0, insets);
       draftCards = layout.cards;
       rerollRect = layout.reroll;
-      controller.setDraft(true, draftCards, rerollRect);
+      lockRects = layout.locks;
+      banishRects = layout.banishes;
+      controller.setDraft(true, draftCards, rerollRect, lockRects, banishRects);
     } else {
       controller.setDraft(false, [], null);
     }
@@ -618,6 +649,8 @@ export function mountGame(
       insets,
       draftCards,
       rerollRect,
+      lockRects,
+      banishRects,
       steer: world.phase === PHASE.PLAY ? controller.getSteer() : null,
       boosting: input.boost,
       pops,

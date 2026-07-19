@@ -175,3 +175,13 @@ export const FULL_CIRCLE = 65536; // brads per revolution
 // --- draft sentinels ------------------------------------------------------
 export const CARD_PICK_NONE = -1; // Input.cardPick when not picking
 export const REROLL_NONE = 0; // Input.reroll default
+
+// --- draft economy (F1: agency to CHASE a build) --------------------------
+// Free rerolls from draftShape stay free; these actions SPEND the cosecha meter (which also sets
+// the next draft's tier — spending now is a real tradeoff against a wider draft later).
+export const LOCK_COST = 10 * FP_ONE; // Q16.16 cosecha: keep one offered card for the next draft
+export const BANISH_COST = 25 * FP_ONE; // Q16.16 cosecha: remove a card from this run's pool
+export const MAX_CARDS = 32; // pool capacity (banished mask length; >= CARD_POOL.length)
+
+// --- enredo chain (the build-explosion arc) -------------------------------
+export const ENREDO_CHAIN_WINDOW = 300; // ticks (5s): a loop closed within this of the last one CHAINS

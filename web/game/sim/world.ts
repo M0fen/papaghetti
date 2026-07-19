@@ -17,6 +17,7 @@ import {
   BASE_SPEED,
   CRUMB_CAP,
   GLOBAL_MULT_START,
+  MAX_CARDS,
   MAX_NODES,
   MAX_OBS,
   MAX_OFFERS,
@@ -65,6 +66,28 @@ export function initModifiers(): Modifiers {
     cosechaGainMul: ONE,
     papaOnlyInDanger: false,
     oilGrowthMul: ONE,
+    // F1 expansion (all neutral)
+    growPerTopBonus: 0,
+    scorePerLenMul: 0,
+    toppingsGiveAlmidon: true,
+    papaAlmidonGain: 0,
+    papaRateMul: ONE,
+    papaOnEatEvery: 0,
+    papaScoreBonus: 0,
+    boostScorePerTick: 0,
+    boostDrainMul: ONE,
+    enredoMultStepMul: ONE,
+    multCapBonus: 0,
+    multDecayPerTick: 0,
+    enredoChainMul: ONE,
+    burnScorePerTick: 0,
+    burnOilBonus: 0,
+    visionNarrow: false,
+    forkAlways: false,
+    forkBlockBonus: 0,
+    forkBlockPapas: 0,
+    forkNearScorePerTick: 0,
+    oilExtraCount: 0,
   };
 }
 
@@ -157,6 +180,11 @@ export function createWorld(seed: number, mode: ModeName): World {
     pickedCards: new Int8Array(MAX_PICKS),
     pickedCount: 0,
     synergyTier: new Int8Array(CARD_TAG_ORDER.length),
+
+    banished: new Int8Array(MAX_CARDS),
+    lockedCard: -1,
+    lastEnredoTick: -100000,
+    enredoChain: 0,
 
     offerIds: new Int8Array(MAX_OFFERS),
     offerCount: 0,

@@ -40,11 +40,14 @@ import {
   AREA_SHIFT,
   BURN_LIFE_TICKS,
   FORK_BLOCK_TICKS,
+  ENREDO_CHAIN_WINDOW,
   ENREDO_MULT_STEP,
   GROW_PER_TOP,
   MAX_NODES,
+  MAX_PAPA,
   MAX_TOP,
   MAX_ZONE,
+  PAPA_LIFE_TICKS,
   MIN_LOOP_AREA_2,
   MULT_MAX,
   MULT_STEP,
@@ -310,10 +313,16 @@ export function runEnredo(w: World): void {
       w.topFlags[i] = w.topFlags[i] & ~TOP_FLAG.ALIVE; // P7 must not double-count these
     }
 
-    // The enredo FEEDS the score snowball: a bigger/chained loop raises the global multiplier
-    // (capped at MULT_MAX), so the signature mechanic drives the game's scoring engine — not just
-    // a one-off payout. Pure/deterministic (function of the enclosed count).
-    w.globalMult = fmin(MULT_MAX, w.globalMult + ENREDO_MULT_STEP * mult);
+    // The enredo FEEDS the score snowball (the BUILD modifies this flow — cards change the step,
+    // the cap and the CHAIN): a loop closed within ENREDO_CHAIN_WINDOW of the previous one CHAINS,
+    // and chained loops can feed multiplied (enredoChainMul, Enredo Doble / C4). Deterministic.
+    const chained = w.tick - w.lastEnredoTick <= ENREDO_CHAIN_WINDOW;
+    w.enredoChain = chained ? w.enredoChain + 1 : 1;
+    w.lastEnredoTick = w.tick;
+    let gain = ENREDO_MULT_STEP * mult;
+    gain = fmul(gain, w.mods.enredoMultStepMul);
+    if (w.enredoChain >= 2) gain = fmul(gain, w.mods.enredoChainMul);
+    w.globalMult = fmin(MULT_MAX + w.mods.multCapBonus, w.globalMult + gain);
   }
 
   // 5. Card loop effects (obstacles / oil / fork enclosed by the loop).
@@ -344,6 +353,8 @@ export function runEnredo(w: World): void {
         burned++;
       }
     }
+    // Olla a Presión: burning grease PAYS (flat bonus per puddle burned).
+    if (burned > 0 && w.mods.burnOilBonus > 0) w.score += w.mods.burnOilBonus * burned;
     if (burned > 0 && w.burnCount < MAX_ZONE) {
       // Burn zone = polygon bbox centroid + half-extent radius.
       minX = scratchPolyX[0];
@@ -371,10 +382,29 @@ export function runEnredo(w: World): void {
 
   if (
     w.fork.active !== 0 &&
+    w.fork.state !== FORK_STATE.BLOCKED &&
     pointInPoly(w.fork.x, w.fork.y, scratchPolyX, scratchPolyY, nVerts)
   ) {
     w.fork.state = FORK_STATE.BLOCKED;
     w.fork.blocked = FORK_BLOCK_TICKS;
+    // Duelo: blocking the boss PAYS WITH YOUR MOMENTUM (× globalMult), drops criollas where it
+    // stands, AND counts as an enredo for the snowball (a boss-lasso usually catches 0 toppings,
+    // which would leave the duel build with no mult engine — this IS its engine).
+    if (w.mods.forkBlockBonus > 0) {
+      w.score += fromFixedToInt(fmul(toFixed(w.mods.forkBlockBonus), w.globalMult));
+      let bGain = ENREDO_MULT_STEP * 2;
+      bGain = fmul(bGain, w.mods.enredoMultStepMul);
+      w.globalMult = fmin(MULT_MAX + w.mods.multCapBonus, w.globalMult + bGain);
+    }
+    for (let d = 0; d < w.mods.forkBlockPapas && w.papaCount < MAX_PAPA; d++) {
+      const idx = w.papaCount;
+      w.papaX[idx] = w.fork.x + (d === 0 ? -20 * FP_ONE : 20 * FP_ONE);
+      w.papaY[idx] = w.fork.y + (d === 0 ? 12 * FP_ONE : -12 * FP_ONE);
+      w.papaKind[idx] = 0; // PAPA.CRIOLLA
+      w.papaSeq[idx] = -1;
+      w.papaExpire[idx] = w.tick + PAPA_LIFE_TICKS;
+      w.papaCount = idx + 1;
+    }
   }
 
   // 6. Cut the neck: remove nodes [1..cut] (in-array memmove), head reconnects to

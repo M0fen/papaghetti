@@ -25,9 +25,11 @@ import {
   SERVICE_COUNT,
   CLUSTER_RADIUS,
   PAPA_LIFE_TICKS,
+  LOCK_COST,
+  BANISH_COST,
 } from "@/game/sim/constants.ts";
 import { TOP_FLAG, OBS, OBS_FLAG, PAPA, CARD_TAG_ORDER } from "@/game/sim/types.ts";
-import type { World } from "@/game/sim/types.ts";
+import type { CardTag, World } from "@/game/sim/types.ts";
 import { CARDS, CARD_POOL, CARD_TAGS } from "@/game/sim/cards.ts";
 import {
   PALETTE,
@@ -136,6 +138,22 @@ const CARD_ICON: Record<string, string> = {
   ojo_criolla: "🥔",
   cosecha_voraz: "🌾",
   fuego_alto: "🌶️",
+  mantequilla: "🧈",
+  queso_curado: "🧀",
+  caldo_largo: "🍜",
+  semola_fina: "🥄",
+  perejil_fresco: "🌿",
+  aceite_oliva: "🫒",
+  doble_racion: "🍽️",
+  reduccion: "🍯",
+  sofrito: "🥘",
+  hilo_dorado: "🪙",
+  enredo_doble: "➿",
+  bechamel: "🥛",
+  a_ciegas: "🕶️",
+  olla_presion: "🍲",
+  hambre_de_papa: "🍠",
+  duelo: "⚔️",
 };
 
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -189,6 +207,8 @@ export type FrameState = {
   insets: Insets;
   draftCards: Rect[]; // engine-computed (== draftLayout), empty when not drafting
   rerollRect: Rect | null;
+  lockRects: Rect[]; // draft-economy buttons (empty when not drafting)
+  banishRects: Rect[];
   steer: { ox: number; oy: number; x: number; y: number } | null; // joystick geometry (HUD ring)
   boosting: boolean; // for the ability-pad highlight
   pops: { wx: number; wy: number; age: number; text: string }[]; // floating "+score" juice
@@ -871,13 +891,13 @@ export function draftLayout(
   count: number,
   hasReroll: boolean,
   insets: Insets,
-): { cards: Rect[]; reroll: Rect | null } {
+): { cards: Rect[]; reroll: Rect | null; locks: Rect[]; banishes: Rect[] } {
   const padX = 18 + insets.left;
   const padR = 18 + insets.right;
   const gap = 10;
   const n = Math.max(1, count);
-  const areaTop = vh * 0.4;
-  const areaBottom = vh - insets.bottom - (hasReroll ? 72 : 20);
+  const areaTop = vh * 0.38;
+  const areaBottom = vh - insets.bottom - (hasReroll ? 108 : 56);
   const avail = areaBottom - areaTop;
   const totalW = vw - padX - padR;
   const cw = (totalW - gap * (n - 1)) / n;
@@ -885,13 +905,20 @@ export function draftLayout(
   const ch = Math.max(200, Math.min(avail, cw * 2.3, 288));
   const y0 = areaTop + Math.max(0, (avail - ch) * 0.5); // centre vertically in the area
   const cards: Rect[] = [];
+  const locks: Rect[] = [];
+  const banishes: Rect[] = [];
   for (let i = 0; i < n; i++) {
-    cards.push({ x: padX + i * (cw + gap), y: y0, w: cw, h: ch });
+    const x = padX + i * (cw + gap);
+    cards.push({ x, y: y0, w: cw, h: ch });
+    // draft-economy buttons UNDER each card (outside its frame; thumb-sized)
+    const bw = (cw - 6) / 2;
+    locks.push({ x, y: y0 + ch + 6, w: bw, h: 30 });
+    banishes.push({ x: x + bw + 6, y: y0 + ch + 6, w: bw, h: 30 });
   }
   const reroll: Rect | null = hasReroll
-    ? { x: vw / 2 - 78, y: y0 + ch + 16, w: 156, h: 46 }
+    ? { x: vw / 2 - 78, y: y0 + ch + 44, w: 156, h: 44 }
     : null;
-  return { cards, reroll };
+  return { cards, reroll, locks, banishes };
 }
 
 // ===========================================================================
@@ -2322,6 +2349,35 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
   ctx.font = fontD(27, 800);
   ctx.fillText("¿QUÉ AÑADES AL FIDEO?", view.w / 2, titleY + 8);
 
+  // "TU FIDEO" — the build you already carry (mini medallions). Seeing it is what turns
+  // "me tocó" into "lo estoy ARMANDO".
+  if (w.pickedCount > 0) {
+    const mR = 13;
+    const gap2 = 8;
+    const totalW2 = w.pickedCount * (mR * 2 + gap2) - gap2;
+    let mx = view.w / 2 - totalW2 / 2 + mR;
+    const my = titleY + 38;
+    ctx.font = fontB(9, 700);
+    ctx.fillStyle = rgba(RGB_CREMA, 0.4);
+    ctx.fillText("TU FIDEO", view.w / 2, my - mR - 8);
+    for (let p = 0; p < w.pickedCount; p++) {
+      const pid = CARD_POOL[w.pickedCards[p]];
+      const col = TAG_RGB[CARD_TAGS[pid][0]] ?? RGB_AMBAR;
+      ctx.fillStyle = rgba(mixRgb(col, RGB_ESPRESSO, 0.45), 0.95);
+      ctx.beginPath();
+      ctx.arc(mx, my, mR, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = rgba(col, 0.9);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(mx, my, mR - 0.8, 0, TAU);
+      ctx.stroke();
+      ctx.font = `${mR + 1}px system-ui, sans-serif`;
+      ctx.fillText(CARD_ICON[pid] ?? "🍥", mx, my + 1);
+      mx += mR * 2 + gap2;
+    }
+  }
+
   for (let i = 0; i < fs.draftCards.length && i < w.offerCount; i++) {
     const r = fs.draftCards[i];
     const id = CARD_POOL[w.offerIds[i]];
@@ -2332,7 +2388,31 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
     const ft = 3.5; // rarity-frame thickness
     const rad = 15;
 
+    // SYNERGY with the build you carry? (shared tag) → the card GLOWS: "this builds something".
+    let sharedTag: CardTag | null = null;
+    if (w.pickedCount > 0) {
+      const offTags = CARD_TAGS[id];
+      outer: for (let p = 0; p < w.pickedCount; p++) {
+        const pt = CARD_TAGS[CARD_POOL[w.pickedCards[p]]];
+        for (const tg of offTags) {
+          if (pt.includes(tg)) {
+            sharedTag = tg;
+            break outer;
+          }
+        }
+      }
+    }
+
     if (!fs.reduceEffects) stamp(ctx, glow, cx, r.y + r.h * 0.3, r.w * 0.9, 0.15);
+    if (sharedTag) {
+      // pulsing synergy aura + connecting thread up toward the build row
+      const pulse = 0.55 + 0.45 * Math.sin(w.tick * 0.15 + i);
+      const scol = TAG_RGB[sharedTag] ?? RGB_AMBAR;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = rgba(scol, 0.35 + 0.4 * pulse);
+      roundRect(ctx, r.x - 3, r.y - 3, r.w + 6, r.h + 6, rad + 3);
+      ctx.stroke();
+    }
 
     // drop shadow
     ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -2417,6 +2497,30 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
       ty += nameSize + 3;
     }
 
+    // TAG chips (the build language): lit bright when shared with your build, dim otherwise.
+    {
+      const tags = CARD_TAGS[id];
+      const chipW = 8;
+      let tx0 = cx - ((tags.length - 1) * 34) / 2;
+      ctx.font = fontB(8, 800);
+      for (const tg of tags) {
+        const col = TAG_RGB[tg] ?? RGB_AMBAR;
+        const lit = sharedTag !== null && CARD_TAGS[id].includes(sharedTag) && tg === sharedTag;
+        ctx.globalAlpha = lit ? 1 : 0.45;
+        ctx.fillStyle = rgb(col);
+        ctx.beginPath();
+        ctx.arc(tx0 - chipW * 1.6, ty - 3, 3.4, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = lit ? rgb(mixRgb(col, [255, 255, 255], 0.35)) : rgba(RGB_CREMA, 0.6);
+        ctx.textAlign = "left";
+        ctx.fillText(tg, tx0 - chipW * 1.6 + 7, ty - 2);
+        ctx.textAlign = "center";
+        tx0 += 34 + chipW;
+      }
+      ctx.globalAlpha = 1;
+      ty += 12;
+    }
+
     // rarity DIVIDER
     ty += 2;
     ctx.strokeStyle = rgba(tc, 0.5);
@@ -2448,6 +2552,45 @@ function drawDraft(ctx: CanvasRenderingContext2D, view: Viewport, fs: FrameState
     line("＋", RGB_VERDE, eff.buff);
     if (eff.debuff) line("－", RGB_ROJO, eff.debuff);
     ctx.textAlign = "center";
+  }
+
+  // DRAFT ECONOMY buttons under each card: LOCK (keep for next draft) and BANISH (remove from
+  // the run's pool), paid with cosecha. Greyed when unaffordable / lock already used.
+  {
+    const cosecha = w.cosecha;
+    const lockCost = Math.round(LOCK_COST / F);
+    const banCost = Math.round(BANISH_COST / F);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < fs.lockRects.length && i < w.offerCount; i++) {
+      const lr = fs.lockRects[i];
+      const br = fs.banishRects[i];
+      const canLock = cosecha >= LOCK_COST && w.lockedCard < 0;
+      const canBan = cosecha >= BANISH_COST;
+      // lock
+      ctx.globalAlpha = canLock ? 1 : 0.35;
+      ctx.fillStyle = "rgba(40,29,21,0.95)";
+      roundRect(ctx, lr.x, lr.y, lr.w, lr.h, 8);
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = rgba(RGB_AMBAR, 0.7);
+      roundRect(ctx, lr.x, lr.y, lr.w, lr.h, 8);
+      ctx.stroke();
+      ctx.fillStyle = rgb(RGB_AMBAR);
+      ctx.font = fontB(10, 800);
+      ctx.fillText(`🔒 ${lockCost}`, lr.x + lr.w / 2, lr.y + lr.h / 2 + 0.5);
+      // banish
+      ctx.globalAlpha = canBan ? 1 : 0.35;
+      ctx.fillStyle = "rgba(40,29,21,0.95)";
+      roundRect(ctx, br.x, br.y, br.w, br.h, 8);
+      ctx.fill();
+      ctx.strokeStyle = rgba(RGB_ROJO, 0.7);
+      roundRect(ctx, br.x, br.y, br.w, br.h, 8);
+      ctx.stroke();
+      ctx.fillStyle = rgb(RGB_ROJO);
+      ctx.fillText(`✖ ${banCost}`, br.x + br.w / 2, br.y + br.h / 2 + 0.5);
+    }
+    ctx.globalAlpha = 1;
   }
 
   // reroll: dark pill with amber border
