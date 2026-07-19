@@ -450,6 +450,24 @@
   color: var(--crema);
   margin: 18px auto 0;
 }
+/* respira cuando el pedido está listo para emplatar */
+.emp-cta--vivo:not(:disabled) {
+  animation: empCtaPulso 1.7s ease-in-out infinite;
+}
+@keyframes empCtaPulso {
+  0%,
+  100% {
+    box-shadow: 0 6px 16px rgba(242, 165, 22, 0.45), 0 0 0 0 rgba(242, 165, 22, 0.4);
+  }
+  50% {
+    box-shadow: 0 6px 16px rgba(242, 165, 22, 0.45), 0 0 0 10px rgba(242, 165, 22, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .emp-cta--vivo:not(:disabled) {
+    animation: none;
+  }
+}
 
 /* ---------- éxito + estado en vivo ---------- */
 .emp-exito {

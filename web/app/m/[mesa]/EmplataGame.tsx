@@ -6,8 +6,13 @@
  * Escena Canvas2D 60fps: cocina cálida con UNA luz arriba-izquierda, la caja origami kraft
  * centro-escenario (volumen + vapor), y una BANDEJA táctil en zona de pulgar con los ingredientes
  * como SPRITES HORNEADOS (modelo de 5 capas: AO → volumen → sombra propia → rim → especular).
- * Tap → el ingrediente VUELA en arco con gravedad, rebota con squash y se APILA dentro de la caja.
- * Confirmar → la caja se pliega en origami y el pedido entra por el flujo existente (canal "qr").
+ *
+ * EL FIDEO MESERO: al tocar una carta, una hebra de spaghetti VIVA (el ADN del personaje de
+ * EL ENREDO — punta con ojitos) sale de la caja, agarra el ingrediente y lo lleva en arco hasta
+ * soltarlo dentro; rebota con squash y se apila. Quitar un topping = el fideo lo SACA de la caja
+ * y lo devuelve a su carta. Si nadie toca nada, el fideo se asoma curioso y mira la bandeja.
+ * Confirmar → la caja se pliega en origami, sello PG con chispas doradas, y el pedido entra por
+ * el flujo existente (canal "qr").
  *
  * El cerebro manda: menú/precios/gratis/impuesto del catálogo. Física y arte son VIEW puro.
  */
@@ -18,6 +23,14 @@ import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { useSonido } from "./sonido";
 
 const TAU = Math.PI * 2;
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+const smooth = (t: number) => t * t * (3 - 2 * t);
+const easeOutBack = (t: number) => {
+  const c = 1.70158;
+  return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2);
+};
+const bez2 = (a: number, b: number, c: number, t: number) =>
+  (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
 
 /* =========================================================================
    SPRITES — comida horneada con el modelo de luz del juego (una luz ↖).
@@ -322,9 +335,28 @@ type Vuelo = {
   vr: number;
   bounces: number;
 };
+/** EL FIDEO MESERO — una hebra viva que trae/saca comida entre la carta y la caja. */
+type Fideo = {
+  ing: Ingrediente;
+  tx: number; // objetivo (la carta)
+  ty: number;
+  t0: number;
+  dir: "traer" | "sacar";
+  off: number; // desplazamiento del ancla (hebras concurrentes)
+  seed: number;
+  grabbed?: boolean; // ya sonó el agarre
+};
 type PilaItem = { id: string; ox: number; oy: number; rot: number; s: number };
 type Puff = { x: number; y: number; life: number; max: number; r: number; tipo: "vapor" | "polvo" };
 type Pop = { x: number; y: number; life: number; texto: string; gratis: boolean };
+type Chispa = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number };
+
+// duraciones del fideo (frames a ~60fps)
+const F_EXT = 15;
+const F_GRAB = 6;
+const F_CARRY = 20;
+const F_SUBIR = 10;
+const F_LLEVAR = 20;
 
 export default function EmplataGame(props: {
   mesa: number;
@@ -370,14 +402,25 @@ export default function EmplataGame(props: {
   const world = useRef({
     sprites: new Map<string, Off>(),
     vuelos: [] as Vuelo[],
+    fideos: [] as Fideo[],
+    fideoN: 0,
     pila: [] as PilaItem[],
     puffs: [] as Puff[],
     pops: [] as Pop[],
+    chispas: [] as Chispa[],
     trayScroll: 0,
     trayVel: 0,
     boxSquash: 0, // 0..1 al aterrizar algo
     fold: 0, // 0 abierto → 1 plegado (confirmar)
     folding: false,
+    selloHecho: false,
+    combo: 0,
+    comboT: -9999,
+    lastTab: 0,
+    tabT: 0,
+    lastAct: 0,
+    pressed: "",
+    wallPat: null as CanvasPattern | null,
     t: 0,
   });
 
@@ -390,31 +433,28 @@ export default function EmplataGame(props: {
   }, [bases, proteinas, toppings]);
 
   // ------- acciones -------
-  const lanzar = useCallback(
-    (ing: Ingrediente, fromX: number, fromY: number, W: number, H: number) => {
-      s.caida(ing);
-      if (navigator.vibrate) navigator.vibrate(12);
-      const bx = W / 2;
-      const by = H * 0.3;
-      const dx = bx - fromX;
-      const t = 34; // frames de vuelo aprox
-      world.current.vuelos.push({
+  /** Despacha al FIDEO MESERO: sale de la caja hacia la carta (cx,cy). */
+  const despachar = useCallback(
+    (ing: Ingrediente, cx: number, cy: number) => {
+      s.ruido(0.05, 0.05, 1600);
+      s.tone(240, 0.09, "sine", 0.05, 640); // latigazo hacia arriba
+      if (navigator.vibrate) navigator.vibrate(10);
+      const wd = world.current;
+      wd.fideos.push({
         ing,
-        x: fromX,
-        y: fromY,
-        vx: dx / t,
-        vy: -9 - Math.random() * 2,
-        rot: (Math.random() - 0.5) * 0.6,
-        vr: (Math.random() - 0.5) * 0.12,
-        bounces: 0,
+        tx: cx,
+        ty: cy,
+        t0: wd.t,
+        dir: "traer",
+        off: ((wd.fideoN++ % 3) - 1) * 26,
+        seed: Math.random() * 10,
       });
-      void by;
     },
     [s],
   );
 
   const tapIngrediente = useCallback(
-    (ing: Ingrediente, cx: number, cy: number, W: number, H: number) => {
+    (ing: Ingrediente, cx: number, cy: number) => {
       if (ing.agotado || world.current.folding) return;
       const cat = ing.categoria;
       if (cat === "base") {
@@ -424,25 +464,35 @@ export default function EmplataGame(props: {
           const it = find(p.id);
           return it?.categoria !== "base";
         });
-        lanzar(ing, cx, cy, W, H);
+        despachar(ing, cx, cy);
       } else if (cat === "proteina") {
         if (sel.current.proteinaId === ing.id) return;
         setProteinaId(ing.id);
         world.current.pila = world.current.pila.filter((p) => find(p.id)?.categoria !== "proteina");
-        lanzar(ing, cx, cy, W, H);
+        despachar(ing, cx, cy);
       } else {
         if (sel.current.toppingIds.includes(ing.id)) {
+          // el fideo lo SACA de la caja y lo devuelve a su carta
           setToppingIds((prev) => prev.filter((t) => t !== ing.id));
           world.current.pila = world.current.pila.filter((p) => p.id !== ing.id);
-          s.tone(300, 0.08, "triangle", 0.1); // sale de la caja
+          world.current.fideos.push({
+            ing,
+            tx: cx,
+            ty: cy,
+            t0: world.current.t,
+            dir: "sacar",
+            off: ((world.current.fideoN++ % 3) - 1) * 22,
+            seed: Math.random() * 10,
+          });
+          s.ruido(0.05, 0.04, 1400);
           return;
         }
         setToppingIds((prev) => [...prev, ing.id]);
-        lanzar(ing, cx, cy, W, H);
+        despachar(ing, cx, cy);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lanzar, s],
+    [despachar, s],
   );
 
   const confirmar = useCallback(async () => {
@@ -466,6 +516,7 @@ export default function EmplataGame(props: {
     } catch {
       world.current.folding = false;
       world.current.fold = 0;
+      world.current.selloHecho = false;
     }
     setEnviando(false);
   }, [abierto, enviando, baseId, proteinaId, toppingIds, mesa, proteinas, s]);
@@ -519,12 +570,90 @@ export default function EmplataGame(props: {
     const listaActiva = (): Ingrediente[] =>
       sel.current.tab === 0 ? bases : sel.current.tab === 1 ? proteinas : toppings;
 
+    /** Aterrizaje en la caja: composición de la montañita + squash + vapor + precio + combo. */
+    const aterrizar = (ing: Ingrediente) => {
+      const wd = world.current;
+      const { boxH, boxX, boxY } = geo();
+      const cat = ing.categoria;
+      wd.pila = wd.pila.filter((p) => !(cat !== "topping" && find(p.id)?.categoria === cat));
+      // slot compuesto: la base es la CAMA (atrás), la proteína al frente-centro,
+      // los toppings CORONAN arriba en abanico (la montañita sobresale de la caja)
+      let ox = 0;
+      let oy = 0;
+      let rot = 0;
+      let sc = 1;
+      if (cat === "base") {
+        ox = 0;
+        oy = -0.3;
+        rot = (Math.random() - 0.5) * 0.1;
+        sc = 1.12;
+      } else if (cat === "proteina") {
+        ox = (Math.random() - 0.5) * 0.12;
+        oy = 0.6;
+        rot = (Math.random() - 0.5) * 0.3;
+        sc = 0.82;
+      } else {
+        const k = wd.pila.filter((p) => find(p.id)?.categoria === "topping").length;
+        const FAN = [-0.5, 0.5, 0, -0.85, 0.85, -0.25, 0.25, -0.65, 0.65, 0.1];
+        ox = FAN[k % 10] + (Math.random() - 0.5) * 0.12;
+        oy = -0.55 - (k % 3) * 0.5 + (Math.random() - 0.5) * 0.2;
+        rot = (Math.random() - 0.5) * 0.7;
+        sc = 0.58;
+      }
+      wd.pila.push({ id: ing.id, ox, oy, rot, s: sc });
+      if (wd.pila.length > 18) {
+        const idx = wd.pila.findIndex((p) => find(p.id)?.categoria === "topping");
+        if (idx >= 0) wd.pila.splice(idx, 1);
+      }
+      wd.boxSquash = 1;
+      s.caida(ing); // el ingrediente SUENA al aterrizar (no al tocar la carta)
+      for (let k = 0; k < 3; k++)
+        wd.puffs.push({
+          x: geo().boxX + (Math.random() - 0.5) * 30,
+          y: boxY - boxH * 0.2,
+          life: 1,
+          max: 60 + Math.random() * 30,
+          r: 5 + Math.random() * 6,
+          tipo: "vapor",
+        });
+      const idxT = sel.current.toppingIds.indexOf(ing.id);
+      const gratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
+      wd.pops.push({
+        x: boxX,
+        y: boxY - boxH * 0.56,
+        life: 1,
+        texto: gratis ? "GRATIS" : ing.precio > 0 ? `+${formatCOP(ing.precio)}` : ing.nombre,
+        gratis,
+      });
+      // seguidilla: emplatar rápido sube el tono (pequeña celebración musical)
+      if (wd.t - wd.comboT < 110) wd.combo++;
+      else wd.combo = 1;
+      wd.comboT = wd.t;
+      if (wd.combo >= 2) s.tone(392 + Math.min(wd.combo, 6) * 84, 0.09, "triangle", 0.1);
+      if (wd.combo >= 3 && navigator.vibrate) navigator.vibrate(8);
+    };
+
     // ---------- input: tap vs drag de bandeja ----------
     let downX = 0;
     let downY = 0;
     let moved = 0;
     let dragging = false;
     let lastX = 0;
+
+    /** Devuelve la carta bajo (x,y) — o null. */
+    const cartaEn = (x: number, y: number): { ing: Ingrediente; cx: number } | null => {
+      const { cardY, cardW, cardH } = geo();
+      if (y < cardY - cardH / 2 - 6 || y > cardY + cardH / 2 + 6) return null;
+      const lista = listaActiva().filter((i) => i.activo);
+      const step = cardW + 10;
+      const totalW = lista.length * step;
+      const x0 = Math.max(14, (W - totalW) / 2) - world.current.trayScroll;
+      for (let k = 0; k < lista.length; k++) {
+        const cx = x0 + k * step + cardW / 2;
+        if (Math.abs(x - cx) < cardW / 2) return { ing: lista[k], cx };
+      }
+      return null;
+    };
 
     const onDown = (e: PointerEvent) => {
       s.unlock();
@@ -534,6 +663,9 @@ export default function EmplataGame(props: {
       lastX = downX;
       moved = 0;
       dragging = downY > geo().trayY + 40; // solo la fila de cartas se arrastra
+      world.current.lastAct = world.current.t;
+      const c = cartaEn(downX, downY);
+      world.current.pressed = c ? c.ing.id : "";
       canvas.setPointerCapture(e.pointerId);
     };
     const onMove = (e: PointerEvent) => {
@@ -541,6 +673,7 @@ export default function EmplataGame(props: {
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left;
       moved += Math.abs(x - lastX);
+      if (moved > 8) world.current.pressed = "";
       if (dragging) {
         world.current.trayScroll -= x - lastX;
         world.current.trayVel = -(x - lastX);
@@ -551,11 +684,12 @@ export default function EmplataGame(props: {
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left;
       const y = e.clientY - r.top;
+      world.current.pressed = "";
+      world.current.lastAct = world.current.t;
       if (moved > 8) return; // fue drag
-      const { trayY, cardY, cardW, cardH } = geo();
+      const { trayY, cardY } = geo();
       // pestañas
       if (y > trayY - 26 && y < trayY + 24) {
-        const tabs = ["LA BASE", "PROTEÍNA", "TOPPINGS"];
         const tw = Math.min(W / 3 - 8, 128);
         for (let k = 0; k < 3; k++) {
           const tx = W / 2 + (k - 1) * (tw + 8);
@@ -565,22 +699,10 @@ export default function EmplataGame(props: {
             return;
           }
         }
-        void tabs;
       }
       // cartas
-      if (y > cardY - cardH / 2 - 6 && y < cardY + cardH / 2 + 6) {
-        const lista = listaActiva().filter((i) => i.activo);
-        const step = cardW + 10;
-        const total = lista.length * step;
-        const x0 = Math.max(14, (W - total) / 2) - world.current.trayScroll;
-        for (let k = 0; k < lista.length; k++) {
-          const cx = x0 + k * step + cardW / 2;
-          if (Math.abs(x - cx) < cardW / 2) {
-            tapIngrediente(lista[k], cx, cardY, W, H);
-            return;
-          }
-        }
-      }
+      const c = cartaEn(x, y);
+      if (c) tapIngrediente(c.ing, c.cx, cardY);
     };
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
@@ -598,6 +720,127 @@ export default function EmplataGame(props: {
       ctx.fill();
     };
 
+    /**
+     * EL FIDEO MESERO — hebra de spaghetti viva desde el ancla (boca de la caja) hasta la punta.
+     * 3 pasadas como el personaje del juego: sombra propia ↘, cuerpo ámbar, filo de brillo ↖.
+     * Con `holdSpr` lleva el ingrediente colgando envuelto en un rizo; con `eyes`, ojitos en la punta.
+     */
+    const drawFideo = (
+      ax: number,
+      ay: number,
+      tipX: number,
+      tipY: number,
+      seed: number,
+      holdSpr: Off | null,
+      eyes: boolean,
+      pupilDown = 0,
+    ) => {
+      const wd = world.current;
+      const wob = Math.sin(wd.t * 0.22 + seed) * 7;
+      const wob2 = Math.cos(wd.t * 0.18 + seed * 1.7) * 6;
+      const dx = tipX - ax;
+      const dy = tipY - ay;
+      const c1x = ax + dx * 0.18 + wob;
+      const c1y = ay - 46 + wob2 * 0.6 + dy * 0.1;
+      const c2x = ax + dx * 0.72 - wob * 0.6;
+      const c2y = Math.min(ay, tipY) - 40 + wob2;
+      const N = 20;
+      const pts: Array<[number, number]> = [];
+      for (let k = 0; k <= N; k++) {
+        const t = k / N;
+        const mt = 1 - t;
+        const px =
+          mt * mt * mt * ax + 3 * mt * mt * t * c1x + 3 * mt * t * t * c2x + t * t * t * tipX;
+        const py =
+          mt * mt * mt * ay + 3 * mt * mt * t * c1y + 3 * mt * t * t * c2y + t * t * t * tipY;
+        pts.push([px, py]);
+      }
+      const trazo = (offY: number) => {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1] + offY);
+        for (let k = 1; k <= N; k++) ctx.lineTo(pts[k][0], pts[k][1] + offY);
+        ctx.stroke();
+      };
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      // el ingrediente cuelga bajo la punta, envuelto en un rizo del fideo
+      const hr = SPR * 0.36;
+      if (holdSpr) {
+        ctx.save();
+        ctx.translate(tipX, tipY + hr * 0.6);
+        ctx.rotate(Math.sin(wd.t * 0.15 + seed) * 0.12);
+        ctx.drawImage(holdSpr, -hr, -hr, hr * 2, hr * 2);
+        ctx.restore();
+      }
+      // sombra propia ↘
+      ctx.strokeStyle = "rgba(50,28,10,0.32)";
+      ctx.lineWidth = 8.5;
+      trazo(2.5);
+      // cuerpo ámbar (más claro hacia la punta)
+      const bodyG = ctx.createLinearGradient(ax, ay, tipX, tipY);
+      bodyG.addColorStop(0, "#B97A24");
+      bodyG.addColorStop(1, "#F2AE38");
+      ctx.strokeStyle = bodyG;
+      ctx.lineWidth = 6.5;
+      trazo(0);
+      // filo de brillo ↖
+      ctx.strokeStyle = "rgba(255,242,205,0.85)";
+      ctx.lineWidth = 2;
+      trazo(-1.6);
+      // rizo que envuelve el ingrediente
+      if (holdSpr) {
+        ctx.strokeStyle = "#E9A32C";
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.ellipse(tipX, tipY + hr * 0.3, hr * 0.62, hr * 0.26, 0.18, Math.PI * 0.85, Math.PI * 2.15);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(255,242,205,0.8)";
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.ellipse(tipX, tipY + hr * 0.26, hr * 0.6, hr * 0.24, 0.18, Math.PI * 1.05, Math.PI * 1.7);
+        ctx.stroke();
+      }
+      // punta rechoncha + especular
+      ctx.fillStyle = "#F6C566";
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, 4.4, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.beginPath();
+      ctx.arc(tipX - 1.4, tipY - 1.6, 1.2, 0, TAU);
+      ctx.fill();
+      // ojitos (el ADN del personaje de EL ENREDO: pequeños, con vida)
+      if (eyes && !holdSpr) {
+        const [px2, py2] = pts[N - 2];
+        let dirX = tipX - px2;
+        let dirY = tipY - py2;
+        const dl = Math.hypot(dirX, dirY) || 1;
+        dirX /= dl;
+        dirY /= dl;
+        const perX = -dirY;
+        const perY = dirX;
+        const blink = wd.t % 190 < 7 ? 0.16 : 1;
+        for (const sd of [-1, 1]) {
+          const ex = tipX - dirX * 1.6 + perX * sd * 3;
+          const ey = tipY - dirY * 1.6 + perY * sd * 3;
+          ctx.fillStyle = "#2A1608";
+          ctx.save();
+          ctx.translate(ex, ey + pupilDown);
+          ctx.scale(1, blink);
+          ctx.beginPath();
+          ctx.arc(0, 0, 1.9, 0, TAU);
+          ctx.fill();
+          ctx.restore();
+          if (blink === 1) {
+            ctx.fillStyle = "rgba(255,255,255,0.9)";
+            ctx.beginPath();
+            ctx.arc(ex - 0.6, ey - 0.6 + pupilDown, 0.6, 0, TAU);
+            ctx.fill();
+          }
+        }
+      }
+    };
+
     const frame = () => {
       raf = requestAnimationFrame(frame);
       const wd = world.current;
@@ -605,17 +848,59 @@ export default function EmplataGame(props: {
       const { boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH } = geo();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // ===== fondo: pared cálida + luz de cocina ↖ + mostrador =====
+      // cambio de pestaña → animación de entrada de cartas + reset de scroll
+      if (sel.current.tab !== wd.lastTab) {
+        wd.lastTab = sel.current.tab;
+        wd.tabT = wd.t;
+        wd.trayScroll = 0;
+        wd.trayVel = 0;
+      }
+
+      // ===== fondo: pared cálida + remolinos de fideo + luz de cocina ↖ + mostrador =====
       ctx.fillStyle = "#F6E7CB";
       ctx.fillRect(0, 0, W, H);
+      const woodY = H * 0.46;
+      if (!wd.wallPat) {
+        const tcv = document.createElement("canvas");
+        tcv.width = 150;
+        tcv.height = 150;
+        const tg = tcv.getContext("2d")!;
+        tg.strokeStyle = "rgba(150,100,50,0.07)";
+        tg.lineWidth = 9;
+        tg.lineCap = "round";
+        tg.beginPath();
+        tg.arc(40, 44, 20, 0.4, 4.6);
+        tg.stroke();
+        tg.beginPath();
+        tg.arc(108, 112, 16, 2.2, 7.2);
+        tg.stroke();
+        tg.beginPath();
+        tg.arc(118, 32, 12, 1.2, 5.6);
+        tg.stroke();
+        wd.wallPat = ctx.createPattern(tcv, "repeat");
+      }
+      if (wd.wallPat) {
+        ctx.fillStyle = wd.wallPat;
+        ctx.fillRect(0, 0, W, woodY);
+      }
       const luz = ctx.createRadialGradient(W * 0.3, H * 0.1, 20, W * 0.3, H * 0.1, H * 0.9);
       luz.addColorStop(0, "rgba(255,245,220,0.9)");
       luz.addColorStop(0.5, "rgba(255,235,200,0.25)");
       luz.addColorStop(1, "rgba(120,80,40,0.16)");
       ctx.fillStyle = luz;
       ctx.fillRect(0, 0, W, H);
+      // motas de polvo flotando en el haz de luz (cocina viva)
+      for (let k = 0; k < 7; k++) {
+        const mx = W * 0.07 + (((k * 137) % 100) / 100) * W * 0.5 + Math.sin(wd.t * 0.005 + k * 1.7) * 14;
+        const my = H * 0.05 + (((k * 71) % 100) / 100) * H * 0.3 + Math.cos(wd.t * 0.004 + k) * 10;
+        ctx.globalAlpha = 0.08 + 0.05 * Math.sin(wd.t * 0.01 + k * 2);
+        ctx.fillStyle = "#FFF6E4";
+        ctx.beginPath();
+        ctx.arc(mx, my, 1.6, 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
       // mostrador de madera (desde el tercio inferior)
-      const woodY = H * 0.46;
       const wood = ctx.createLinearGradient(0, woodY, 0, H);
       wood.addColorStop(0, "#8A5A2E");
       wood.addColorStop(0.12, "#6E4523");
@@ -632,12 +917,16 @@ export default function EmplataGame(props: {
       }
 
       // ===== LA CAJA =====
+      // entrada: la caja cae a escena con squash en el primer medio segundo
+      const ent = Math.min(1, wd.t / 26);
+      const entY = (1 - easeOutCubic(ent)) * -H * 0.35;
+      if (wd.t === 27) wd.boxSquash = 1;
       const squash = 1 + 0.05 * Math.sin(wd.t * 0.02) * 0.3 + wd.boxSquash * 0.08;
       wd.boxSquash *= 0.86;
       if (wd.folding && wd.fold < 1) wd.fold = Math.min(1, wd.fold + 0.022);
       const f = wd.fold;
       ctx.save();
-      ctx.translate(boxX, boxY + boxH * 0.32);
+      ctx.translate(boxX, boxY + boxH * 0.32 + entY);
       ctx.scale(1 + wd.boxSquash * 0.05, squash - wd.boxSquash * 0.05);
       ctx.translate(0, -boxH * 0.32);
       // sombra de contacto (cálida, ceñida)
@@ -685,12 +974,17 @@ export default function EmplataGame(props: {
           ctx.restore();
         }
 
-        // LA COMIDA — apilada, SOBRESALE del borde (montañita); clip solo lateral
+        // LA COMIDA — montañita compuesta: la base es la cama (atrás), la proteína al frente,
+        // los toppings coronan arriba; SOBRESALE del borde; clip solo lateral
         ctx.save();
         ctx.beginPath();
         ctx.rect(-boxW * 0.44, -boxH * 0.95, boxW * 0.88, boxH * 1.1);
         ctx.clip();
-        const ordenada = [...wd.pila].sort((a, b) => (a.oy - b.oy));
+        const capa = (id: string) => {
+          const c = find(id)?.categoria;
+          return c === "base" ? 0 : c === "proteina" ? 1 : 2;
+        };
+        const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id) || a.oy - b.oy);
         for (const p of ordenada) {
           const spr = wd.sprites.get(p.id);
           if (!spr) continue;
@@ -724,11 +1018,31 @@ export default function EmplataGame(props: {
       // tapa plegada + sello (al confirmar)
       if (f > 0.55) {
         const ta = (f - 0.55) / 0.45;
+        if (!wd.selloHecho) {
+          // el sello ATERRIZA: golpe seco + chispas doradas de fideo
+          wd.selloHecho = true;
+          wd.boxSquash = 1.3;
+          s.tone(196, 0.14, "sine", 0.18);
+          for (let k = 0; k < 12; k++) {
+            const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+            const sp = 3 + Math.random() * 4;
+            wd.chispas.push({
+              x: boxX,
+              y: boxY - boxH * 0.06,
+              vx: Math.cos(a) * sp,
+              vy: Math.sin(a) * sp,
+              rot: Math.random() * TAU,
+              vr: (Math.random() - 0.5) * 0.4,
+              life: 1,
+            });
+          }
+        }
         ctx.globalAlpha = ta;
         kraft(0, -boxH * 0.06, boxW * 0.98, boxH * 0.34, 8, 14);
+        const selloS = easeOutBack(Math.min(1, ta * 1.6));
         ctx.fillStyle = "rgba(200,50,30,0.92)";
         ctx.beginPath();
-        ctx.arc(0, -boxH * 0.06, 16 * ta, 0, TAU);
+        ctx.arc(0, -boxH * 0.06, 16 * selloS, 0, TAU);
         ctx.fill();
         ctx.fillStyle = "#FBF1DE";
         ctx.font = "800 9px var(--pg-font-body, system-ui)";
@@ -737,7 +1051,66 @@ export default function EmplataGame(props: {
       }
       ctx.restore();
 
-      // ===== física: vuelos =====
+      // vapor extra mientras se pliega (la cocina respira al cerrar)
+      if (wd.folding && wd.fold < 0.4 && wd.t % 3 === 0) {
+        wd.puffs.push({
+          x: boxX + (Math.random() - 0.5) * boxW * 0.5,
+          y: boxY - boxH * 0.28,
+          life: 1,
+          max: 50,
+          r: 6 + Math.random() * 5,
+          tipo: "vapor",
+        });
+      }
+
+      // ===== rizos de vapor (hebras onduladas — vapor con ADN de fideo) =====
+      if (wd.pila.length > 0 && f < 0.5) {
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#FFF9EE";
+        ctx.lineWidth = 3;
+        for (const sd of [0, 1]) {
+          ctx.globalAlpha = 0.13 + 0.05 * Math.sin(wd.t * 0.03 + sd * 2);
+          ctx.beginPath();
+          const x0 = boxX + (sd ? 16 : -14);
+          const y0 = boxY - boxH * 0.34;
+          for (let k = 0; k < 10; k++) {
+            const yy = y0 - k * 7;
+            const xx = x0 + Math.sin(wd.t * 0.045 + k * 0.7 + sd * 2.6) * (1.5 + k * 1.1);
+            if (k === 0) ctx.moveTo(xx, yy);
+            else ctx.lineTo(xx, yy);
+          }
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // ===== chispas doradas (sello) =====
+      for (let i = wd.chispas.length - 1; i >= 0; i--) {
+        const ch = wd.chispas[i];
+        ch.x += ch.vx;
+        ch.y += ch.vy;
+        ch.vy += 0.28;
+        ch.rot += ch.vr;
+        ch.life -= 0.028;
+        if (ch.life <= 0) {
+          wd.chispas.splice(i, 1);
+          continue;
+        }
+        ctx.save();
+        ctx.translate(ch.x, ch.y);
+        ctx.rotate(ch.rot);
+        ctx.globalAlpha = ch.life;
+        ctx.strokeStyle = "#F6C566";
+        ctx.lineWidth = 2.6;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.arc(0, 0, 4, 0, 2.4);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+
+      // ===== física: vuelos (la caída final desde la boca de la caja) =====
       for (let i = wd.vuelos.length - 1; i >= 0; i--) {
         const v = wd.vuelos[i];
         v.x += v.vx;
@@ -753,30 +1126,7 @@ export default function EmplataGame(props: {
             wd.boxSquash = 1;
             s.ruido(0.04, 0.05, 900);
           } else {
-            // aterrizó → a la pila
-            const cat = v.ing.categoria;
-            wd.pila = wd.pila.filter((p) => !(cat !== "topping" && find(p.id)?.categoria === cat));
-            wd.pila.push({
-              id: v.ing.id,
-              ox: cat === "base" ? 0 : (Math.random() - 0.5) * 1.6,
-              oy: cat === "base" ? 0.6 : Math.random() * 0.8 - 0.1,
-              rot: (Math.random() - 0.5) * 0.5,
-              s: cat === "base" ? 0.98 : cat === "proteina" ? 0.8 : 0.58,
-            });
-            if (wd.pila.length > 14) wd.pila.shift();
-            wd.boxSquash = 1;
-            // vapor + polvo + precio
-            for (let k = 0; k < 3; k++)
-              wd.puffs.push({ x: boxX + (Math.random() - 0.5) * 30, y: boxY - boxH * 0.2, life: 1, max: 60 + Math.random() * 30, r: 5 + Math.random() * 6, tipo: "vapor" });
-            const idxT = sel.current.toppingIds.indexOf(v.ing.id);
-            const gratis = v.ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
-            wd.pops.push({
-              x: boxX,
-              y: boxY - boxH * 0.42,
-              life: 1,
-              texto: gratis ? "GRATIS" : v.ing.precio > 0 ? `+${formatCOP(v.ing.precio)}` : v.ing.nombre,
-              gratis,
-            });
+            aterrizar(v.ing);
             wd.vuelos.splice(i, 1);
             continue;
           }
@@ -811,26 +1161,6 @@ export default function EmplataGame(props: {
         ctx.beginPath();
         ctx.arc(p.x, yy, p.r * (1 + (1 - p.life) * 1.6), 0, TAU);
         ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-
-      // ===== price pops =====
-      for (let i = wd.pops.length - 1; i >= 0; i--) {
-        const p = wd.pops[i];
-        p.life -= 0.016;
-        if (p.life <= 0) {
-          wd.pops.splice(i, 1);
-          continue;
-        }
-        const yy = p.y - (1 - p.life) * 34;
-        ctx.globalAlpha = Math.min(1, p.life * 2);
-        ctx.font = `800 ${p.gratis ? 15 : 14}px var(--pg-font-display, Georgia), serif`;
-        ctx.textAlign = "center";
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(60,35,15,0.55)";
-        ctx.strokeText(p.texto, p.x, yy);
-        ctx.fillStyle = p.gratis ? "#7ED07C" : "#FFD98A";
-        ctx.fillText(p.texto, p.x, yy);
         ctx.globalAlpha = 1;
       }
 
@@ -885,30 +1215,45 @@ export default function EmplataGame(props: {
           ing.id === sel.current.baseId ||
           ing.id === sel.current.proteinaId ||
           sel.current.toppingIds.includes(ing.id);
+        // entrada escalonada al cambiar de pestaña
+        const ap = Math.min(1, Math.max(0, (wd.t - wd.tabT - k * 2) / 10));
+        const ea = easeOutCubic(ap);
         const bob = Math.sin(wd.t * 0.04 + k) * 2;
-        const cyk = cardY + bob;
-        // carta
+        const press = wd.pressed === ing.id ? 0.94 : 1;
+        ctx.save();
+        ctx.translate(cx, cardY + bob + (1 - ea) * 30);
+        ctx.scale(press, press);
+        ctx.globalAlpha = ea;
+        // carta (coordenadas locales: centro en 0,0)
         ctx.fillStyle = "rgba(30,16,8,0.35)";
         ctx.beginPath();
-        ctx.roundRect(cx - cardW / 2 + 2, cyk - cardH / 2 + 4, cardW, cardH, 14);
+        ctx.roundRect(-cardW / 2 + 2, -cardH / 2 + 4, cardW, cardH, 14);
         ctx.fill();
         ctx.fillStyle = selr ? "#FFF3D6" : "#FBF1DE";
         ctx.beginPath();
-        ctx.roundRect(cx - cardW / 2, cyk - cardH / 2, cardW, cardH, 14);
+        ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 14);
         ctx.fill();
         if (selr) {
-          ctx.lineWidth = 3;
+          ctx.lineWidth = 3 + Math.sin(wd.t * 0.09 + k) * 0.6;
           ctx.strokeStyle = "#F2A516";
           ctx.beginPath();
-          ctx.roundRect(cx - cardW / 2 + 1.5, cyk - cardH / 2 + 1.5, cardW - 3, cardH - 3, 12);
+          ctx.roundRect(-cardW / 2 + 1.5, -cardH / 2 + 1.5, cardW - 3, cardH - 3, 12);
           ctx.stroke();
         }
-        // sprite
+        // sprite (los elegidos se mecen contentos)
         const spr = wd.sprites.get(ing.id);
         if (spr) {
-          ctx.globalAlpha = ing.agotado ? 0.35 : 1;
-          ctx.drawImage(spr, cx - 33, cyk - cardH / 2 + 4, 66, 66);
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = ea * (ing.agotado ? 0.35 : 1);
+          if (selr) {
+            ctx.save();
+            ctx.translate(0, -cardH / 2 + 37);
+            ctx.rotate(Math.sin(wd.t * 0.09 + k * 1.3) * 0.07);
+            ctx.drawImage(spr, -33, -33, 66, 66);
+            ctx.restore();
+          } else {
+            ctx.drawImage(spr, -33, -cardH / 2 + 4, 66, 66);
+          }
+          ctx.globalAlpha = ea;
         }
         // nombre (2 líneas máx)
         ctx.font = "700 10px var(--pg-font-body, system-ui)";
@@ -917,8 +1262,8 @@ export default function EmplataGame(props: {
         const words = ing.nombre.split(" ");
         const l1 = words.slice(0, 2).join(" ").slice(0, 14);
         const l2 = words.slice(2).join(" ").slice(0, 14);
-        ctx.fillText(l1, cx, cyk + cardH / 2 - (l2 ? 34 : 26));
-        if (l2) ctx.fillText(l2, cx, cyk + cardH / 2 - 24);
+        ctx.fillText(l1, 0, cardH / 2 - (l2 ? 34 : 26));
+        if (l2) ctx.fillText(l2, 0, cardH / 2 - 24);
         // precio
         const idxT = sel.current.toppingIds.indexOf(ing.id);
         const esGratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
@@ -926,36 +1271,169 @@ export default function EmplataGame(props: {
         ctx.fillStyle = ing.agotado ? "#A0A0A0" : esGratis ? "#4C9A5A" : "#C8321E";
         ctx.fillText(
           ing.agotado ? "AGOTADO" : esGratis ? "GRATIS" : ing.precio > 0 ? formatCOP(ing.precio) : "—",
-          cx,
-          cyk + cardH / 2 - 11,
+          0,
+          cardH / 2 - 11,
         );
         // check
         if (selr) {
           ctx.fillStyle = "#F2A516";
           ctx.beginPath();
-          ctx.arc(cx + cardW / 2 - 13, cyk - cardH / 2 + 13, 9, 0, TAU);
+          ctx.arc(cardW / 2 - 13, -cardH / 2 + 13, 9, 0, TAU);
           ctx.fill();
           ctx.strokeStyle = "#1E1611";
           ctx.lineWidth = 2.2;
           ctx.beginPath();
-          ctx.moveTo(cx + cardW / 2 - 17, cyk - cardH / 2 + 13);
-          ctx.lineTo(cx + cardW / 2 - 14, cyk - cardH / 2 + 16.5);
-          ctx.lineTo(cx + cardW / 2 - 9, cyk - cardH / 2 + 9);
+          ctx.moveTo(cardW / 2 - 17, -cardH / 2 + 13);
+          ctx.lineTo(cardW / 2 - 14, -cardH / 2 + 16.5);
+          ctx.lineTo(cardW / 2 - 9, -cardH / 2 + 9);
           ctx.stroke();
         }
+        ctx.restore();
       }
-      // pista de scroll
+      ctx.globalAlpha = 1;
+      // pista de scroll — un fideíto ondulado
       if (maxScroll > 0) {
-        ctx.fillStyle = "rgba(251,241,222,0.25)";
-        ctx.beginPath();
-        ctx.roundRect(W * 0.3, cardY + cardH / 2 + 12, W * 0.4, 3, 2);
-        ctx.fill();
-        ctx.fillStyle = "rgba(242,165,22,0.9)";
-        const th = (W * 0.4) * (W / (totalW2 + 1));
-        ctx.beginPath();
-        ctx.roundRect(W * 0.3 + (W * 0.4 - th) * (wd.trayScroll / maxScroll), cardY + cardH / 2 + 12, th, 3, 2);
-        ctx.fill();
+        const trackX = W * 0.3;
+        const trackW = W * 0.4;
+        const yb = cardY + cardH / 2 + 14;
+        ctx.lineCap = "round";
+        const onda = (xa: number, xb: number) => {
+          ctx.beginPath();
+          for (let xx = xa; xx <= xb; xx += 5) {
+            const yy = yb + Math.sin(xx * 0.14) * 2.2;
+            if (xx === xa) ctx.moveTo(xx, yy);
+            else ctx.lineTo(xx, yy);
+          }
+          ctx.stroke();
+        };
+        ctx.strokeStyle = "rgba(251,241,222,0.22)";
+        ctx.lineWidth = 3;
+        onda(trackX, trackX + trackW);
+        const th = trackW * (W / (totalW2 + 1));
+        const tx0 = trackX + (trackW - th) * (wd.trayScroll / maxScroll);
+        ctx.strokeStyle = "#F2A516";
+        ctx.lineWidth = 3.4;
+        onda(tx0, tx0 + th);
       }
+
+      // ===== EL FIDEO MESERO (encima de la bandeja: agarra sobre las cartas) =====
+      const mouthYBase = boxY - boxH * 0.34;
+      for (let i = wd.fideos.length - 1; i >= 0; i--) {
+        const fd = wd.fideos[i];
+        const age = wd.t - fd.t0;
+        const mouthX = boxX + fd.off;
+        const anchX = boxX + fd.off * 0.5;
+        const anchY = boxY - boxH * 0.1;
+        let tipX = 0;
+        let tipY = 0;
+        let holding = false;
+        let eyes = false;
+        if (fd.dir === "traer") {
+          if (age <= F_EXT) {
+            const u = easeOutCubic(age / F_EXT);
+            const cxm = (mouthX + fd.tx) / 2;
+            const cym = Math.min(mouthYBase, fd.ty) - 60;
+            tipX = bez2(mouthX, cxm, fd.tx, u);
+            tipY = bez2(mouthYBase, cym, fd.ty, u);
+            eyes = true;
+          } else if (age <= F_EXT + F_GRAB) {
+            if (!fd.grabbed) {
+              fd.grabbed = true;
+              s.tone(760, 0.05, "triangle", 0.07);
+              for (let k = 0; k < 2; k++)
+                wd.puffs.push({ x: fd.tx + (Math.random() - 0.5) * 20, y: fd.ty - 10, life: 1, max: 26, r: 5, tipo: "polvo" });
+            }
+            tipX = fd.tx;
+            tipY = fd.ty - Math.sin(((age - F_EXT) / F_GRAB) * Math.PI) * 5;
+            holding = age > F_EXT + 2;
+          } else if (age <= F_EXT + F_GRAB + F_CARRY) {
+            const u = smooth((age - F_EXT - F_GRAB) / F_CARRY);
+            const apexX = boxX + fd.off * 0.5;
+            const apexY = boxY - boxH * 0.95;
+            const dropX = boxX + fd.off * 0.3;
+            tipX = bez2(fd.tx, apexX, dropX, u);
+            tipY = bez2(fd.ty, apexY, mouthYBase - 6, u);
+            holding = true;
+          } else {
+            // suelta: caída corta con rebote dentro de la caja (la física existente remata)
+            wd.vuelos.push({
+              ing: fd.ing,
+              x: boxX + fd.off * 0.3,
+              y: mouthYBase,
+              vx: -fd.off * 0.02,
+              vy: 1.6,
+              rot: (Math.random() - 0.5) * 0.4,
+              vr: (Math.random() - 0.5) * 0.1,
+              bounces: 0,
+            });
+            wd.fideos.splice(i, 1);
+            continue;
+          }
+        } else {
+          // sacar: levanta el ingrediente de la caja y lo devuelve a su carta
+          if (age <= F_SUBIR) {
+            const u = easeOutCubic(age / F_SUBIR);
+            tipX = mouthX;
+            tipY = mouthYBase - u * boxH * 0.35;
+            holding = true;
+          } else if (age <= F_SUBIR + F_LLEVAR) {
+            const u = smooth((age - F_SUBIR) / F_LLEVAR);
+            const apexX = (mouthX + fd.tx) / 2;
+            const apexY = Math.min(mouthYBase - boxH * 0.5, fd.ty - 80);
+            tipX = bez2(mouthX, apexX, fd.tx, u);
+            tipY = bez2(mouthYBase - boxH * 0.35, apexY, fd.ty, u);
+            holding = true;
+          } else {
+            for (let k = 0; k < 3; k++)
+              wd.puffs.push({ x: fd.tx + (Math.random() - 0.5) * 24, y: fd.ty, life: 1, max: 30, r: 6, tipo: "polvo" });
+            s.tone(340, 0.08, "triangle", 0.09, 200);
+            wd.fideos.splice(i, 1);
+            continue;
+          }
+        }
+        drawFideo(anchX, anchY, tipX, tipY, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, eyes);
+      }
+
+      // ===== fideo curioso: si nadie toca nada, se asoma y mira la bandeja =====
+      const idle = wd.t - wd.lastAct;
+      if (idle > 420 && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding) {
+        const cycle = (idle - 420) % 640;
+        if (cycle < 270) {
+          const kIn = easeOutCubic(Math.min(1, cycle / 30));
+          const kOut = cycle > 215 ? Math.max(0, 1 - (cycle - 215) / 55) : 1;
+          const kk = kIn * kOut;
+          if (kk > 0.01) {
+            const tipY2 = mouthYBase - 52 * kk;
+            const tipX2 = boxX + Math.sin(cycle * 0.045) * 12 * kk;
+            drawFideo(boxX, boxY - boxH * 0.1, tipX2, tipY2, 3.7, null, true, 1.3);
+          }
+        }
+      }
+
+      // ===== price pops (nacen ALTOS, entran con rebote) =====
+      for (let i = wd.pops.length - 1; i >= 0; i--) {
+        const p = wd.pops[i];
+        p.life -= 0.016;
+        if (p.life <= 0) {
+          wd.pops.splice(i, 1);
+          continue;
+        }
+        const yy = p.y - (1 - p.life) * 26;
+        const scl = easeOutBack(Math.min(1, (1 - p.life) * 4));
+        ctx.save();
+        ctx.translate(p.x, yy);
+        ctx.scale(scl, scl);
+        ctx.globalAlpha = Math.min(1, p.life * 2);
+        ctx.font = `800 ${p.gratis ? 15 : 14}px var(--pg-font-display, Georgia), serif`;
+        ctx.textAlign = "center";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(60,35,15,0.55)";
+        ctx.strokeText(p.texto, 0, 0);
+        ctx.fillStyle = p.gratis ? "#7ED07C" : "#FFD98A";
+        ctx.fillText(p.texto, 0, 0);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
     };
     raf = requestAnimationFrame(frame);
 
@@ -1012,9 +1490,15 @@ export default function EmplataGame(props: {
               setPedido(null);
               setToppingIds([]);
               setProteinaId("");
-              world.current.pila = [];
-              world.current.fold = 0;
-              world.current.folding = false;
+              const wd = world.current;
+              wd.pila = [];
+              wd.fideos = [];
+              wd.vuelos = [];
+              wd.chispas = [];
+              wd.fold = 0;
+              wd.folding = false;
+              wd.selloHecho = false;
+              wd.combo = 0;
             }}
           >
             Pedir otra caja
@@ -1054,7 +1538,7 @@ export default function EmplataGame(props: {
         </div>
         <button
           type="button"
-          className="emp-cta"
+          className={`emp-cta ${abierto && baseId && !enviando ? "emp-cta--vivo" : ""}`}
           onClick={confirmar}
           disabled={!abierto || enviando || !baseId}
         >
