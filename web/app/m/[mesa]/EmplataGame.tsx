@@ -104,6 +104,22 @@ function spec(g: CanvasRenderingContext2D, x: number, y: number, r: number, hard
     g.fill();
   }
 }
+/** Deriva tonos cálidos del color del catálogo: f>0 aclara hacia crema, f<0 oscurece hacia marrón. */
+function shade(hex: string | undefined, f: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  let r = 242;
+  let g = 165;
+  let b = 22;
+  if (m) {
+    r = parseInt(m[1].slice(0, 2), 16);
+    g = parseInt(m[1].slice(2, 4), 16);
+    b = parseInt(m[1].slice(4, 6), 16);
+  }
+  const t = f > 0 ? [255, 244, 214] : [58, 34, 12];
+  const k = Math.abs(f);
+  return `rgb(${Math.round(r + (t[0] - r) * k)},${Math.round(g + (t[1] - g) * k)},${Math.round(b + (t[2] - b) * k)})`;
+}
+
 function blob(g: CanvasRenderingContext2D, cx: number, cy: number, r: number, s1: number, sq = 0.94): () => void {
   return () => {
     g.beginPath();
@@ -117,7 +133,12 @@ function blob(g: CanvasRenderingContext2D, cx: number, cy: number, r: number, s1
   };
 }
 
-/** Pinta el sprite de un ingrediente según su id (regex) — o gema+emoji si no lo conocemos. */
+/**
+ * Pinta el sprite de un ingrediente según su id (regex) — y si no lo conocemos, un GENERADOR
+ * PROCEDURAL con volumen a partir de ing.color + categoría. NUNCA emoji, nunca system-ui.
+ * Al final, TODA silueta pasa por el horneado volumétrico (luz ↖ + sombra propia ↘) y se
+ * compone sobre su sombra de contacto — una sola luz, coherente con la biblia de arte.
+ */
 function bakeSprite(ing: Ingrediente): Off {
   const { c, g } = makeOff();
   const cx = SPR / 2;
@@ -125,7 +146,6 @@ function bakeSprite(ing: Ingrediente): Off {
   const id = ing.id;
   g.lineJoin = "round";
   g.lineCap = "round";
-  ao(g, cx, cy, R);
 
   if (/spaghetti|pasta|fideo/.test(id)) {
     // nido de spaghetti: hebras ámbar enrolladas con brillo
@@ -309,17 +329,68 @@ function bakeSprite(ing: Ingrediente): Off {
     }
     spec(g, cx - R * 0.2, cy - R * 0.36, R, true);
   } else {
-    // desconocido → gema cálida con su emoji
-    volumen(g, () => {
-      g.beginPath();
-      g.arc(cx, cy, R * 0.9, 0, TAU);
-    }, cx, cy, R * 0.9, "#FFE2A0", ing.color || "#F2A516", "#6E4310");
-    g.font = `${R * 1.1}px system-ui`;
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    g.fillText(ing.emoji || "🍽️", cx, cy + 2);
+    // DESCONOCIDO → forma rechoncha procedural con el color del catálogo (jamás emoji)
+    const hi = shade(ing.color, 0.45);
+    const mi = shade(ing.color, 0);
+    const lo = shade(ing.color, -0.55);
+    if (ing.categoria === "topping") {
+      // montículo triple: tres masas redondeadas que se tocan
+      const masas: Array<[number, number, number]> = [
+        [-0.34, 0.16, 0.44],
+        [0.36, 0.1, 0.4],
+        [0.0, -0.24, 0.48],
+      ];
+      for (const [px, py, pr] of masas) {
+        const x = cx + px * R;
+        const y = cy + py * R;
+        volumen(g, () => {
+          g.beginPath();
+          g.ellipse(x, y, pr * R, pr * R * 0.85, px * 0.4, 0, TAU);
+        }, x, y, pr * R, hi, mi, lo);
+      }
+      rim(g, () => {
+        g.beginPath();
+        g.ellipse(cx, cy - R * 0.24, R * 0.48, R * 0.4, 0, 0, TAU);
+      }, cx, cy - R * 0.24, R * 0.46, 0.6);
+      spec(g, cx - R * 0.18, cy - R * 0.42, R * 0.7, false);
+    } else if (ing.categoria === "proteina") {
+      // masa generosa e irregular
+      volumen(g, blob(g, cx, cy, R * 0.9, 2.6, 0.86), cx, cy, R * 0.9, hi, mi, lo);
+      rim(g, blob(g, cx, cy, R * 0.9, 2.6, 0.86), cx, cy, R * 0.9, 0.65);
+      spec(g, cx - R * 0.24, cy - R * 0.28, R, false);
+    } else {
+      // base: montículo ancho y bajo (una cama)
+      volumen(g, () => {
+        g.beginPath();
+        g.ellipse(cx, cy + R * 0.12, R * 0.95, R * 0.58, 0, 0, TAU);
+      }, cx, cy, R * 0.9, hi, mi, lo);
+      rim(g, () => {
+        g.beginPath();
+        g.ellipse(cx, cy + R * 0.12, R * 0.95, R * 0.58, 0, 0, TAU);
+      }, cx, cy, R * 0.9, 0.55);
+      spec(g, cx - R * 0.3, cy - R * 0.12, R, false);
+    }
   }
-  return c;
+
+  // ===== HORNEADO VOLUMÉTRICO (todas las siluetas, una sola luz ↖) =====
+  g.globalCompositeOperation = "source-atop";
+  const vg = g.createRadialGradient(cx - R * 0.5, cy - R * 0.55, R * 0.1, cx, cy, R * 1.5);
+  vg.addColorStop(0, "rgba(255,248,225,0.30)");
+  vg.addColorStop(0.55, "rgba(255,248,225,0)");
+  g.fillStyle = vg;
+  g.fillRect(0, 0, SPR, SPR);
+  const dg = g.createLinearGradient(cx + R * 0.9, cy + R * 0.9, cx - R * 0.3, cy - R * 0.3);
+  dg.addColorStop(0, "rgba(58,32,10,0.30)");
+  dg.addColorStop(0.5, "rgba(58,32,10,0)");
+  g.fillStyle = dg;
+  g.fillRect(0, 0, SPR, SPR);
+  g.globalCompositeOperation = "source-over";
+
+  // ===== composición final: sombra de contacto elíptica + la forma horneada =====
+  const { c: out, g: og } = makeOff();
+  ao(og, cx, cy, R);
+  og.drawImage(c, 0, 0);
+  return out;
 }
 
 /* =========================================================================
@@ -343,10 +414,13 @@ type Fideo = {
   t0: number;
   dir: "traer" | "sacar";
   off: number; // desplazamiento del ancla (hebras concurrentes)
+  drop: number; // [-1,1] dónde suelta sobre la caja (dispersa el montón)
   seed: number;
   grabbed?: boolean; // ya sonó el agarre
 };
-type PilaItem = { id: string; ox: number; oy: number; rot: number; s: number };
+/** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
+ *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
+type PilaItem = { id: string; fx: number; fy: number; ty: number; rot: number; s: number; r: number };
 type Puff = { x: number; y: number; life: number; max: number; r: number; tipo: "vapor" | "polvo" };
 type Pop = { x: number; y: number; life: number; texto: string; gratis: boolean };
 type Chispa = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number };
@@ -413,6 +487,7 @@ export default function EmplataGame(props: {
     boxSquash: 0, // 0..1 al aterrizar algo
     fold: 0, // 0 abierto → 1 plegado (confirmar)
     folding: false,
+    resettle: false, // el montón debe reacomodarse (cambió la cama o se sacó algo)
     selloHecho: false,
     combo: 0,
     comboT: -9999,
@@ -447,6 +522,7 @@ export default function EmplataGame(props: {
         t0: wd.t,
         dir: "traer",
         off: ((wd.fideoN++ % 3) - 1) * 26,
+        drop: (Math.random() - 0.5) * 2,
         seed: Math.random() * 10,
       });
     },
@@ -475,6 +551,7 @@ export default function EmplataGame(props: {
           // el fideo lo SACA de la caja y lo devuelve a su carta
           setToppingIds((prev) => prev.filter((t) => t !== ing.id));
           world.current.pila = world.current.pila.filter((p) => p.id !== ing.id);
+          world.current.resettle = true; // los de arriba caen al hueco que dejó
           world.current.fideos.push({
             ing,
             tx: cx,
@@ -482,6 +559,7 @@ export default function EmplataGame(props: {
             t0: world.current.t,
             dir: "sacar",
             off: ((world.current.fideoN++ % 3) - 1) * 22,
+            drop: 0,
             seed: Math.random() * 10,
           });
           s.ruido(0.05, 0.04, 1400);
@@ -556,10 +634,10 @@ export default function EmplataGame(props: {
 
     // ---------- geometría de la escena ----------
     const geo = () => {
-      const boxW = Math.min(W * 0.58, 250);
+      const boxW = Math.min(W * 0.66, 300);
       const boxH = boxW * 0.78;
       const boxX = W / 2;
-      const boxY = H * 0.295;
+      const boxY = H * 0.32;
       const trayY = H * 0.555; // pestañas
       const cardW = 92;
       const cardH = 118;
@@ -570,41 +648,62 @@ export default function EmplataGame(props: {
     const listaActiva = (): Ingrediente[] =>
       sel.current.tab === 0 ? bases : sel.current.tab === 1 ? proteinas : toppings;
 
-    /** Aterrizaje en la caja: composición de la montañita + squash + vapor + precio + combo. */
-    const aterrizar = (ing: Ingrediente) => {
+    /** Radio de colisión (px) según categoría — la comida ocupa ~0.35 del sprite. */
+    const radioDe = (cat: string, sc: number) => SPR * sc * 0.35;
+
+    /**
+     * FÍSICA DE APILADO: dónde reposa un círculo de radio r soltado en x local `lxIn`.
+     * Cae hasta tocar la cama (la base levanta el piso) o apoyarse SOBRE otro item ya
+     * asentado (colisión circular con solape buscado — la comida real se toca).
+     */
+    const reposo = (lxIn: number, r: number, excluirId?: string) => {
+      const { boxW, boxH } = geo();
       const wd = world.current;
-      const { boxH, boxX, boxY } = geo();
+      const hayBase = wd.pila.some((p) => find(p.id)?.categoria === "base");
+      const lim = boxW * 0.3;
+      const lx = Math.max(-lim, Math.min(lim, lxIn));
+      let y = (hayBase ? -0.16 : -0.04) * boxH - r * 0.35;
+      for (const p of wd.pila) {
+        if (p.id === excluirId || find(p.id)?.categoria === "base") continue;
+        const dx = lx - p.fx * boxW;
+        const md = (r + p.r * boxW) * 0.72;
+        if (Math.abs(dx) < md) {
+          const dy = Math.sqrt(md * md - dx * dx) * 0.8;
+          y = Math.min(y, p.ty * boxH - dy);
+        }
+      }
+      return { lx, y };
+    };
+
+    /** Aterrizaje: el item se queda DONDE la física lo dejó (x real del vuelo) + squash + precio. */
+    const aterrizar = (ing: Ingrediente, xScreen: number) => {
+      const wd = world.current;
+      const { boxW, boxH, boxX, boxY } = geo();
       const cat = ing.categoria;
       wd.pila = wd.pila.filter((p) => !(cat !== "topping" && find(p.id)?.categoria === cat));
-      // slot compuesto: la base es la CAMA (atrás), la proteína al frente-centro,
-      // los toppings CORONAN arriba en abanico (la montañita sobresale de la caja)
-      let ox = 0;
-      let oy = 0;
-      let rot = 0;
-      let sc = 1;
+      let fx = 0;
+      let ty = -0.1;
+      let rot = (Math.random() - 0.5) * 0.5;
+      let sc = 0.58;
       if (cat === "base") {
-        ox = 0;
-        oy = -0.3;
-        rot = (Math.random() - 0.5) * 0.1;
-        sc = 1.12;
-      } else if (cat === "proteina") {
-        ox = (Math.random() - 0.5) * 0.12;
-        oy = 0.6;
-        rot = (Math.random() - 0.5) * 0.3;
-        sc = 0.82;
+        // la CAMA: ancha, casi plana, al fondo
+        rot = (Math.random() - 0.5) * 0.06;
+        sc = 1.18;
       } else {
-        const k = wd.pila.filter((p) => find(p.id)?.categoria === "topping").length;
-        const FAN = [-0.5, 0.5, 0, -0.85, 0.85, -0.25, 0.25, -0.65, 0.65, 0.1];
-        ox = FAN[k % 10] + (Math.random() - 0.5) * 0.12;
-        oy = -0.55 - (k % 3) * 0.5 + (Math.random() - 0.5) * 0.2;
-        rot = (Math.random() - 0.5) * 0.7;
-        sc = 0.58;
+        sc = cat === "proteina" ? 0.8 : 0.58;
+        if (cat === "proteina") rot = (Math.random() - 0.5) * 0.25;
+        const r = radioDe(cat, sc);
+        // rueda hacia el hueco: prueba la x real ±8px y se queda en la MÁS asentada
+        let best = reposo(xScreen - boxX, r);
+        for (const dxTry of [-8, 8]) {
+          const c = reposo(xScreen - boxX + dxTry, r);
+          if (c.y > best.y) best = c;
+        }
+        fx = best.lx / boxW;
+        ty = best.y / boxH;
       }
-      wd.pila.push({ id: ing.id, ox, oy, rot, s: sc });
-      if (wd.pila.length > 18) {
-        const idx = wd.pila.findIndex((p) => find(p.id)?.categoria === "topping");
-        if (idx >= 0) wd.pila.splice(idx, 1);
-      }
+      wd.pila.push({ id: ing.id, fx, fy: ty - 0.035, ty, rot, s: sc, r: radioDe(cat, sc) / boxW });
+      if (cat !== "topping") wd.resettle = true; // cambió la cama → el montón se reacomoda
       wd.boxSquash = 1;
       s.caida(ing); // el ingrediente SUENA al aterrizar (no al tocar la carta)
       for (let k = 0; k < 3; k++)
@@ -936,7 +1035,23 @@ export default function EmplataGame(props: {
       ctx.fill();
 
       // ---- vista 3/4: pared TRASERA interior → COMIDA (sobresale) → banda FRONTAL ----
+      // DESPLIEGUE de apertura: la caja llega plegada y las solapas se abren en origami
+      // (easeOutBack = pasan de largo y asientan); al confirmar, (1-f) las vuelve a cerrar.
+      const abre = easeOutBack(Math.min(1, Math.max(0, (wd.t - 28) / 40))) * (1 - f);
       if (f < 0.9) {
+        // solapa TRASERA: se abate hacia atrás con escorzo (detrás de la pared)
+        const bh = boxW * 0.24 * (1 - abre * 0.82);
+        const bfG = ctx.createLinearGradient(0, -boxH * 0.42 - bh, 0, -boxH * 0.42);
+        bfG.addColorStop(0, "#B98A4C");
+        bfG.addColorStop(1, "#9A7038");
+        ctx.fillStyle = bfG;
+        ctx.beginPath();
+        ctx.moveTo(-boxW * 0.36, -boxH * 0.42);
+        ctx.lineTo(boxW * 0.36, -boxH * 0.42);
+        ctx.lineTo(boxW * 0.29, -boxH * 0.42 - bh);
+        ctx.lineTo(-boxW * 0.29, -boxH * 0.42 - bh);
+        ctx.closePath();
+        ctx.fill();
         // pared trasera (interior kraft oscuro, lit ↖)
         const backG = ctx.createLinearGradient(0, -boxH * 0.42, 0, boxH * 0.05);
         backG.addColorStop(0, "#8A6230");
@@ -945,21 +1060,48 @@ export default function EmplataGame(props: {
         ctx.beginPath();
         ctx.roundRect(-boxW * 0.42, -boxH * 0.42, boxW * 0.84, boxH * 0.48, 8);
         ctx.fill();
-        // sombra interior (la caja tiene hondo)
-        const inS = ctx.createLinearGradient(0, -boxH * 0.42, 0, -boxH * 0.18);
-        inS.addColorStop(0, "rgba(40,22,8,0.55)");
+        // canto superior iluminado ↖ (la luz marca el borde del pliegue)
+        ctx.strokeStyle = "rgba(255,236,195,0.5)";
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(-boxW * 0.4, -boxH * 0.42);
+        ctx.lineTo(boxW * 0.32, -boxH * 0.42);
+        ctx.stroke();
+        // sombra interior (la caja tiene hondo) — más honda abajo-derecha
+        const inS = ctx.createLinearGradient(0, -boxH * 0.42, 0, -boxH * 0.16);
+        inS.addColorStop(0, "rgba(40,22,8,0.6)");
         inS.addColorStop(1, "rgba(40,22,8,0)");
         ctx.fillStyle = inS;
         ctx.beginPath();
         ctx.roundRect(-boxW * 0.42, -boxH * 0.42, boxW * 0.84, boxH * 0.3, 8);
         ctx.fill();
+        const inR = ctx.createLinearGradient(boxW * 0.42, 0, boxW * 0.18, 0);
+        inR.addColorStop(0, "rgba(40,22,8,0.4)");
+        inR.addColorStop(1, "rgba(40,22,8,0)");
+        ctx.fillStyle = inR;
+        ctx.beginPath();
+        ctx.roundRect(boxW * 0.12, -boxH * 0.42, boxW * 0.3, boxH * 0.48, 8);
+        ctx.fill();
+        // branding interior: se lee al abrir vacía, la comida lo va tapando
+        const marcaA = Math.max(0, 0.55 - wd.pila.length * 0.14) * Math.min(1, abre * 1.4);
+        if (marcaA > 0.02) {
+          ctx.font = "800 10px var(--pg-font-display, Georgia), serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.globalAlpha = marcaA;
+          ctx.fillStyle = "rgba(40,22,8,0.9)";
+          ctx.fillText("P A P A G H E T T I", 0, -boxH * 0.18 + 1);
+          ctx.fillStyle = "rgba(230,190,130,0.8)";
+          ctx.fillText("P A P A G H E T T I", 0, -boxH * 0.18);
+          ctx.globalAlpha = 1;
+        }
 
-        // solapas cortas ABIERTAS, pegadas a las esquinas (alas de origami)
+        // solapas laterales: se DESPLIEGAN al abrir (ángulo animado por `abre`)
         const flapW = boxW * 0.22;
         for (const side of [-1, 1]) {
           ctx.save();
           ctx.translate(side * boxW * 0.42, -boxH * 0.34);
-          ctx.rotate(side * (0.85 - f * 0.85));
+          ctx.rotate(side * 0.85 * abre);
           const grad = ctx.createLinearGradient(0, 0, side * flapW, -flapW * 0.5);
           grad.addColorStop(0, "#C69A5B");
           grad.addColorStop(1, "#E2BA7E");
@@ -971,11 +1113,26 @@ export default function EmplataGame(props: {
           ctx.lineTo(0, -boxH * 0.02);
           ctx.closePath();
           ctx.fill();
+          // canto iluminado del pliegue
+          ctx.strokeStyle = "rgba(255,236,195,0.35)";
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(0, -boxH * 0.02);
+          ctx.lineTo(side * flapW * 0.7, -flapW * 0.6);
+          ctx.stroke();
           ctx.restore();
         }
 
-        // LA COMIDA — montañita compuesta: la base es la cama (atrás), la proteína al frente,
-        // los toppings coronan arriba; SOBRESALE del borde; clip solo lateral
+        // LA COMIDA — montón FÍSICO: cada item está donde la física lo dejó; se asienta con
+        // lerp hacia su y de reposo; SOBRESALE del borde; clip solo lateral
+        if (wd.resettle) {
+          // se quitó algo o cambió la cama → los de arriba resbalan hacia los huecos
+          wd.resettle = false;
+          for (const p of wd.pila) {
+            if (find(p.id)?.categoria === "base") continue;
+            p.ty = reposo(p.fx * boxW, p.r * boxW, p.id).y / boxH;
+          }
+        }
         ctx.save();
         ctx.beginPath();
         ctx.rect(-boxW * 0.44, -boxH * 0.95, boxW * 0.88, boxH * 1.1);
@@ -984,18 +1141,36 @@ export default function EmplataGame(props: {
           const c = find(id)?.categoria;
           return c === "base" ? 0 : c === "proteina" ? 1 : 2;
         };
-        const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id) || a.oy - b.oy);
+        // sort ESTABLE: capa (cama→proteína→toppings) y, dentro, orden de llegada = orden de apilado
+        const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id));
         for (const p of ordenada) {
           const spr = wd.sprites.get(p.id);
           if (!spr) continue;
+          p.fy += (p.ty - p.fy) * 0.25; // micro-asentamiento
+          const lx = p.fx * boxW;
+          const ly = p.fy * boxH;
+          const rp = p.r * boxW;
+          // sombra de contacto: lo pega al montón
+          if (capa(p.id) > 0) {
+            ctx.fillStyle = "rgba(50,28,10,0.22)";
+            ctx.beginPath();
+            ctx.ellipse(lx + 2, ly + rp * 0.6, rp * 0.9, rp * 0.34, 0, 0, TAU);
+            ctx.fill();
+          }
           ctx.save();
-          ctx.translate(p.ox * boxW * 0.3, -boxH * 0.16 + p.oy * boxH * 0.12);
+          ctx.translate(lx, capa(p.id) === 0 ? -boxH * 0.13 : ly);
           ctx.rotate(p.rot);
           const sz = SPR * p.s;
           ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
           ctx.restore();
         }
         ctx.restore();
+        // labio interior: la sombra del borde frontal CAE sobre la comida (está DENTRO)
+        const lip = ctx.createLinearGradient(0, boxH * 0.06, 0, -boxH * 0.06);
+        lip.addColorStop(0, "rgba(40,22,8,0.4)");
+        lip.addColorStop(1, "rgba(40,22,8,0)");
+        ctx.fillStyle = lip;
+        ctx.fillRect(-boxW * 0.42, -boxH * 0.06, boxW * 0.84, boxH * 0.12);
       }
 
       // banda FRONTAL kraft (baja: deja ver la comida) + wordmark emboss
@@ -1007,6 +1182,19 @@ export default function EmplataGame(props: {
       ctx.beginPath();
       ctx.roundRect(-boxW / 2, boxH * 0.05, boxW, boxH * 0.34, 9);
       ctx.fill();
+      // canto superior iluminado ↖ + pliegue central del kraft
+      ctx.strokeStyle = "rgba(255,240,205,0.55)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-boxW / 2 + 9, boxH * 0.056);
+      ctx.lineTo(boxW / 2 - 9, boxH * 0.056);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(90,58,24,0.14)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, boxH * 0.07);
+      ctx.lineTo(0, boxH * 0.37);
+      ctx.stroke();
       ctx.font = "800 11px var(--pg-font-display, Georgia), serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1110,15 +1298,20 @@ export default function EmplataGame(props: {
       }
       ctx.globalAlpha = 1;
 
-      // ===== física: vuelos (la caída final desde la boca de la caja) =====
+      // ===== física: vuelos (caen hasta la SUPERFICIE del montón bajo su x, no un piso fijo) =====
       for (let i = wd.vuelos.length - 1; i >= 0; i--) {
         const v = wd.vuelos[i];
         v.x += v.vx;
         v.y += v.vy;
         v.vy += 0.55;
         v.rot += v.vr;
-        const floorY = boxY + boxH * 0.02;
-        if (v.vy > 0 && v.y >= floorY) {
+        const catV = v.ing.categoria;
+        const scV = catV === "base" ? 1.18 : catV === "proteina" ? 0.8 : 0.58;
+        const surfY =
+          catV === "base"
+            ? boxY - boxH * 0.1
+            : boxY + reposo(v.x - boxX, radioDe(catV, scV)).y;
+        if (v.vy > 0 && v.y >= surfY) {
           if (v.bounces < 1) {
             v.bounces++;
             v.vy *= -0.38;
@@ -1126,7 +1319,7 @@ export default function EmplataGame(props: {
             wd.boxSquash = 1;
             s.ruido(0.04, 0.05, 900);
           } else {
-            aterrizar(v.ing);
+            aterrizar(v.ing, v.x);
             wd.vuelos.splice(i, 1);
             continue;
           }
@@ -1141,8 +1334,10 @@ export default function EmplataGame(props: {
         }
       }
 
-      // ===== vapor idle de la caja =====
-      if (wd.t % 34 === 0 && !wd.folding && wd.pila.length > 0) {
+      // ===== vapor idle de la caja (más generoso cuando el plato está completo: "se ve rico") =====
+      const completo =
+        !!sel.current.baseId && !!sel.current.proteinaId && sel.current.toppingIds.length > 0;
+      if (wd.t % (completo ? 20 : 34) === 0 && !wd.folding && wd.pila.length > 0) {
         wd.puffs.push({ x: boxX + (Math.random() - 0.5) * 26, y: boxY - boxH * 0.22, life: 1, max: 90, r: 5, tipo: "vapor" });
       }
       for (let i = wd.puffs.length - 1; i >= 0; i--) {
@@ -1348,19 +1543,19 @@ export default function EmplataGame(props: {
             holding = age > F_EXT + 2;
           } else if (age <= F_EXT + F_GRAB + F_CARRY) {
             const u = smooth((age - F_EXT - F_GRAB) / F_CARRY);
-            const apexX = boxX + fd.off * 0.5;
+            const dropX = boxX + fd.off * 0.2 + fd.drop * boxW * 0.22;
+            const apexX = (dropX + boxX) / 2 + fd.off * 0.4;
             const apexY = boxY - boxH * 0.95;
-            const dropX = boxX + fd.off * 0.3;
             tipX = bez2(fd.tx, apexX, dropX, u);
             tipY = bez2(fd.ty, apexY, mouthYBase - 6, u);
             holding = true;
           } else {
-            // suelta: caída corta con rebote dentro de la caja (la física existente remata)
+            // suelta DISPERSO sobre la caja: cada strand emplata en un punto distinto (montón real)
             wd.vuelos.push({
               ing: fd.ing,
-              x: boxX + fd.off * 0.3,
+              x: boxX + fd.off * 0.2 + fd.drop * boxW * 0.22,
               y: mouthYBase,
-              vx: -fd.off * 0.02,
+              vx: (Math.random() - 0.5) * 1.4,
               vy: 1.6,
               rot: (Math.random() - 0.5) * 0.4,
               vr: (Math.random() - 0.5) * 0.1,
