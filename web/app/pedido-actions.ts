@@ -32,6 +32,16 @@ export async function enviarPedido(input: NuevoPedido) {
   return { id: pedido.id, total: pedido.total, estado: pedido.estado };
 }
 
+/** Público (EMPLATA): estado en vivo de UN pedido para la pantalla del cliente (polling). */
+export async function estadoPedido(id: string) {
+  if (!id) return null;
+  const { getCatalog } = await import("@/lib/catalog");
+  const cat = await getCatalog();
+  const p = cat.pedidos.find((x) => x.id === id);
+  if (!p) return null;
+  return { id: p.id, estado: p.estado, total: p.total, mesa: p.mesa ?? null };
+}
+
 /** Cocina/admin: avanza el estado de un pedido. */
 export async function avanzarPedidoAction(formData: FormData) {
   if (!(await authed())) return;

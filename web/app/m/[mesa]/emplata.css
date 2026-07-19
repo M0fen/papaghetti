@@ -1,0 +1,539 @@
+/* EMPLATA — mobile-first, vertical, una mano. Paleta de marca (crema/espresso/ámbar/tomate) +
+   caja kraft origami. dvh + safe-area + touch-action; targets ≥44px; reduced-motion respetado. */
+
+.emp-root {
+  --crema: #fbf1de;
+  --espresso: #1e1611;
+  --ambar: #f2a516;
+  --tomate: #c8321e;
+  --verde: #4c9a5a;
+  --kraft: #c69a5b;
+  --kraft-hondo: #a87b42;
+  --kraft-sombra: #7a5526;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(120% 60% at 50% -10%, #fff7e6 0%, var(--crema) 55%),
+    var(--crema);
+  color: var(--espresso);
+  font-family: var(--pg-font-body, system-ui, sans-serif);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ---------- header compacto ---------- */
+.emp-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+  background: rgba(251, 241, 222, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(30, 22, 17, 0.08);
+}
+.emp-top__brand {
+  font-family: var(--pg-font-display, Georgia, serif);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 15px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.emp-top__brand span {
+  font-family: var(--pg-font-body, system-ui);
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--tomate);
+}
+.emp-top__actions {
+  display: flex;
+  gap: 8px;
+}
+.emp-mini {
+  min-height: 44px;
+  min-width: 44px;
+  border: 1.5px solid rgba(30, 22, 17, 0.16);
+  background: #fff;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 0 12px;
+  color: var(--espresso);
+}
+.emp-modo {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  background: var(--espresso);
+  color: var(--crema);
+  border-color: var(--espresso);
+}
+.emp-modo.is-on {
+  background: var(--ambar);
+  color: var(--espresso);
+  border-color: var(--ambar);
+}
+
+.emp-cerrado {
+  margin: 10px 14px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(200, 50, 30, 0.1);
+  color: var(--tomate);
+  font-weight: 700;
+  font-size: 13.5px;
+}
+
+/* ---------- LA CAJA (2D kraft, 3/4) ---------- */
+.emp-caja-wrap {
+  display: grid;
+  place-items: center;
+  padding: 18px 0 6px;
+}
+.emp-caja {
+  position: relative;
+  width: min(220px, 58vw);
+  aspect-ratio: 1.15;
+  filter: drop-shadow(0 10px 14px rgba(30, 22, 17, 0.22));
+}
+.emp-caja__cuerpo {
+  position: absolute;
+  inset: 16% 6% 0;
+  background:
+    linear-gradient(160deg, #d8ad6c 0%, var(--kraft) 42%, var(--kraft-hondo) 100%);
+  border-radius: 10px 10px 14px 14px;
+  clip-path: polygon(6% 0, 94% 0, 100% 100%, 0 100%);
+  box-shadow:
+    inset 0 10px 18px rgba(122, 85, 38, 0.5),
+    inset 0 -6px 10px rgba(255, 240, 210, 0.25);
+  overflow: hidden;
+}
+.emp-caja__marca {
+  position: absolute;
+  left: 50%;
+  bottom: 9%;
+  transform: translateX(-50%);
+  font-family: var(--pg-font-display, Georgia, serif);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  font-weight: 800;
+  color: rgba(122, 85, 38, 0.85);
+  text-shadow: 0 1px 0 rgba(255, 240, 210, 0.5); /* emboss */
+  pointer-events: none;
+}
+/* solapas origami abiertas */
+.emp-caja__flap {
+  position: absolute;
+  top: 2%;
+  width: 46%;
+  height: 26%;
+  background: linear-gradient(180deg, #e2ba7e, var(--kraft));
+  box-shadow: inset 0 -4px 8px rgba(122, 85, 38, 0.35);
+}
+.emp-caja__flap--a {
+  left: 5%;
+  clip-path: polygon(0 100%, 100% 100%, 78% 0, 8% 18%);
+  transform-origin: bottom center;
+  transform: rotate(-4deg);
+}
+.emp-caja__flap--b {
+  right: 5%;
+  clip-path: polygon(0 100%, 100% 100%, 92% 18%, 22% 0);
+  transform-origin: bottom center;
+  transform: rotate(4deg);
+}
+/* contenido apilado */
+.emp-caja__contenido {
+  position: absolute;
+  inset: 18% 8% 26%;
+  display: flex;
+  flex-wrap: wrap-reverse;
+  align-content: flex-start;
+  justify-content: center;
+  gap: 2px;
+}
+.emp-ing {
+  font-size: 22px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 2px rgba(30, 22, 17, 0.3));
+}
+.emp-ing img {
+  width: 26px;
+  height: 26px;
+  object-fit: cover;
+  border-radius: 50%;
+}
+.emp-ing--base {
+  font-size: 30px;
+}
+.emp-ing--prot {
+  font-size: 26px;
+}
+
+/* caída con rebote */
+.emp-drop {
+  position: absolute;
+  left: 50%;
+  top: -12%;
+  font-size: 30px;
+  transform: translateX(-50%);
+  animation: emp-drop 0.62s cubic-bezier(0.34, 1.4, 0.64, 1) forwards;
+  pointer-events: none;
+}
+.emp-drop img {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+@keyframes emp-drop {
+  0% {
+    transform: translate(-50%, 0) scale(0.7) rotate(-12deg);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  70% {
+    transform: translate(-50%, 120px) scale(1.06, 0.9) rotate(8deg);
+  }
+  84% {
+    transform: translate(-50%, 108px) scale(0.96, 1.05) rotate(4deg);
+  }
+  100% {
+    transform: translate(-50%, 116px) scale(1) rotate(0);
+    opacity: 0;
+  }
+}
+
+/* vapor */
+.emp-vapor {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  width: 10px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 250, 240, 0.85), rgba(255, 250, 240, 0));
+  animation: emp-vapor 1.3s ease-out forwards;
+  pointer-events: none;
+}
+.emp-vapor--1 {
+  left: 40%;
+  animation-delay: 0.12s;
+}
+.emp-vapor--2 {
+  left: 60%;
+  animation-delay: 0.22s;
+}
+@keyframes emp-vapor {
+  0% {
+    transform: translateY(6px) scale(0.7);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-34px) scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* cierre origami (confirmar) */
+.emp-caja--plegando .emp-caja__flap--a {
+  animation: emp-plegar-a 0.7s ease-in forwards;
+}
+.emp-caja--plegando .emp-caja__flap--b {
+  animation: emp-plegar-b 0.7s 0.08s ease-in forwards;
+}
+.emp-caja--plegando .emp-caja__cuerpo {
+  animation: emp-sellar 0.9s ease-in forwards;
+}
+@keyframes emp-plegar-a {
+  to {
+    transform: rotate(0) scaleY(0.2) translateY(120%);
+  }
+}
+@keyframes emp-plegar-b {
+  to {
+    transform: rotate(0) scaleY(0.2) translateY(120%);
+  }
+}
+@keyframes emp-sellar {
+  60% {
+    transform: scale(1.02, 0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.emp-caja--cerrada .emp-caja__flap--a,
+.emp-caja--cerrada .emp-caja__flap--b {
+  transform: rotate(0) scaleY(0.24) translateY(118%);
+}
+
+/* ---------- pasos ---------- */
+.emp-main {
+  flex: 1;
+  padding: 4px 14px 0;
+}
+.emp-paso {
+  margin-top: 14px;
+}
+.emp-paso h2 {
+  font-family: var(--pg-font-display, Georgia, serif);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.emp-paso h2 b {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--espresso);
+  color: var(--crema);
+  font-size: 12px;
+}
+.emp-paso h2 small {
+  font-family: var(--pg-font-body, system-ui);
+  font-weight: 600;
+  font-size: 11.5px;
+  color: rgba(30, 22, 17, 0.55);
+}
+
+.emp-fila {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.emp-fila::-webkit-scrollbar {
+  display: none;
+}
+.emp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+@media (min-width: 480px) {
+  .emp-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* chip de ingrediente (target ≥44px, tap = camino principal) */
+.emp-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1.5px solid rgba(30, 22, 17, 0.14);
+  background: #fff;
+  text-align: left;
+  flex: 0 0 auto;
+  transition: transform 0.08s ease, border-color 0.15s, background 0.15s;
+}
+.emp-fila .emp-chip {
+  min-width: 138px;
+}
+.emp-chip:active {
+  transform: scale(0.96);
+}
+.emp-chip.is-on {
+  border-color: var(--chip, var(--ambar));
+  background: color-mix(in srgb, var(--chip, var(--ambar)) 14%, #fff);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--chip, var(--ambar)) 30%, transparent);
+}
+.emp-chip.is-off {
+  opacity: 0.45;
+}
+.emp-chip__icon {
+  font-size: 24px;
+  line-height: 1;
+}
+.emp-chip__icon img {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: block;
+}
+.emp-chip__name {
+  font-weight: 700;
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+}
+.emp-chip__price {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(30, 22, 17, 0.55);
+}
+.emp-chip.is-on .emp-chip__price {
+  color: var(--tomate);
+}
+
+.emp-espaciador {
+  height: 96px; /* aire para la barra fija */
+}
+
+/* ---------- barra de pulgar ---------- */
+.emp-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  background: rgba(251, 241, 222, 0.94);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(30, 22, 17, 0.1);
+}
+.emp-total {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.emp-total small {
+  font-size: 10.5px;
+  color: rgba(30, 22, 17, 0.55);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.emp-total b {
+  font-family: var(--pg-font-display, Georgia, serif);
+  font-size: 20px;
+}
+.emp-cta {
+  margin-left: auto;
+  min-height: 52px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: none;
+  background: var(--ambar);
+  color: var(--espresso);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.03em;
+  box-shadow: 0 6px 16px rgba(242, 165, 22, 0.45);
+  transition: transform 0.08s ease;
+}
+.emp-cta:active {
+  transform: scale(0.96);
+}
+.emp-cta:disabled {
+  opacity: 0.5;
+  box-shadow: none;
+}
+.emp-cta--sec {
+  background: var(--espresso);
+  color: var(--crema);
+  margin: 18px auto 0;
+}
+
+/* ---------- éxito + estado en vivo ---------- */
+.emp-exito {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 26px 18px 40px;
+  text-align: center;
+}
+.emp-exito h1 {
+  font-family: var(--pg-font-display, Georgia, serif);
+  font-size: 28px;
+  margin: 16px 0 4px;
+}
+.emp-exito__id {
+  font-size: 13.5px;
+  color: rgba(30, 22, 17, 0.65);
+  font-weight: 600;
+}
+.emp-estado {
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  padding: 0;
+  margin: 22px 0 0;
+}
+.emp-estado li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 86px;
+  padding: 10px 8px;
+  border-radius: 14px;
+  border: 1.5px solid rgba(30, 22, 17, 0.12);
+  background: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(30, 22, 17, 0.45);
+}
+.emp-estado li i {
+  font-style: normal;
+  font-size: 20px;
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.emp-estado li.done {
+  border-color: var(--verde);
+  color: var(--espresso);
+}
+.emp-estado li.done i {
+  filter: none;
+  opacity: 1;
+}
+.emp-estado li.activo {
+  background: color-mix(in srgb, var(--verde) 12%, #fff);
+  animation: emp-late 1.6s ease-in-out infinite;
+}
+@keyframes emp-late {
+  50% {
+    transform: scale(1.04);
+  }
+}
+.emp-listo {
+  margin-top: 14px;
+  font-weight: 800;
+  color: var(--verde);
+}
+
+/* ---------- reduced motion: sin animaciones, misma lógica ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .emp-drop,
+  .emp-vapor {
+    display: none;
+  }
+  .emp-caja--plegando .emp-caja__flap--a,
+  .emp-caja--plegando .emp-caja__flap--b,
+  .emp-caja--plegando .emp-caja__cuerpo,
+  .emp-estado li.activo {
+    animation: none;
+  }
+  .emp-chip,
+  .emp-cta {
+    transition: none;
+  }
+}
