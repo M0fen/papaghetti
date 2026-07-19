@@ -31,6 +31,43 @@ const easeOutBack = (t: number) => {
 };
 const bez2 = (a: number, b: number, c: number, t: number) =>
   (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
+const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+
+/* =========================================================================
+   TIPOGRAFÍA — Canvas2D NO resuelve var(--…) en ctx.font. Hay que leer las
+   familias resueltas de las custom properties UNA vez (portado del juego
+   hermano render.ts). Sin esto, TODO el texto cae a "10px sans-serif".
+   ========================================================================= */
+let FONT_DISPLAY = "system-ui, sans-serif"; // Bricolage Grotesque
+let FONT_BODY = "system-ui, sans-serif"; // Manrope
+let fontsResolved = false;
+function resolveFonts(): void {
+  if (fontsResolved || typeof document === "undefined") return;
+  try {
+    const cs = getComputedStyle(document.documentElement);
+    const disp = cs.getPropertyValue("--font-display").trim();
+    const body = cs.getPropertyValue("--font-body").trim();
+    if (disp) FONT_DISPLAY = `${disp}, system-ui, sans-serif`;
+    if (body) FONT_BODY = `${body}, system-ui, sans-serif`;
+    const fonts = (document as unknown as { fonts?: { load?: (s: string) => Promise<unknown> } }).fonts;
+    if (fonts?.load && disp && body) {
+      [`700 24px ${disp}`, `800 24px ${disp}`, `500 14px ${body}`, `800 14px ${body}`].forEach((sp) => {
+        try {
+          void fonts.load!(sp);
+        } catch {
+          /* ignore */
+        }
+      });
+    }
+    fontsResolved = true;
+  } catch {
+    /* mantener fallbacks */
+  }
+}
+/** Cara display (Bricolage) — wordmark, números, nombres. */
+const fontD = (px: number, weight = 800) => `${weight} ${px}px ${FONT_DISPLAY}`;
+/** Cara body (Manrope) — labels, precios, small print. */
+const fontB = (px: number, weight = 600) => `${weight} ${px}px ${FONT_BODY}`;
 
 /* =========================================================================
    SPRITES — comida horneada con el modelo de luz del juego (una luz ↖).
@@ -495,8 +532,13 @@ export default function EmplataGame(props: {
     tabT: 0,
     lastAct: 0,
     pressed: "",
-    wallPat: null as CanvasPattern | null,
+    bg: null as Off | null, // fondo horneado (crema+luz+mostrador+grano) por resize
+    vig: null as Off | null, // viñeta + velo cálido cacheados por resize
+    dotSprite: null as Off | null, // partícula de vapor horneada (dot suave)
+    entered: false, // one-shot del squash de entrada de la caja
     t: 0,
+    dt: 1 / 60,
+    df: 1,
   });
 
   // hornear sprites al montar (y si cambia el catálogo)
@@ -619,6 +661,130 @@ export default function EmplataGame(props: {
     let W = 0;
     let H = 0;
     let dpr = 1;
+    let lastT = 0; // timestamp del rAF anterior (reloj real, no contador de frames)
+    const reduce =
+      typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // Tipografía de marca: resolver ya, y re-resolver cuando las webfonts terminen de cargar.
+    resolveFonts();
+    const fdoc = document as unknown as { fonts?: { ready?: Promise<unknown> } };
+    if (fdoc.fonts?.ready) {
+      fdoc.fonts.ready.then(() => {
+        fontsResolved = false;
+        resolveFonts();
+      });
+    }
+
+    // ---- dot de vapor horneado (una vez): reemplaza createRadialGradient por puff/frame ----
+    const bakeDot = () => {
+      const c = document.createElement("canvas");
+      c.width = 48;
+      c.height = 48;
+      const g = c.getContext("2d")!;
+      const rad = g.createRadialGradient(24, 24, 0, 24, 24, 24);
+      rad.addColorStop(0, "rgba(255,250,240,0.9)");
+      rad.addColorStop(1, "rgba(255,250,240,0)");
+      g.fillStyle = rad;
+      g.beginPath();
+      g.arc(24, 24, 24, 0, TAU);
+      g.fill();
+      world.current.dotSprite = c;
+    };
+
+    // ---- ESCENARIO horneado: crema + pool de luz ↖ + mostrador con canto + veta + GRANO ----
+    const bakeBg = () => {
+      const c = document.createElement("canvas");
+      c.width = Math.max(2, Math.round(W));
+      c.height = Math.max(2, Math.round(H));
+      const g = c.getContext("2d")!;
+      const woodY = H * 0.46;
+      // pared crema
+      g.fillStyle = "#F6E7CB";
+      g.fillRect(0, 0, W, H);
+      // remolinos kraft sutiles en la pared
+      g.strokeStyle = "rgba(150,100,50,0.06)";
+      g.lineWidth = 9;
+      g.lineCap = "round";
+      for (let yy = 20; yy < woodY; yy += 74) {
+        for (let xx = 20; xx < W; xx += 96) {
+          g.beginPath();
+          g.arc(xx + (yy % 48), yy, 18, 0.4, 4.6);
+          g.stroke();
+        }
+      }
+      // pool de luz ↖ (la premisa lumínica, por fin visible)
+      const luz = g.createRadialGradient(W * 0.3, H * 0.08, 20, W * 0.32, H * 0.16, H * 0.95);
+      luz.addColorStop(0, "rgba(255,247,224,0.85)");
+      luz.addColorStop(0.5, "rgba(255,236,200,0.18)");
+      luz.addColorStop(1, "rgba(120,80,40,0.12)");
+      g.fillStyle = luz;
+      g.fillRect(0, 0, W, woodY);
+      // mostrador de madera
+      const wood = g.createLinearGradient(0, woodY, 0, H);
+      wood.addColorStop(0, "#8A5A2E");
+      wood.addColorStop(0.12, "#6E4523");
+      wood.addColorStop(1, "#4A2D16");
+      g.fillStyle = wood;
+      g.fillRect(0, woodY, W, H - woodY);
+      // canto pared/mostrador: sombra de contacto de la pared + filo iluminado
+      const cont = g.createLinearGradient(0, woodY, 0, woodY + 10);
+      cont.addColorStop(0, "rgba(30,16,6,0.4)");
+      cont.addColorStop(1, "rgba(30,16,6,0)");
+      g.fillStyle = cont;
+      g.fillRect(0, woodY, W, 10);
+      g.strokeStyle = "rgba(255,232,190,0.5)";
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.moveTo(0, woodY - 0.5);
+      g.lineTo(W, woodY - 0.5);
+      g.stroke();
+      // veta de madera ondulada (no líneas rectas)
+      g.strokeStyle = "rgba(0,0,0,0.13)";
+      g.lineWidth = 1;
+      for (let li = 1; li < 5; li++) {
+        const base = woodY + (H - woodY) * (li / 5);
+        g.beginPath();
+        for (let xx = 0; xx <= W; xx += 12) {
+          const yy = base + Math.sin(xx * 0.03 + li * 1.7) * 3;
+          if (xx === 0) g.moveTo(xx, yy);
+          else g.lineTo(xx, yy);
+        }
+        g.stroke();
+      }
+      // GRANO monocromo (dithering barato) → mata el banding en OLED. Horneado, 0/frame.
+      const gn = 42;
+      const nc = document.createElement("canvas");
+      nc.width = gn;
+      nc.height = gn;
+      const ng = nc.getContext("2d")!;
+      const img = ng.createImageData(gn, gn);
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = 128 + (Math.random() * 2 - 1) * 128;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+        img.data[i + 3] = 10; // alpha ~0.04
+      }
+      ng.putImageData(img, 0, 0);
+      const pat = g.createPattern(nc, "repeat");
+      if (pat) {
+        g.fillStyle = pat;
+        g.fillRect(0, 0, W, H);
+      }
+      world.current.bg = c;
+    };
+
+    // ---- VIÑETA cacheada (descentrada hacia la luz ↖, más oscura abajo-derecha) ----
+    const bakeVig = () => {
+      const c = document.createElement("canvas");
+      c.width = Math.max(2, Math.round(W));
+      c.height = Math.max(2, Math.round(H));
+      const g = c.getContext("2d")!;
+      const vg = g.createRadialGradient(W * 0.34, H * 0.28, H * 0.2, W * 0.5, H * 0.6, H * 0.95);
+      vg.addColorStop(0, "rgba(28,20,14,0)");
+      vg.addColorStop(1, "rgba(28,20,14,0.32)");
+      g.fillStyle = vg;
+      g.fillRect(0, 0, W, H);
+      world.current.vig = c;
+    };
 
     const resize = () => {
       const r = canvas.getBoundingClientRect();
@@ -627,6 +793,9 @@ export default function EmplataGame(props: {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = Math.round(W * dpr);
       canvas.height = Math.round(H * dpr);
+      if (!world.current.dotSprite) bakeDot();
+      bakeBg();
+      bakeVig();
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -676,7 +845,7 @@ export default function EmplataGame(props: {
     };
 
     /** Aterrizaje: el item se queda DONDE la física lo dejó (x real del vuelo) + squash + precio. */
-    const aterrizar = (ing: Ingrediente, xScreen: number) => {
+    const aterrizar = (ing: Ingrediente, xScreen: number, energia = 1) => {
       const wd = world.current;
       const { boxW, boxH, boxX, boxY } = geo();
       const cat = ing.categoria;
@@ -705,7 +874,7 @@ export default function EmplataGame(props: {
       wd.pila.push({ id: ing.id, fx, fy: ty - 0.035, ty, rot, s: sc, r: radioDe(cat, sc) / boxW });
       if (cat !== "topping") wd.resettle = true; // cambió la cama → el montón se reacomoda
       wd.boxSquash = 1;
-      s.caida(ing); // el ingrediente SUENA al aterrizar (no al tocar la carta)
+      s.caida(ing, energia); // suena al aterrizar, con energía cinética de la caída
       for (let k = 0; k < 3; k++)
         wd.puffs.push({
           x: geo().boxX + (Math.random() - 0.5) * 30,
@@ -728,7 +897,7 @@ export default function EmplataGame(props: {
       if (wd.t - wd.comboT < 110) wd.combo++;
       else wd.combo = 1;
       wd.comboT = wd.t;
-      if (wd.combo >= 2) s.tone(392 + Math.min(wd.combo, 6) * 84, 0.09, "triangle", 0.1);
+      if (wd.combo >= 2) s.combo(wd.combo - 1); // seguidilla musical (pentatónica)
       if (wd.combo >= 3 && navigator.vibrate) navigator.vibrate(8);
     };
 
@@ -940,10 +1109,17 @@ export default function EmplataGame(props: {
       }
     };
 
-    const frame = () => {
+    const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const wd = world.current;
-      wd.t++;
+      // reloj real → dt en segundos; df = factor de frame (1.0 a 60fps). Toda la coreografía
+      // y la física se escalan por df, así corre igual a 60/90/120Hz.
+      const dt = lastT ? Math.min((now - lastT) / 1000, 1 / 30) : 1 / 60;
+      lastT = now;
+      const df = dt * 60;
+      wd.dt = dt;
+      wd.df = df;
+      wd.t += df;
       const { boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH } = geo();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
@@ -955,74 +1131,37 @@ export default function EmplataGame(props: {
         wd.trayVel = 0;
       }
 
-      // ===== fondo: pared cálida + remolinos de fideo + luz de cocina ↖ + mostrador =====
-      ctx.fillStyle = "#F6E7CB";
-      ctx.fillRect(0, 0, W, H);
-      const woodY = H * 0.46;
-      if (!wd.wallPat) {
-        const tcv = document.createElement("canvas");
-        tcv.width = 150;
-        tcv.height = 150;
-        const tg = tcv.getContext("2d")!;
-        tg.strokeStyle = "rgba(150,100,50,0.07)";
-        tg.lineWidth = 9;
-        tg.lineCap = "round";
-        tg.beginPath();
-        tg.arc(40, 44, 20, 0.4, 4.6);
-        tg.stroke();
-        tg.beginPath();
-        tg.arc(108, 112, 16, 2.2, 7.2);
-        tg.stroke();
-        tg.beginPath();
-        tg.arc(118, 32, 12, 1.2, 5.6);
-        tg.stroke();
-        wd.wallPat = ctx.createPattern(tcv, "repeat");
+      // ===== fondo horneado (crema + pool de luz ↖ + mostrador con canto + veta + grano) =====
+      if (wd.bg) ctx.drawImage(wd.bg, 0, 0, W, H);
+      else {
+        ctx.fillStyle = "#F6E7CB";
+        ctx.fillRect(0, 0, W, H);
       }
-      if (wd.wallPat) {
-        ctx.fillStyle = wd.wallPat;
-        ctx.fillRect(0, 0, W, woodY);
-      }
-      const luz = ctx.createRadialGradient(W * 0.3, H * 0.1, 20, W * 0.3, H * 0.1, H * 0.9);
-      luz.addColorStop(0, "rgba(255,245,220,0.9)");
-      luz.addColorStop(0.5, "rgba(255,235,200,0.25)");
-      luz.addColorStop(1, "rgba(120,80,40,0.16)");
-      ctx.fillStyle = luz;
-      ctx.fillRect(0, 0, W, H);
-      // motas de polvo flotando en el haz de luz (cocina viva)
-      for (let k = 0; k < 7; k++) {
-        const mx = W * 0.07 + (((k * 137) % 100) / 100) * W * 0.5 + Math.sin(wd.t * 0.005 + k * 1.7) * 14;
-        const my = H * 0.05 + (((k * 71) % 100) / 100) * H * 0.3 + Math.cos(wd.t * 0.004 + k) * 10;
-        ctx.globalAlpha = 0.08 + 0.05 * Math.sin(wd.t * 0.01 + k * 2);
-        ctx.fillStyle = "#FFF6E4";
-        ctx.beginPath();
-        ctx.arc(mx, my, 1.6, 0, TAU);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-      // mostrador de madera (desde el tercio inferior)
-      const wood = ctx.createLinearGradient(0, woodY, 0, H);
-      wood.addColorStop(0, "#8A5A2E");
-      wood.addColorStop(0.12, "#6E4523");
-      wood.addColorStop(1, "#4A2D16");
-      ctx.fillStyle = wood;
-      ctx.fillRect(0, woodY, W, H - woodY);
-      ctx.strokeStyle = "rgba(0,0,0,0.15)";
-      ctx.lineWidth = 1;
-      for (let k = 1; k < 4; k++) {
-        ctx.beginPath();
-        ctx.moveTo(0, woodY + (H - woodY) * (k / 4));
-        ctx.lineTo(W, woodY + (H - woodY) * (k / 4));
-        ctx.stroke();
+      // motas de polvo flotando en el haz de luz (única capa viva del fondo)
+      if (!reduce) {
+        for (let k = 0; k < 7; k++) {
+          const mx = W * 0.07 + (((k * 137) % 100) / 100) * W * 0.5 + Math.sin(wd.t * 0.005 + k * 1.7) * 14;
+          const my = H * 0.05 + (((k * 71) % 100) / 100) * H * 0.3 + Math.cos(wd.t * 0.004 + k) * 10;
+          ctx.globalAlpha = 0.08 + 0.05 * Math.sin(wd.t * 0.01 + k * 2);
+          ctx.fillStyle = "#FFF6E4";
+          ctx.beginPath();
+          ctx.arc(mx, my, 1.6, 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
       }
 
       // ===== LA CAJA =====
       // entrada: la caja cae a escena con squash en el primer medio segundo
       const ent = Math.min(1, wd.t / 26);
       const entY = (1 - easeOutCubic(ent)) * -H * 0.35;
-      if (wd.t === 27) wd.boxSquash = 1;
+      if (!wd.entered && wd.t >= 27) {
+        wd.entered = true;
+        wd.boxSquash = 1;
+      }
       const squash = 1 + 0.05 * Math.sin(wd.t * 0.02) * 0.3 + wd.boxSquash * 0.08;
-      wd.boxSquash *= 0.86;
-      if (wd.folding && wd.fold < 1) wd.fold = Math.min(1, wd.fold + 0.022);
+      wd.boxSquash *= Math.pow(0.86, df);
+      if (wd.folding && wd.fold < 1) wd.fold = Math.min(1, wd.fold + 0.022 * df);
       const f = wd.fold;
       ctx.save();
       ctx.translate(boxX, boxY + boxH * 0.32 + entY);
@@ -1085,7 +1224,7 @@ export default function EmplataGame(props: {
         // branding interior: se lee al abrir vacía, la comida lo va tapando
         const marcaA = Math.max(0, 0.55 - wd.pila.length * 0.14) * Math.min(1, abre * 1.4);
         if (marcaA > 0.02) {
-          ctx.font = "800 10px var(--pg-font-display, Georgia), serif";
+          ctx.font = fontD(10, 800);
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.globalAlpha = marcaA;
@@ -1146,7 +1285,7 @@ export default function EmplataGame(props: {
         for (const p of ordenada) {
           const spr = wd.sprites.get(p.id);
           if (!spr) continue;
-          p.fy += (p.ty - p.fy) * 0.25; // micro-asentamiento
+          p.fy += (p.ty - p.fy) * (1 - Math.pow(0.75, df)); // micro-asentamiento (dt-normalizado)
           const lx = p.fx * boxW;
           const ly = p.fy * boxH;
           const rp = p.r * boxW;
@@ -1195,7 +1334,8 @@ export default function EmplataGame(props: {
       ctx.moveTo(0, boxH * 0.07);
       ctx.lineTo(0, boxH * 0.37);
       ctx.stroke();
-      ctx.font = "800 11px var(--pg-font-display, Georgia), serif";
+      // wordmark con letterpress (luz ↖: brillo arriba, tinta abajo)
+      ctx.font = fontD(11, 800);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "rgba(255,240,210,0.55)";
@@ -1227,20 +1367,45 @@ export default function EmplataGame(props: {
         }
         ctx.globalAlpha = ta;
         kraft(0, -boxH * 0.06, boxW * 0.98, boxH * 0.34, 8, 14);
+        // sello de lacre: borde festoneado + volumen radial + emboss del monograma
         const selloS = easeOutBack(Math.min(1, ta * 1.6));
-        ctx.fillStyle = "rgba(200,50,30,0.92)";
+        const sr = 16 * selloS;
+        const syc = -boxH * 0.06;
+        ctx.save();
+        ctx.translate(0, syc);
         ctx.beginPath();
-        ctx.arc(0, -boxH * 0.06, 16 * selloS, 0, TAU);
+        for (let k = 0; k <= 44; k++) {
+          const a = (k / 44) * TAU;
+          const rr = sr * (1 + 0.08 * Math.sin(a * 11));
+          const px = Math.cos(a) * rr;
+          const py = Math.sin(a) * rr;
+          if (k === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        const lacre = ctx.createRadialGradient(-sr * 0.3, -sr * 0.35, sr * 0.1, 0, 0, sr * 1.15);
+        lacre.addColorStop(0, "#E4553A");
+        lacre.addColorStop(0.6, "#C8321E");
+        lacre.addColorStop(1, "#8E1E10");
+        ctx.fillStyle = lacre;
         ctx.fill();
-        ctx.fillStyle = "#FBF1DE";
-        ctx.font = "800 9px var(--pg-font-body, system-ui)";
-        ctx.fillText("PG", 0, -boxH * 0.06 + 1);
+        ctx.strokeStyle = "rgba(255,220,200,0.35)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.font = fontD(11, 800);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "rgba(90,20,10,0.6)";
+        ctx.fillText("PG", 0, sr * 0.06 + 1);
+        ctx.fillStyle = "#FBE7DD";
+        ctx.fillText("PG", 0, sr * 0.06);
+        ctx.restore();
         ctx.globalAlpha = 1;
       }
       ctx.restore();
 
       // vapor extra mientras se pliega (la cocina respira al cerrar)
-      if (wd.folding && wd.fold < 0.4 && wd.t % 3 === 0) {
+      if (wd.folding && wd.fold < 0.4 && !reduce && Math.random() < 0.34 * df) {
         wd.puffs.push({
           x: boxX + (Math.random() - 0.5) * boxW * 0.5,
           y: boxY - boxH * 0.28,
@@ -1251,23 +1416,33 @@ export default function EmplataGame(props: {
         });
       }
 
-      // ===== rizos de vapor (hebras onduladas — vapor con ADN de fideo) =====
-      if (wd.pila.length > 0 && f < 0.5) {
+      // ===== VAPOR GHIBLI PERPETUO — hebras senoidales que NUNCA se detienen (señal de calor).
+      // Activo desde que la caja se despliega; +vida cuando hay comida; retroiluminado al cruzar ↖.
+      // Con reduced-motion: se dibuja congelado en fase fija (sin animación).
+      if (f < 0.6) {
+        const nH = wd.pila.length > 0 ? 3 : 2; // 2 hebras invitando en vacío, 3 con comida
+        const vida = wd.pila.length > 0 ? 1 : 0.7;
+        const ph = reduce ? 0 : wd.t;
         ctx.lineCap = "round";
-        ctx.strokeStyle = "#FFF9EE";
-        ctx.lineWidth = 3;
-        for (const sd of [0, 1]) {
-          ctx.globalAlpha = 0.13 + 0.05 * Math.sin(wd.t * 0.03 + sd * 2);
-          ctx.beginPath();
-          const x0 = boxX + (sd ? 16 : -14);
+        for (let sd = 0; sd < nH; sd++) {
+          const x0 = boxX + (sd - (nH - 1) / 2) * 18;
           const y0 = boxY - boxH * 0.34;
-          for (let k = 0; k < 10; k++) {
-            const yy = y0 - k * 7;
-            const xx = x0 + Math.sin(wd.t * 0.045 + k * 0.7 + sd * 2.6) * (1.5 + k * 1.1);
-            if (k === 0) ctx.moveTo(xx, yy);
-            else ctx.lineTo(xx, yy);
+          const fase = sd * 2.1;
+          for (let pass = 0; pass < 2; pass++) {
+            // pass 0 = retroiluminación (más ancha, cálida); pass 1 = filo crema
+            ctx.strokeStyle = pass === 0 ? "#FFE9C8" : "#FFF9EE";
+            ctx.lineWidth = pass === 0 ? 6 : 2.4;
+            ctx.globalAlpha = (pass === 0 ? 0.06 : 0.14) * vida * (0.75 + 0.25 * Math.sin(ph * 0.03 + fase));
+            ctx.beginPath();
+            for (let k = 0; k < 12; k++) {
+              const yy = y0 - k * 7;
+              // más luz arriba-izquierda: la amplitud crece con la altura y deriva ↖
+              const xx = x0 - k * 0.6 + Math.sin(ph * 0.045 + k * 0.62 + fase) * (1.5 + k * 1.15);
+              if (k === 0) ctx.moveTo(xx, yy);
+              else ctx.lineTo(xx, yy);
+            }
+            ctx.stroke();
           }
-          ctx.stroke();
         }
         ctx.globalAlpha = 1;
       }
@@ -1275,11 +1450,11 @@ export default function EmplataGame(props: {
       // ===== chispas doradas (sello) =====
       for (let i = wd.chispas.length - 1; i >= 0; i--) {
         const ch = wd.chispas[i];
-        ch.x += ch.vx;
-        ch.y += ch.vy;
-        ch.vy += 0.28;
-        ch.rot += ch.vr;
-        ch.life -= 0.028;
+        ch.x += ch.vx * df;
+        ch.y += ch.vy * df;
+        ch.vy += 0.28 * df;
+        ch.rot += ch.vr * df;
+        ch.life -= 0.028 * df;
         if (ch.life <= 0) {
           wd.chispas.splice(i, 1);
           continue;
@@ -1301,10 +1476,10 @@ export default function EmplataGame(props: {
       // ===== física: vuelos (caen hasta la SUPERFICIE del montón bajo su x, no un piso fijo) =====
       for (let i = wd.vuelos.length - 1; i >= 0; i--) {
         const v = wd.vuelos[i];
-        v.x += v.vx;
-        v.y += v.vy;
-        v.vy += 0.55;
-        v.rot += v.vr;
+        v.x += v.vx * df;
+        v.y += v.vy * df;
+        v.vy += 0.55 * df;
+        v.rot += v.vr * df;
         const catV = v.ing.categoria;
         const scV = catV === "base" ? 1.18 : catV === "proteina" ? 0.8 : 0.58;
         const surfY =
@@ -1319,7 +1494,7 @@ export default function EmplataGame(props: {
             wd.boxSquash = 1;
             s.ruido(0.04, 0.05, 900);
           } else {
-            aterrizar(v.ing, v.x);
+            aterrizar(v.ing, v.x, clamp(v.vy / 14, 0, 1));
             wd.vuelos.splice(i, 1);
             continue;
           }
@@ -1337,25 +1512,22 @@ export default function EmplataGame(props: {
       // ===== vapor idle de la caja (más generoso cuando el plato está completo: "se ve rico") =====
       const completo =
         !!sel.current.baseId && !!sel.current.proteinaId && sel.current.toppingIds.length > 0;
-      if (wd.t % (completo ? 20 : 34) === 0 && !wd.folding && wd.pila.length > 0) {
+      if (!reduce && !wd.folding && wd.pila.length > 0 && Math.random() < (completo ? 0.05 : 0.03) * df) {
         wd.puffs.push({ x: boxX + (Math.random() - 0.5) * 26, y: boxY - boxH * 0.22, life: 1, max: 90, r: 5, tipo: "vapor" });
       }
+      // dot-sprite horneado (evita createRadialGradient POR PUFF POR FRAME)
+      const dot = wd.dotSprite!;
       for (let i = wd.puffs.length - 1; i >= 0; i--) {
         const p = wd.puffs[i];
-        p.life -= 1 / p.max;
+        p.life -= (1 / p.max) * df;
         if (p.life <= 0) {
           wd.puffs.splice(i, 1);
           continue;
         }
         const yy = p.y - (1 - p.life) * 46;
+        const rr = p.r * (1 + (1 - p.life) * 1.6);
         ctx.globalAlpha = p.life * 0.5;
-        const gg = ctx.createRadialGradient(p.x, yy, 0, p.x, yy, p.r * (1 + (1 - p.life) * 1.6));
-        gg.addColorStop(0, "rgba(255,250,240,0.9)");
-        gg.addColorStop(1, "rgba(255,250,240,0)");
-        ctx.fillStyle = gg;
-        ctx.beginPath();
-        ctx.arc(p.x, yy, p.r * (1 + (1 - p.life) * 1.6), 0, TAU);
-        ctx.fill();
+        ctx.drawImage(dot, p.x - rr, yy - rr, rr * 2, rr * 2);
         ctx.globalAlpha = 1;
       }
 
@@ -1377,15 +1549,15 @@ export default function EmplataGame(props: {
         ctx.beginPath();
         ctx.roundRect(tx - tw / 2, trayY - 22, tw, 40, 999);
         ctx.fill();
-        ctx.font = "800 12px var(--pg-font-body, system-ui)";
+        ctx.font = fontB(12, 800);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = activo ? "#1E1611" : "rgba(251,241,222,0.85)";
         ctx.fillText(tabsTxt[k], tx, trayY - 2);
-        // check de completado
+        // check de completado (ámbar, disciplina de color — nunca verde-UI)
         const done = k === 0 ? !!sel.current.baseId : k === 1 ? !!sel.current.proteinaId : sel.current.toppingIds.length > 0;
         if (done && !activo) {
-          ctx.fillStyle = "#7ED07C";
+          ctx.fillStyle = "#F2A516";
           ctx.beginPath();
           ctx.arc(tx + tw / 2 - 12, trayY - 12, 4.5, 0, TAU);
           ctx.fill();
@@ -1393,8 +1565,8 @@ export default function EmplataGame(props: {
       }
       // inercia del scroll
       if (Math.abs(wd.trayVel) > 0.2 && !dragging) {
-        wd.trayScroll += wd.trayVel;
-        wd.trayVel *= 0.92;
+        wd.trayScroll += wd.trayVel * df;
+        wd.trayVel *= Math.pow(0.92, df);
       }
       const lista = listaActiva().filter((i) => i.activo);
       const step = cardW + 10;
@@ -1451,7 +1623,7 @@ export default function EmplataGame(props: {
           ctx.globalAlpha = ea;
         }
         // nombre (2 líneas máx)
-        ctx.font = "700 10px var(--pg-font-body, system-ui)";
+        ctx.font = fontB(10, 700);
         ctx.textAlign = "center";
         ctx.fillStyle = "#1E1611";
         const words = ing.nombre.split(" ");
@@ -1459,16 +1631,25 @@ export default function EmplataGame(props: {
         const l2 = words.slice(2).join(" ").slice(0, 14);
         ctx.fillText(l1, 0, cardH / 2 - (l2 ? 34 : 26));
         if (l2) ctx.fillText(l2, 0, cardH / 2 - 24);
-        // precio
+        // precio — disciplina de color: espresso, nunca rojo; GRATIS como chip kraft
         const idxT = sel.current.toppingIds.indexOf(ing.id);
         const esGratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
-        ctx.font = "800 10px var(--pg-font-body, system-ui)";
-        ctx.fillStyle = ing.agotado ? "#A0A0A0" : esGratis ? "#4C9A5A" : "#C8321E";
-        ctx.fillText(
-          ing.agotado ? "AGOTADO" : esGratis ? "GRATIS" : ing.precio > 0 ? formatCOP(ing.precio) : "—",
-          0,
-          cardH / 2 - 11,
-        );
+        ctx.font = fontB(10, 800);
+        if (esGratis && !ing.agotado) {
+          ctx.fillStyle = "#C69A5B";
+          ctx.beginPath();
+          ctx.roundRect(-24, cardH / 2 - 20, 48, 15, 8);
+          ctx.fill();
+          ctx.fillStyle = "#2A1C0E";
+          ctx.fillText("GRATIS", 0, cardH / 2 - 11.5);
+        } else {
+          ctx.fillStyle = ing.agotado ? "#9A8C7A" : "#5A3A18";
+          ctx.fillText(
+            ing.agotado ? "AGOTADO" : ing.precio > 0 ? formatCOP(ing.precio) : "—",
+            0,
+            cardH / 2 - 11,
+          );
+        }
         // check
         if (selr) {
           ctx.fillStyle = "#F2A516";
@@ -1589,10 +1770,10 @@ export default function EmplataGame(props: {
         drawFideo(anchX, anchY, tipX, tipY, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, eyes);
       }
 
-      // ===== fideo curioso: si nadie toca nada, se asoma y mira la bandeja =====
+      // ===== fideo curioso: si nadie toca nada, se asoma y mira la bandeja (~3s, no 7s) =====
       const idle = wd.t - wd.lastAct;
-      if (idle > 420 && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding) {
-        const cycle = (idle - 420) % 640;
+      if (idle > 180 && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding) {
+        const cycle = (idle - 180) % 640;
         if (cycle < 270) {
           const kIn = easeOutCubic(Math.min(1, cycle / 30));
           const kOut = cycle > 215 ? Math.max(0, 1 - (cycle - 215) / 55) : 1;
@@ -1608,7 +1789,7 @@ export default function EmplataGame(props: {
       // ===== price pops (nacen ALTOS, entran con rebote) =====
       for (let i = wd.pops.length - 1; i >= 0; i--) {
         const p = wd.pops[i];
-        p.life -= 0.016;
+        p.life -= 0.016 * df;
         if (p.life <= 0) {
           wd.pops.splice(i, 1);
           continue;
@@ -1619,16 +1800,28 @@ export default function EmplataGame(props: {
         ctx.translate(p.x, yy);
         ctx.scale(scl, scl);
         ctx.globalAlpha = Math.min(1, p.life * 2);
-        ctx.font = `800 ${p.gratis ? 15 : 14}px var(--pg-font-display, Georgia), serif`;
+        ctx.font = fontD(p.gratis ? 15 : 14, 800);
         ctx.textAlign = "center";
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(60,35,15,0.55)";
+        ctx.textBaseline = "middle";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(46,22,8,0.7)";
         ctx.strokeText(p.texto, 0, 0);
-        ctx.fillStyle = p.gratis ? "#7ED07C" : "#FFD98A";
+        ctx.fillStyle = p.gratis ? "#F4D08A" : "#FFE7B0";
         ctx.fillText(p.texto, 0, 0);
         ctx.restore();
       }
       ctx.globalAlpha = 1;
+
+      // ===== grado final: velo cálido (soft-light) + viñeta (multiply) — temperatura unificada =====
+      ctx.globalCompositeOperation = "soft-light";
+      ctx.fillStyle = "rgba(242,165,22,0.06)";
+      ctx.fillRect(0, 0, W, H);
+      if (wd.vig) {
+        ctx.globalCompositeOperation = "multiply";
+        ctx.drawImage(wd.vig, 0, 0, W, H);
+      }
+      ctx.globalCompositeOperation = "source-over";
     };
     raf = requestAnimationFrame(frame);
 
