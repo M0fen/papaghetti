@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { getCatalog } from "@/lib/catalog";
 import { TOPPINGS_INCLUIDOS } from "@/lib/menu";
-import EmplataClient from "./EmplataClient";
+import EmplataSwitch from "./EmplataSwitch";
 import "./emplata.css";
 
 /**
@@ -37,7 +37,7 @@ export default async function MesaPage({
   const activos = (list: typeof cat.bases) => list.filter((i) => i.activo);
 
   return (
-    <EmplataClient
+    <EmplataSwitch
       mesa={mesa}
       negocio={cat.ajustes.negocio || "Papaghetti"}
       abierto={cat.ajustes.abierto ?? true}
