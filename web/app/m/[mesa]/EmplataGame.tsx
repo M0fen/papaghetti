@@ -80,14 +80,19 @@ const fontB = (px: number, weight = 600) => `${weight} ${px}px ${FONT_BODY}`;
    SPRITES — comida horneada con el modelo de luz del juego (una luz ↖).
    ========================================================================= */
 type Off = HTMLCanvasElement;
-const SPR = 96; // px del lienzo del sprite
+const SPR = 96; // px lógicos del sprite (unidad de dibujo/display)
 const R = 34; // radio base de la comida dentro del sprite
+// SUPERSAMPLING: se hornea a SPR·Q y se dibuja a tamaño de display → nítido aun en la base heroína
+// (~240px device). Q=2 equilibra nitidez (la base sube a 192px, ~1.25× upscale) y coste en gama media.
+const Q = 2;
 
 function makeOff(): { c: Off; g: CanvasRenderingContext2D } {
   const c = document.createElement("canvas");
-  c.width = SPR;
-  c.height = SPR;
-  return { c, g: c.getContext("2d")! };
+  c.width = SPR * Q;
+  c.height = SPR * Q;
+  const g = c.getContext("2d")!;
+  g.scale(Q, Q);
+  return { c, g };
 }
 function ao(g: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
   const a = g.createRadialGradient(cx + r * 0.14, cy + r * 0.66, r * 0.1, cx + r * 0.14, cy + r * 0.66, r * 1.1);
@@ -433,8 +438,33 @@ function bakeSprite(ing: Ingrediente): Off {
   // ===== composición final: sombra de contacto elíptica + la forma horneada =====
   const { c: out, g: og } = makeOff();
   ao(og, cx, cy, R);
-  og.drawImage(c, 0, 0);
+  og.drawImage(c, 0, 0, SPR, SPR); // c es SPR·Q; el contexto va escalado Q → 1:1
   return out;
+}
+
+/** Color dominante de un sprite horneado (promedio de píxeles opacos, sesgado a saturación).
+ *  Sirve para el burst de partículas del aterrizaje (Fruit Ninja: partículas del color de la comida). */
+function muestrearColor(off: Off): string {
+  try {
+    const g = off.getContext("2d")!;
+    const S = off.width;
+    const d = g.getImageData(S * 0.28, S * 0.28, S * 0.44, S * 0.44).data;
+    let r = 0;
+    let gr = 0;
+    let b = 0;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 16) {
+      if (d[i + 3] < 180) continue;
+      r += d[i];
+      gr += d[i + 1];
+      b += d[i + 2];
+      n++;
+    }
+    if (!n) return "#F2A516";
+    return `rgb(${Math.round(r / n)},${Math.round(gr / n)},${Math.round(b / n)})`;
+  } catch {
+    return "#F2A516";
+  }
 }
 
 /* =========================================================================
@@ -449,6 +479,8 @@ type Vuelo = {
   rot: number;
   vr: number;
   bounces: number;
+  sc: number; // escala actual (interpola de la carta al reposo — sin salto)
+  scT: number; // escala objetivo (la de reposo según categoría)
 };
 /** EL FIDEO MESERO — una hebra viva que trae/saca comida entre la carta y la caja.
  *  hx/hy = posición de la CABEZA gobernada por muelle (persigue al objetivo con lag → whip). */
@@ -469,10 +501,13 @@ type Fideo = {
 };
 /** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
  *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
-type PilaItem = { id: string; fx: number; fy: number; ty: number; rot: number; s: number; r: number };
+type PilaItem = { id: string; fx: number; fy: number; ty: number; rot: number; s: number; r: number; land: number };
 type Puff = { x: number; y: number; life: number; max: number; r: number; tipo: "vapor" | "polvo" };
 type Pop = { x: number; y: number; life: number; texto: string; gratis: boolean };
 type Chispa = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number };
+type Part = { x: number; y: number; vx: number; vy: number; life: number; r: number; color: string };
+type Mancha = { fx: number; fy: number; life: number; r: number };
+type Trail = { x: number; y: number; life: number };
 
 // duraciones del fideo (frames a ~60fps)
 const F_EXT = 15;
@@ -532,6 +567,7 @@ export default function EmplataGame(props: {
   // ------- mundo del juego (refs, cero re-render) -------
   const world = useRef({
     sprites: new Map<string, Off>(),
+    colores: new Map<string, string>(), // color dominante por ingrediente (partículas)
     vuelos: [] as Vuelo[],
     fideos: [] as Fideo[],
     fideoN: 0,
@@ -539,6 +575,9 @@ export default function EmplataGame(props: {
     puffs: [] as Puff[],
     pops: [] as Pop[],
     chispas: [] as Chispa[],
+    parts: [] as Part[], // partículas del color de la comida al aterrizar (Fruit Ninja)
+    manchas: [] as Mancha[], // micro-manchas en el kraft del suelo (multiply)
+    trail: [] as Trail[], // rastro dorado del pulgar al arrastrar la bandeja
     trayScroll: 0,
     trayVel: 0,
     boxSquash: 0, // 0..1 al aterrizar algo
@@ -569,8 +608,14 @@ export default function EmplataGame(props: {
   // hornear sprites al montar (y si cambia el catálogo)
   useEffect(() => {
     const m = world.current.sprites;
+    const col = world.current.colores;
     m.clear();
-    for (const ing of all) m.set(ing.id, bakeSprite(ing));
+    col.clear();
+    for (const ing of all) {
+      const spr = bakeSprite(ing);
+      m.set(ing.id, spr);
+      col.set(ing.id, muestrearColor(spr));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bases, proteinas, toppings]);
 
@@ -899,7 +944,7 @@ export default function EmplataGame(props: {
         fx = best.lx / boxW;
         ty = best.y / boxH;
       }
-      wd.pila.push({ id: ing.id, fx, fy: ty - 0.035, ty, rot, s: sc, r: radioDe(cat, sc) / boxW });
+      wd.pila.push({ id: ing.id, fx, fy: ty - 0.035, ty, rot, s: sc, r: radioDe(cat, sc) / boxW, land: 1 });
       if (cat !== "topping") wd.resettle = true; // cambió la cama → el montón se reacomoda
       wd.boxSquash = 1;
       s.caida(ing, energia); // suena al aterrizar, con energía cinética de la caída
@@ -912,6 +957,17 @@ export default function EmplataGame(props: {
           r: 5 + Math.random() * 6,
           tipo: "vapor",
         });
+      // BURST de partículas del color de la comida (Fruit Ninja) + micro-mancha en el kraft
+      const col = wd.colores.get(ing.id) ?? "#F2A516";
+      const nP = 6 + Math.floor(energia * 5);
+      const px0 = clamp(xScreen, boxX - boxW * 0.34, boxX + boxW * 0.34);
+      const py0 = boxY + fx * 0 + ty * boxH * 0 - boxH * 0.14; // sobre la boca de la caja
+      for (let k = 0; k < nP; k++) {
+        const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6;
+        const sp = 1.6 + Math.random() * 3.2 * (0.6 + energia);
+        wd.parts.push({ x: px0, y: py0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1, life: 1, r: 1.6 + Math.random() * 2, color: col });
+      }
+      if (cat !== "base") wd.manchas.push({ fx, fy: ty, life: 1, r: radioDe(cat, sc) * 0.7 });
       const idxT = sel.current.toppingIds.indexOf(ing.id);
       const gratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
       // los pops vivos suben para dejar sitio (nunca ilegibles apilados); el nuevo nace en el borde
@@ -976,6 +1032,12 @@ export default function EmplataGame(props: {
       if (dragging) {
         world.current.trayScroll -= x - lastX;
         world.current.trayVel = -(x - lastX);
+        // rastro dorado del pulgar (Fruit Ninja) — solo si se mueve de verdad
+        if (Math.abs(x - lastX) > 1.5) {
+          const tr = world.current.trail;
+          tr.push({ x, y: e.clientY - r.top, life: 1 });
+          if (tr.length > 14) tr.shift();
+        }
       }
       lastX = x;
     };
@@ -1400,6 +1462,23 @@ export default function EmplataGame(props: {
         ctx.beginPath();
         ctx.rect(-boxW * 0.44, -boxH * 0.95, boxW * 0.88, boxH * 1.1);
         ctx.clip();
+        // micro-manchas en el kraft del suelo (multiply, se desvanecen) — jugosidad del emplatado
+        ctx.globalCompositeOperation = "multiply";
+        for (let mi = wd.manchas.length - 1; mi >= 0; mi--) {
+          const m = wd.manchas[mi];
+          m.life -= 0.012 * df;
+          if (m.life <= 0) {
+            wd.manchas.splice(mi, 1);
+            continue;
+          }
+          ctx.globalAlpha = m.life * 0.16;
+          ctx.fillStyle = "#5A3A18";
+          ctx.beginPath();
+          ctx.ellipse(m.fx * boxW + 2, m.fy * boxH + m.r * 0.5, m.r * 1.1, m.r * 0.5, 0, 0, TAU);
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
         const capa = (id: string) => {
           const c = find(id)?.categoria;
           return c === "base" ? 0 : c === "proteina" ? 1 : 2;
@@ -1431,9 +1510,13 @@ export default function EmplataGame(props: {
             ctx.ellipse(lx + 2, ly + rp * 0.62, rp * 0.85, rp * 0.32, 0, 0, TAU);
             ctx.fill();
           }
+          p.land *= Math.pow(0.8, df); // el squash de impacto se recupera
           ctx.save();
           ctx.translate(lx, ly);
           ctx.rotate(p.rot);
+          // SQUASH de aterrizaje con conservación de volumen (aplasta ancho, recupera)
+          const sq = p.land * 0.32;
+          ctx.scale(1 + sq, 1 - sq);
           const sz = SPR * (cp === 0 ? p.s * 1.06 : p.s); // la cama, un poco más ancha
           // niebla cálida de profundidad: los items más ALTOS (al fondo) se atenúan un pelo
           const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1);
@@ -1667,12 +1750,23 @@ export default function EmplataGame(props: {
         v.y += v.vy * df;
         v.vy += 0.55 * df;
         v.rot += v.vr * df;
+        v.sc += (v.scT - v.sc) * (1 - Math.pow(0.86, df)); // escala continua carta→reposo (sin salto)
         const catV = v.ing.categoria;
-        const scV = catV === "base" ? 1.18 : catV === "proteina" ? 0.8 : 0.58;
         const surfY =
           catV === "base"
             ? boxY - boxH * 0.1
-            : boxY + reposo(v.x - boxX, radioDe(catV, scV)).y;
+            : boxY + reposo(v.x - boxX, radioDe(catV, v.scT)).y;
+        // sombra de caída: encoge y se oscurece al acercarse a la superficie (vende la caída)
+        const alto = Math.max(0, surfY - v.y);
+        if (v.vy > 0 && alto < boxH * 0.7 && catV !== "base") {
+          const sr = radioDe(catV, v.scT) * (0.5 + alto / (boxH * 0.7));
+          ctx.globalAlpha = 0.28 * (1 - alto / (boxH * 0.7));
+          ctx.fillStyle = "#2A1808";
+          ctx.beginPath();
+          ctx.ellipse(v.x, surfY, sr, sr * 0.4, 0, 0, TAU);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
         if (v.vy > 0 && v.y >= surfY) {
           if (v.bounces < 1) {
             v.bounces++;
@@ -1680,6 +1774,7 @@ export default function EmplataGame(props: {
             v.vx *= 0.5;
             wd.boxSquash = 1;
             s.ruido(0.04, 0.05, 900);
+            if (navigator.vibrate) navigator.vibrate(10); // haptic SOLO en el 1er contacto
           } else {
             aterrizar(v.ing, v.x, clamp(v.vy / 14, 0, 1));
             wd.vuelos.splice(i, 1);
@@ -1691,10 +1786,30 @@ export default function EmplataGame(props: {
           ctx.save();
           ctx.translate(v.x, v.y);
           ctx.rotate(v.rot);
-          ctx.drawImage(spr, -SPR * 0.4, -SPR * 0.4, SPR * 0.8, SPR * 0.8);
+          const sz = SPR * v.sc;
+          ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
           ctx.restore();
         }
       }
+
+      // ===== partículas del color de la comida (burst de aterrizaje) =====
+      for (let i = wd.parts.length - 1; i >= 0; i--) {
+        const pa = wd.parts[i];
+        pa.x += pa.vx * df;
+        pa.y += pa.vy * df;
+        pa.vy += 0.32 * df;
+        pa.life -= 0.04 * df;
+        if (pa.life <= 0) {
+          wd.parts.splice(i, 1);
+          continue;
+        }
+        ctx.globalAlpha = Math.min(1, pa.life * 1.6);
+        ctx.fillStyle = pa.color;
+        ctx.beginPath();
+        ctx.arc(pa.x, pa.y, pa.r * (0.4 + pa.life * 0.6), 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
 
       // ===== vapor idle de la caja (más generoso cuando el plato está completo: "se ve rico") =====
       const completo =
@@ -2023,6 +2138,7 @@ export default function EmplataGame(props: {
             holding = true;
           } else {
             // suelta DISPERSO sobre la caja: cada strand emplata en un punto distinto (montón real)
+            const catR = fd.ing.categoria;
             wd.vuelos.push({
               ing: fd.ing,
               x: boxX + fd.off * 0.2 + fd.drop * boxW * 0.22,
@@ -2032,6 +2148,8 @@ export default function EmplataGame(props: {
               rot: (Math.random() - 0.5) * 0.4,
               vr: (Math.random() - 0.5) * 0.1,
               bounces: 0,
+              sc: 0.68, // sale del rizo del fideo (≈ su tamaño colgando)
+              scT: catR === "base" ? 1.25 : catR === "proteina" ? 0.8 : 0.58, // → reposo, sin salto
             });
             wd.fideos.splice(i, 1);
             continue;
@@ -2135,6 +2253,28 @@ export default function EmplataGame(props: {
       }
       ctx.globalAlpha = 1;
 
+      // ===== rastro dorado del pulgar (se desvanece) =====
+      if (wd.trail.length > 1) {
+        for (let i = wd.trail.length - 1; i >= 0; i--) {
+          wd.trail[i].life -= 0.06 * df;
+          if (wd.trail[i].life <= 0) wd.trail.splice(i, 1);
+        }
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        for (let i = 1; i < wd.trail.length; i++) {
+          const a = wd.trail[i - 1];
+          const bpt = wd.trail[i];
+          ctx.globalAlpha = bpt.life * 0.5;
+          ctx.strokeStyle = "#F2A516";
+          ctx.lineWidth = 2 + bpt.life * 5;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(bpt.x, bpt.y);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+
       // ===== grado final: velo cálido (soft-light) + viñeta (multiply) — temperatura unificada =====
       ctx.globalCompositeOperation = "soft-light";
       ctx.fillStyle = "rgba(242,165,22,0.06)";
@@ -2166,6 +2306,9 @@ export default function EmplataGame(props: {
     wd.chispas = [];
     wd.ondas = [];
     wd.pops = [];
+    wd.parts = [];
+    wd.manchas = [];
+    wd.trail = [];
     wd.fold = 0;
     wd.folding = false;
     wd.selloHecho = false;
