@@ -452,23 +452,81 @@ function bakeSprite(ing: Ingrediente): Off {
     spec(g, cx - R * 0.3, cy - R * 0.36, R, true);
   } else if (/bolonesa|carne/.test(id)) {
     volumen(g, blob(g, cx, cy + R * 0.06, R * 0.9, 2.1, 0.8), cx, cy, R * 0.9, "#E06A3A", "#B23A1C", "#5E1A0C");
-    g.fillStyle = "rgba(94,26,12,0.8)";
-    for (let k = 0; k < 7; k++) {
+    // TROZOS de carne (masas redondeadas con su propia luz ↖) — no un blob liso
+    for (const [mx, my, mr] of [[-0.28, -0.02, 0.2], [0.18, -0.16, 0.17], [0.06, 0.22, 0.19], [0.34, 0.1, 0.14]] as const) {
+      const bx = cx + mx * R;
+      const byc = cy + my * R;
+      const br = mr * R;
+      const cg = g.createRadialGradient(bx - br * 0.4, byc - br * 0.4, br * 0.1, bx, byc, br);
+      cg.addColorStop(0, "#A8482A");
+      cg.addColorStop(1, "#5E1E10");
+      g.fillStyle = cg;
       g.beginPath();
-      g.arc(cx + (Math.random() - 0.5) * R * 1.1, cy + (Math.random() - 0.4) * R * 0.7, 2.2, 0, TAU);
+      g.arc(bx, byc, br, 0, TAU);
       g.fill();
     }
-    glossy(g, cx, cy, R * 0.9); // la boloñesa es salsa: brillo húmedo, no punto duro
+    // HEBRA de fideo asomando (la firma papaghetti) — rizo ámbar con filo de brillo
+    g.strokeStyle = "#E9A83C";
+    g.lineWidth = R * 0.14;
+    g.lineCap = "round";
+    g.beginPath();
+    g.ellipse(cx + R * 0.08, cy - R * 0.16, R * 0.32, R * 0.16, -0.4, 0.3, Math.PI * 1.7);
+    g.stroke();
+    g.strokeStyle = "rgba(255,240,200,0.6)";
+    g.lineWidth = R * 0.045;
+    g.beginPath();
+    g.ellipse(cx + R * 0.08, cy - R * 0.18, R * 0.3, R * 0.14, -0.4, 0.5, Math.PI * 1.4);
+    g.stroke();
+    glossy(g, cx, cy, R * 0.9); // salsa: brillo húmedo
   } else if (/pollo|crispy/.test(id)) {
-    // pollo apanado: dorado PÁLIDO (no la criolla naranja), moteado claro + oscuro = costra crujiente
+    // pollo apanado CRUJIENTE: base dorada pálida + CRÁTERES de costra (bultitos con volumen,
+    // luz ↖ y sombra ↘) → lee como frito, no como blob liso
     volumen(g, blob(g, cx, cy, R * 0.86, 3.3), cx, cy, R * 0.86, "#FBE7AE", "#E6BC63", "#9A6A24");
-    for (let k = 0; k < 9; k++) {
-      g.fillStyle = k % 2 ? "rgba(120,80,26,0.5)" : "rgba(255,240,200,0.55)";
+    const nubs: Array<[number, number, number]> = [
+      [-0.3, -0.18, 0.2], [0.12, -0.28, 0.16], [0.34, 0.02, 0.18],
+      [-0.1, 0.12, 0.22], [0.2, 0.3, 0.15], [-0.34, 0.24, 0.14], [0.02, -0.02, 0.17],
+    ];
+    for (const [nx, ny, nr] of nubs) {
+      const bx = cx + nx * R;
+      const byc = cy + ny * R;
+      const br = nr * R;
+      g.fillStyle = "rgba(120,78,24,0.38)"; // sombra ↘ del bulto
       g.beginPath();
-      g.arc(cx + (Math.random() - 0.5) * R * 1.2, cy + (Math.random() - 0.5) * R * 0.9, k % 2 ? 1.6 : 1.9, 0, TAU);
+      g.arc(bx + br * 0.3, byc + br * 0.32, br, 0, TAU);
+      g.fill();
+      const bg = g.createRadialGradient(bx - br * 0.4, byc - br * 0.4, br * 0.1, bx, byc, br);
+      bg.addColorStop(0, "#FFEFC0");
+      bg.addColorStop(0.6, "#EDC066");
+      bg.addColorStop(1, "#B5842E");
+      g.fillStyle = bg;
+      g.beginPath();
+      g.arc(bx, byc, br, 0, TAU);
       g.fill();
     }
     rim(g, blob(g, cx, cy, R * 0.86, 3.3), cx, cy, R * 0.86, 0.7);
+  } else if (/mixta/.test(id)) {
+    // MIXTA: revuelto de dos proteínas — parches dorados (frito) + rojos (carne) sobre una masa
+    volumen(g, blob(g, cx, cy, R * 0.9, 2.6, 0.86), cx, cy, R * 0.9, "#E8B45A", "#C88A34", "#7A4E14");
+    const parche = (mx: number, my: number, mr: number, c0: string, c1: string) => {
+      const bx = cx + mx * R;
+      const byc = cy + my * R;
+      const br = mr * R;
+      const cg = g.createRadialGradient(bx - br * 0.4, byc - br * 0.4, br * 0.1, bx, byc, br);
+      cg.addColorStop(0, c0);
+      cg.addColorStop(1, c1);
+      g.fillStyle = cg;
+      g.beginPath();
+      g.arc(bx, byc, br, 0, TAU);
+      g.fill();
+    };
+    parche(0.2, -0.1, 0.22, "#C05A32", "#6E2412"); // carne
+    parche(0.34, 0.16, 0.16, "#B85030", "#6E2412");
+    parche(0.08, 0.24, 0.18, "#C05A32", "#6E2412");
+    parche(-0.3, -0.05, 0.2, "#FFE6A8", "#B5842E"); // frito
+    parche(-0.16, 0.2, 0.15, "#FBE0A0", "#B5842E");
+    parche(-0.34, 0.22, 0.13, "#FFE6A8", "#B5842E");
+    rim(g, blob(g, cx, cy, R * 0.9, 2.6, 0.86), cx, cy, R * 0.9, 0.6);
+    spec(g, cx - R * 0.24, cy - R * 0.28, R, false);
   } else if (/maicito|maiz/.test(id)) {
     // montoncito de granos de maíz
     for (let k = 0; k < 9; k++) {
