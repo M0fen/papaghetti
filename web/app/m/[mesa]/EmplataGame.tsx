@@ -1724,20 +1724,22 @@ export default function EmplataGame(props: {
       pupilDown = 0,
       hvx = 0,
       hvy = 0,
+      scale = 1,
     ) => {
       const wd = world.current;
-      const wob = Math.sin(wd.t * 0.22 + seed) * 7;
-      const wob2 = Math.cos(wd.t * 0.18 + seed * 1.7) * 6;
+      const S = scale; // el fideo escala con su objeto (p.ej. la caja crecida en la espera)
+      const wob = Math.sin(wd.t * 0.22 + seed) * 7 * S;
+      const wob2 = Math.cos(wd.t * 0.18 + seed * 1.7) * 6 * S;
       const dx = tipX - ax;
       const dy = tipY - ay;
       // WHIP: el cuerpo TRAILA la velocidad de la cabeza (follow-through) → ondula como ser vivo,
       // no es un cable rígido. El nodo cercano a la cabeza (c2) se retrasa opuesto al movimiento.
-      const whipX = clamp(hvx * 0.05, -15, 15);
-      const whipY = clamp(hvy * 0.05, -15, 15);
+      const whipX = clamp(hvx * 0.05, -15, 15) * S;
+      const whipY = clamp(hvy * 0.05, -15, 15) * S;
       const c1x = ax + dx * 0.16 + wob - whipX * 0.35;
-      const c1y = ay - 48 + wob2 * 0.6 + dy * 0.1 - whipY * 0.35;
+      const c1y = ay - 48 * S + wob2 * 0.6 + dy * 0.1 - whipY * 0.35;
       const c2x = ax + dx * 0.74 - wob * 0.6 - whipX;
-      const c2y = Math.min(ay, tipY) - 42 + wob2 - whipY;
+      const c2y = Math.min(ay, tipY) - 42 * S + wob2 - whipY;
       for (let k = 0; k <= FN; k++) {
         const t = k / FN;
         const mt = 1 - t;
@@ -1747,9 +1749,10 @@ export default function EmplataGame(props: {
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
 
-      // ancho por nodo: TAPER de la base (7.5) al cuello (3.2), con leve respiración
-      const wBase = 7.6;
-      const wTip = 3.2;
+      // ancho por nodo: TAPER de la base al cuello, escalado por S (respira ±4% para "vida")
+      const breathe = 1 + Math.sin(wd.t * 0.09 + seed) * 0.04;
+      const wBase = 7.6 * S * breathe;
+      const wTip = 3.2 * S * breathe;
       // construye la cinta como polígono (borde izq de ida, borde der de vuelta)
       const ribbon = (grow: number, offx: number, offy: number) => {
         ctx.beginPath();
@@ -1851,6 +1854,7 @@ export default function EmplataGame(props: {
       ctx.save();
       ctx.translate(tipX, tipY);
       ctx.rotate(ang + Math.PI / 2); // el eje largo sigue la hebra
+      ctx.scale(S, S); // la cabeza escala con el cuerpo
       const spd = Math.hypot(hvx, hvy);
       const st = clamp(spd * 0.0016, 0, 0.3); // squash&stretch: la cabeza se estira al ir rápido
       const headG = ctx.createRadialGradient(-2, -3, 1, 0, 0, 9);
@@ -1875,9 +1879,12 @@ export default function EmplataGame(props: {
         const spd2 = Math.hypot(hvx, hvy);
         const lx = spd2 > 10 ? clamp(hvx / spd2, -1, 1) * 1.3 : 0; // la pupila mira hacia el movimiento
         const ly = clamp((spd2 > 10 ? clamp(hvy / spd2, -1, 1) * 1.1 : 0) + pupilDown * 0.7, -1.15, 1.15);
+        ctx.save();
+        ctx.translate(tipX, tipY); // marco local a la cabeza, escalado por S (ojos/boca crecen con ella)
+        ctx.scale(S, S);
         for (const sd of [-1, 1]) {
-          const ex = tipX - dirX * 0.5 + perX * sd * 2.7;
-          const ey = tipY - dirY * 0.5 + perY * sd * 2.7;
+          const ex = -dirX * 0.5 + perX * sd * 2.7;
+          const ey = -dirY * 0.5 + perY * sd * 2.7;
           ctx.save();
           ctx.translate(ex, ey);
           ctx.scale(1, blink);
@@ -1898,8 +1905,8 @@ export default function EmplataGame(props: {
           ctx.restore();
         }
         // BOCA mínima hacia el frente de la cabeza: sonríe, o "o" de esfuerzo al cargar / ir rápido
-        const mx = tipX + dirX * 2.6;
-        const my = tipY + dirY * 2.6;
+        const mx = dirX * 2.6;
+        const my = dirY * 2.6;
         ctx.strokeStyle = "rgba(58,28,10,0.85)";
         ctx.lineWidth = 1;
         ctx.lineCap = "round";
@@ -1911,6 +1918,7 @@ export default function EmplataGame(props: {
           ctx.quadraticCurveTo(mx, my + 1, mx + 1.3, my - 0.2); // sonrisa sutil
         }
         ctx.stroke();
+        ctx.restore();
       }
     };
 
@@ -1992,28 +2000,42 @@ export default function EmplataGame(props: {
         // diagonal (era el "borrón extraño"). Al SELLAR la caja se alza → la sombra se ensancha
         // pero se ACLARA (objeto que se levanta), en vez de agigantarse oscura.
         const base = boxY + boxH * 0.32 + entY + focoY;
-        const cy2 = base + boxH * 0.13 * focoScale; // justo bajo la base
+        const cy2 = base + boxH * 0.12 * focoScale;
         const lift = clamp(-focoY / (H * 0.06), 0, 1); // 0 apoyada → 1 alzada (al sellar)
-        const spread = 1 + lift * 0.35;
-        const fade = 1 - lift * 0.45;
-        // penumbra ambiente: ancha, MUY suave, cálida, apenas desplazada ↘
-        const amb = ctx.createRadialGradient(boxX + boxW * 0.04, cy2, boxW * 0.05, boxX + boxW * 0.05, cy2 + boxH * 0.01, boxW * 0.5 * focoScale * spread);
-        amb.addColorStop(0, `rgba(40,23,10,${0.15 * fade})`);
-        amb.addColorStop(0.6, `rgba(40,23,10,${0.06 * fade})`);
-        amb.addColorStop(1, "rgba(40,23,10,0)");
+        const spread = 1 + lift * 0.4;
+        const fade = 1 - lift * 0.4;
+        const cxs = boxX + boxW * 0.02;
+        ctx.save();
+        ctx.globalCompositeOperation = "multiply"; // la mesa asoma su tono cálido a través de la sombra (una-luz)
+        // AMBIENTE: ancha, tenuísima, apenas ↘ (única capa con dirección de luz)
+        const amb = ctx.createRadialGradient(cxs + boxW * 0.05, cy2 + boxH * 0.02, boxW * 0.06, cxs + boxW * 0.06, cy2 + boxH * 0.02, boxW * 0.85 * focoScale * spread);
+        amb.addColorStop(0, `rgba(74,44,20,${0.1 * fade})`);
+        amb.addColorStop(0.55, `rgba(74,44,20,${0.05 * fade})`);
+        amb.addColorStop(1, "rgba(74,44,20,0)");
         ctx.fillStyle = amb;
         ctx.beginPath();
-        ctx.ellipse(boxX + boxW * 0.05, cy2 + boxH * 0.01, boxW * 0.5 * focoScale * spread, boxH * 0.09 * focoScale * spread, 0, 0, TAU);
+        ctx.ellipse(cxs + boxW * 0.06, cy2 + boxH * 0.02, boxW * 0.85 * focoScale * spread, boxH * 0.14 * focoScale * spread, 0, 0, TAU);
         ctx.fill();
-        // contacto: ceñido, más oscuro, nítido bajo la base (contact-hardening)
-        const con = ctx.createRadialGradient(boxX + boxW * 0.02, cy2, 2, boxX + boxW * 0.02, cy2, boxW * 0.34 * focoScale);
-        con.addColorStop(0, `rgba(30,16,6,${0.34 * fade})`);
-        con.addColorStop(0.7, `rgba(30,16,6,${0.11 * fade})`);
-        con.addColorStop(1, "rgba(30,16,6,0)");
+        // MEDIA (penumbra)
+        const med = ctx.createRadialGradient(cxs, cy2, boxW * 0.04, cxs, cy2, boxW * 0.42 * focoScale);
+        med.addColorStop(0, `rgba(74,44,20,${0.16 * fade})`);
+        med.addColorStop(0.6, `rgba(74,44,20,${0.07 * fade})`);
+        med.addColorStop(1, "rgba(74,44,20,0)");
+        ctx.fillStyle = med;
+        ctx.beginPath();
+        ctx.ellipse(cxs, cy2, boxW * 0.42 * focoScale, boxH * 0.08 * focoScale, 0, 0, TAU);
+        ctx.fill();
+        // CONTACTO: ceñido, stops que se desploman → línea de contacto casi dura (contact-hardening)
+        const con = ctx.createRadialGradient(cxs, cy2, 1, cxs, cy2, boxW * 0.22 * focoScale);
+        con.addColorStop(0, `rgba(58,32,14,${0.5 * fade})`);
+        con.addColorStop(0.25, `rgba(58,32,14,${0.34 * fade})`);
+        con.addColorStop(0.5, `rgba(58,32,14,${0.12 * fade})`);
+        con.addColorStop(1, "rgba(58,32,14,0)");
         ctx.fillStyle = con;
         ctx.beginPath();
-        ctx.ellipse(boxX + boxW * 0.02, cy2, boxW * 0.34 * focoScale, boxH * 0.055 * focoScale, 0, 0, TAU);
+        ctx.ellipse(cxs, cy2, boxW * 0.22 * focoScale, boxH * 0.05 * focoScale, 0, 0, TAU);
         ctx.fill();
+        ctx.restore();
       }
 
       // ===== LA MASCOTA — el fideo SIEMPRE presente. Vive a un lado de la caja (hogar fijo) y
@@ -2987,7 +3009,7 @@ export default function EmplataGame(props: {
           tipXe = anchXe; // reverencia
           tipYe = anchYe - up * (0.5 + 0.06 * Math.sin(wd.t * 0.05));
         }
-        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, est === "cocina" ? 1.1 : 0.4);
+        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, est === "cocina" ? 1.1 : 0.4, 0, 0, fs * 1.15);
         // la comanda kraft que lleva el fideo (recibido)
         if (ticket) {
           ctx.save();
