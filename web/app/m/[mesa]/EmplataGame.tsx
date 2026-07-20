@@ -3608,6 +3608,9 @@ export default function EmplataGame(props: {
       {!pedido ? (
         <footer className="emp-bar emp-bar--game">
           <div className="emp-total">
+            {baseId && proteinaIds.length === 0 && (
+              <span className="emp-total__aviso">Caja sin proteína · puedes emplatar igual</span>
+            )}
             <small>
               {tops.length > incluidos
                 ? `${incluidos} toppings gratis · ${tops.length - incluidos} con precio`
@@ -3630,26 +3633,40 @@ export default function EmplataGame(props: {
         </footer>
       ) : (
         <footer className="emp-bar emp-bar--game emp-bar--espera">
-          <div className="emp-espera">
-            <div className="emp-espera__id">
-              <span className="emp-espera__k">COMANDA</span> <b>#{pedido.id}</b> · {formatCOP(pedido.total)}
+          <div className="emp-wstate">
+            <div className="emp-wstate__hero">
+              <b className="emp-wstate__now">{estadoLabel[estado]}</b>
+              <span className="emp-wstate__sub">
+                {estado === "recibido"
+                  ? "La cocina ya recibió tu caja"
+                  : estado === "cocina"
+                    ? "La están preparando…"
+                    : estado === "listo"
+                      ? "¡Lista! Recógela en la barra"
+                      : "¡Buen provecho!"}
+              </span>
             </div>
-            <ol className="emp-pasos" aria-hidden>
+            <ol className="emp-timeline" aria-label={`Estado del pedido: ${estadoLabel[estado]}`}>
               {(["recibido", "cocina", "listo"] as EstadoPedido[]).map((e, k) => (
                 <li key={e} className={`${ordenIdx >= k ? "on" : ""} ${ordenIdx === k ? "now" : ""}`}>
-                  <i />
-                  {estadoLabel[e]}
+                  <span className="emp-timeline__dot" />
+                  <span className="emp-timeline__lbl">{estadoLabel[e]}</span>
                 </li>
               ))}
             </ol>
           </div>
-          <div className="emp-espera__acciones">
-            <button type="button" className="emp-cta emp-cta--otra" onClick={compartirCaja} disabled={compartiendo}>
-              {compartiendo ? "…" : (<><IcoCompartir /> Compartir</>)}
-            </button>
-            <button type="button" className="emp-cta emp-cta--sec emp-cta--otra" onClick={otraCaja}>
-              Otra
-            </button>
+          <div className="emp-espera__foot">
+            <span className="emp-espera__id">
+              <span className="emp-espera__k">COMANDA</span> <b>#{pedido.id}</b> · {formatCOP(pedido.total)}
+            </span>
+            <div className="emp-espera__acciones">
+              <button type="button" className="emp-cta emp-cta--otra" onClick={compartirCaja} disabled={compartiendo}>
+                {compartiendo ? "…" : (<><IcoCompartir /> Compartir</>)}
+              </button>
+              <button type="button" className="emp-cta emp-cta--sec emp-cta--otra" onClick={otraCaja}>
+                Otra
+              </button>
+            </div>
           </div>
         </footer>
       )}
