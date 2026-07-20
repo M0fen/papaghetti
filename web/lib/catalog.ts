@@ -363,6 +363,7 @@ export async function deleteEnredo(id: string): Promise<Catalog> {
 export interface NuevoPedido {
   baseId: string;
   proteinaId: string;
+  proteinaId2?: string; // 2ª proteína opcional (EMPLATA permite hasta 2); retro-compatible
   toppingIds: string[];
   canal?: Pedido["canal"];
   tipo?: TipoServicio;
@@ -416,6 +417,7 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
 
   const base = consumir(input.baseId);
   const proteina = consumir(input.proteinaId);
+  const proteina2 = input.proteinaId2 ? consumir(input.proteinaId2) : undefined; // 2ª proteína (opcional)
   const tops = input.toppingIds
     .map(consumir)
     .filter(Boolean) as Ingrediente[];
@@ -423,12 +425,14 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
   const subtotal =
     (base?.precio ?? 0) +
     (proteina?.precio ?? 0) +
+    (proteina2?.precio ?? 0) + // ambas proteínas a precio completo (sin lógica de incluidas)
     tops.reduce((s, t, i) => s + (i < TOPPINGS_INCLUIDOS ? 0 : t.precio), 0);
   const impuesto = Math.round((subtotal * (cat.ajustes.impuestoPct ?? 0)) / 100);
   // Costo de insumos (COGS) congelado según receta y costos actuales.
   const costo = Math.round(
     costoReceta(base?.receta, byId) +
       costoReceta(proteina?.receta, byId) +
+      costoReceta(proteina2?.receta, byId) +
       tops.reduce((s, t) => s + costoReceta(t.receta, byId), 0)
   );
 
@@ -443,7 +447,7 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     estado: "recibido",
     pago: "pendiente",
     base: base?.nombre ?? "—",
-    proteina: proteina?.nombre ?? "—",
+    proteina: [proteina?.nombre, proteina2?.nombre].filter(Boolean).join(" + ") || "—",
     toppings: tops.map((t) => t.nombre),
     subtotal,
     impuesto,

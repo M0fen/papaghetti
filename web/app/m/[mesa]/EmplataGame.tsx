@@ -58,6 +58,32 @@ function springStep(pos: number, vel: number, target: number, k: number, c: numb
 }
 
 /* =========================================================================
+   EL NIDO SERVIBLE — la comida NO se apila al azar: cada ingrediente cae en un SLOT
+   determinista (rol + índice) que forma un MONTÍCULO con héroe(s) de proteína y toppings
+   dispuestos por ángulo áureo. Estructura y forma, foto reproducible. Ver recomputeSlots().
+   ========================================================================= */
+const YB = -0.05; // tapa de la CAMA (fracción de boxH; el nido se apoya aquí, cerca del suelo)
+const HM = 0.2; // altura del penacho (apex ≈ -0.25, anidado dentro de la caja)
+const FXLIM = 0.3; // límite lateral (= el lim del apilado anterior)
+const GOLDEN = 2.399963229728653; // ángulo áureo (phyllotaxis de Vogel → ruido azul, sin clusters)
+/** Hash determinista str→[0,1): jitter/rot reproducibles (jamás Math.random posicional). */
+function hash01(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 100000) / 100000;
+}
+/** Envolvente del montículo: alto al centro-fondo, cae a flancos y frente. ty en fracción de boxH
+ *  (negativo = arriba). depth 0=frente/cámara, 1=fondo. Apex ≈ -0.33 (bajo el rim, no se sale). */
+function moundY(fx: number, depth: number): number {
+  const t = Math.min(1, Math.abs(fx) / FXLIM);
+  const prof = Math.pow(1 - t * t, 0.6);
+  return YB - HM * prof * (0.4 + 0.6 * depth);
+}
+
+/* =========================================================================
    TIPOGRAFÍA — Canvas2D NO resuelve var(--…) en ctx.font. Hay que leer las
    familias resueltas de las custom properties UNA vez (portado del juego
    hermano render.ts). Sin esto, TODO el texto cae a "10px sans-serif".
@@ -124,10 +150,10 @@ function wrap2(ctx: CanvasRenderingContext2D, text: string, maxW: number): [stri
    ========================================================================= */
 type Sabor = { cro: number; cre: number; fre: number; dul: number };
 const EJES = [
-  { k: "cro" as const, label: "Crocante", color: "#E0930C" },
-  { k: "cre" as const, label: "Cremoso", color: "#EAD9A0" },
-  { k: "fre" as const, label: "Fresco", color: "#7FA64A" },
-  { k: "dul" as const, label: "Dulce", color: "#E89BB0" },
+  { k: "cro" as const, label: "Crocante", color: "#E8A21E" },
+  { k: "cre" as const, label: "Cremoso", color: "#DDBE6A" }, // más saturado → la barra se ve (antes casi invisible)
+  { k: "fre" as const, label: "Fresco", color: "#8CB856" },
+  { k: "dul" as const, label: "Dulce", color: "#DE7A98" },
 ];
 const SABOR_MAP: Record<string, Sabor> = {
   "papa-criolla": { cro: 0.35, cre: 0.8, fre: 0.1, dul: 0.25 },
@@ -258,6 +284,36 @@ function spec(g: CanvasRenderingContext2D, x: number, y: number, r: number, hard
     g.fill();
   }
 }
+/** Brillo HÚMEDO para salsas/cremosos (comemos con los ojos): sheen elíptico amplio orientado ↖ +
+ *  2 micro-catchlights + menisco brillante en el borde inferior. `source-atop` lo confina a la
+ *  silueta ya dibujada. Da la lectura "jugoso" que el spec() de punto duro no logra en una salsa. */
+function glossy(g: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+  g.save();
+  g.globalCompositeOperation = "source-atop"; // solo sobre la comida ya pintada, jamás fuera
+  const sg = g.createRadialGradient(cx - r * 0.3, cy - r * 0.36, r * 0.05, cx - r * 0.2, cy - r * 0.24, r * 0.92);
+  sg.addColorStop(0, "rgba(255,252,240,0.55)");
+  sg.addColorStop(0.5, "rgba(255,250,235,0.14)");
+  sg.addColorStop(1, "rgba(255,250,235,0)");
+  g.fillStyle = sg;
+  g.beginPath();
+  g.ellipse(cx - r * 0.16, cy - r * 0.22, r * 0.72, r * 0.52, -0.5, 0, TAU);
+  g.fill();
+  g.fillStyle = "rgba(255,255,255,0.9)"; // catchlight duro (la gota de reflejo)
+  g.beginPath();
+  g.arc(cx - r * 0.34, cy - r * 0.36, r * 0.08, 0, TAU);
+  g.fill();
+  g.fillStyle = "rgba(255,255,255,0.55)";
+  g.beginPath();
+  g.arc(cx + r * 0.1, cy - r * 0.48, r * 0.05, 0, TAU);
+  g.fill();
+  g.strokeStyle = "rgba(255,246,225,0.4)"; // menisco húmedo inferior
+  g.lineWidth = Math.max(1, r * 0.09);
+  g.beginPath();
+  g.ellipse(cx, cy + r * 0.04, r * 0.8, r * 0.64, 0, Math.PI * 0.12, Math.PI * 0.88);
+  g.stroke();
+  g.restore();
+}
+
 /** Deriva tonos cálidos del color del catálogo: f>0 aclara hacia crema, f<0 oscurece hacia marrón. */
 function shade(hex: string | undefined, f: number): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
@@ -402,7 +458,7 @@ function bakeSprite(ing: Ingrediente): Off {
       g.arc(cx + (Math.random() - 0.5) * R * 1.1, cy + (Math.random() - 0.4) * R * 0.7, 2.2, 0, TAU);
       g.fill();
     }
-    spec(g, cx - R * 0.26, cy - R * 0.2, R, true);
+    glossy(g, cx, cy, R * 0.9); // la boloñesa es salsa: brillo húmedo, no punto duro
   } else if (/pollo|crispy/.test(id)) {
     // pollo apanado: dorado PÁLIDO (no la criolla naranja), moteado claro + oscuro = costra crujiente
     volumen(g, blob(g, cx, cy, R * 0.86, 3.3), cx, cy, R * 0.86, "#FBE7AE", "#E6BC63", "#9A6A24");
@@ -432,7 +488,7 @@ function bakeSprite(ing: Ingrediente): Off {
     g.beginPath();
     g.ellipse(cx + R * 0.3, cy - R * 0.18, R * 0.14, R * 0.08, 0.6, 0, TAU);
     g.fill();
-    spec(g, cx - R * 0.28, cy - R * 0.14, R, true);
+    glossy(g, cx, cy, R * 0.92); // hogao/salsa: superficie húmeda brillante
   } else if (/parmesano|queso/.test(id)) {
     // virutas de queso
     for (let k = 0; k < 5; k++) {
@@ -458,7 +514,7 @@ function bakeSprite(ing: Ingrediente): Off {
       g.beginPath();
       g.arc(cx, cy + R * 0.12, R * 0.3, 0, TAU);
     }, cx, cy + R * 0.12, R * 0.3, "#C89A5B", "#A87B42", "#6B4A1E");
-    spec(g, cx - R * 0.24, cy - R * 0.34, R, false);
+    glossy(g, cx, cy, R * 0.82); // aguacate: cremoso, brillo húmedo suave
   } else if (/perejil|cilantro|hierba/.test(id)) {
     g.strokeStyle = "#3E7A46";
     g.lineWidth = 2.4;
@@ -630,7 +686,7 @@ type Fideo = {
 };
 /** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
  *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
-type PilaItem = { id: string; fx: number; fy: number; ty: number; rot: number; s: number; r: number; land: number };
+type PilaItem = { id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number };
 type Puff = { x: number; y: number; life: number; max: number; r: number; tipo: "vapor" | "polvo" };
 type Pop = { x: number; y: number; life: number; texto: string; gratis: boolean };
 type Chispa = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number };
@@ -698,17 +754,17 @@ export default function EmplataGame(props: {
 
   // ------- selección (React para la barra DOM; refs espejo para el loop) -------
   const [baseId, setBaseId] = useState<string>(() => bases.find((i) => !i.agotado)?.id ?? "");
-  const [proteinaId, setProteinaId] = useState<string>("");
+  const [proteinaIds, setProteinaIds] = useState<string[]>([]); // hasta 2 proteínas
   const [toppingIds, setToppingIds] = useState<string[]>([]);
   const [tab, setTab] = useState<0 | 1 | 2>(0);
   const [enviando, setEnviando] = useState(false);
   const [pedido, setPedido] = useState<{ id: string; total: number } | null>(null);
   const [estado, setEstado] = useState<EstadoPedido>("recibido");
 
-  const sel = useRef({ baseId: "", proteinaId: "", toppingIds: [] as string[], tab: 0 as 0 | 1 | 2 });
+  const sel = useRef({ baseId: "", proteinaIds: [] as string[], toppingIds: [] as string[], tab: 0 as 0 | 1 | 2 });
   useEffect(() => {
-    sel.current = { baseId, proteinaId, toppingIds, tab };
-  }, [baseId, proteinaId, toppingIds, tab]);
+    sel.current = { baseId, proteinaIds, toppingIds, tab };
+  }, [baseId, proteinaIds, toppingIds, tab]);
 
   // W4: la escena NO se desmonta al pedir. faseRef gobierna el loop; estadoRef lo lee sin re-render.
   const faseRef = useRef<"arma" | "espera">("arma");
@@ -724,7 +780,7 @@ export default function EmplataGame(props: {
   const tops = toppingIds.map(find).filter(Boolean) as Ingrediente[];
   const subtotal =
     (find(baseId)?.precio ?? 0) +
-    (find(proteinaId)?.precio ?? 0) +
+    proteinaIds.reduce((sum, id) => sum + (find(id)?.precio ?? 0), 0) + // ambas a precio completo
     tops.reduce((sum, t, i) => sum + (i < incluidos ? 0 : t.precio), 0);
   const impuesto = Math.round((subtotal * impuestoPct) / 100);
   const total = subtotal + impuesto;
@@ -838,6 +894,36 @@ export default function EmplataGame(props: {
     [s],
   );
 
+  /** El fideo SACA un ingrediente de la caja y lo devuelve a su plato (parte visual; el estado lo
+   *  cambia quien llama). Reusado por quitar-topping y deseleccionar una proteína. */
+  const sacarDeCaja = useCallback(
+    (ing: Ingrediente, cx: number, cy: number) => {
+      const wd = world.current;
+      const mm = wd.masc;
+      const hh = HOMES[mm.home];
+      wd.pila = wd.pila.filter((p) => p.id !== ing.id);
+      wd.resettle = true; // el nido se recompone y los demás fluyen al hueco
+      wd.fideos.push({
+        ing,
+        tx: cx,
+        ty: cy,
+        t0: wd.t,
+        dir: "sacar",
+        off: ((wd.fideoN++ % 3) - 1) * 22,
+        drop: 0,
+        seed: Math.random() * 10,
+        sx: mm.init ? mm.hx : cx,
+        sy: mm.init ? mm.hy : cy - 80,
+        haxf: hh.axf,
+        hayf: hh.ayf,
+      });
+      mm.home = otroHome(mm.home);
+      mm.modeT = wd.t;
+      s.ruido(0.05, 0.04, 1400);
+    },
+    [s],
+  );
+
   const tapIngrediente = useCallback(
     (ing: Ingrediente, cx: number, cy: number) => {
       if (ing.agotado || world.current.folding) {
@@ -860,38 +946,25 @@ export default function EmplataGame(props: {
         });
         despachar(ing, cx, cy);
       } else if (cat === "proteina") {
-        if (sel.current.proteinaId === ing.id) {
-          s.tone(560, 0.05, "sine", 0.04);
+        // multi-select con TOPE 2: toggle, y rechazo honesto de la 3ª
+        if (sel.current.proteinaIds.includes(ing.id)) {
+          setProteinaIds((prev) => prev.filter((p) => p !== ing.id));
+          sacarDeCaja(ing, cx, cy); // el fideo la saca y la devuelve a su plato
           return;
         }
-        setProteinaId(ing.id);
-        world.current.pila = world.current.pila.filter((p) => find(p.id)?.categoria !== "proteina");
+        if (sel.current.proteinaIds.length >= 2) {
+          s.tone(150, 0.08, "sine", 0.05); // "nope" grave
+          s.tone(110, 0.1, "sine", 0.04, undefined, 0.03);
+          if (navigator.vibrate) navigator.vibrate(12);
+          world.current.pops.push({ x: cx, y: cy - 20, life: 1, texto: "MÁX 2 PROTEÍNAS", gratis: false });
+          return;
+        }
+        setProteinaIds((prev) => [...prev, ing.id]);
         despachar(ing, cx, cy);
       } else {
         if (sel.current.toppingIds.includes(ing.id)) {
-          // el fideo lo SACA de la caja y lo devuelve a su carta
           setToppingIds((prev) => prev.filter((t) => t !== ing.id));
-          world.current.pila = world.current.pila.filter((p) => p.id !== ing.id);
-          world.current.resettle = true; // los de arriba caen al hueco que dejó
-          const mm = world.current.masc;
-          const hh = HOMES[mm.home];
-          world.current.fideos.push({
-            ing,
-            tx: cx,
-            ty: cy,
-            t0: world.current.t,
-            dir: "sacar",
-            off: ((world.current.fideoN++ % 3) - 1) * 22,
-            drop: 0,
-            seed: Math.random() * 10,
-            sx: mm.init ? mm.hx : cx,
-            sy: mm.init ? mm.hy : cy - 80,
-            haxf: hh.axf,
-            hayf: hh.ayf,
-          });
-          mm.home = otroHome(mm.home);
-          mm.modeT = world.current.t;
-          s.ruido(0.05, 0.04, 1400);
+          sacarDeCaja(ing, cx, cy); // el fideo lo saca y lo devuelve a su plato
           return;
         }
         setToppingIds((prev) => [...prev, ing.id]);
@@ -899,7 +972,7 @@ export default function EmplataGame(props: {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [despachar, s],
+    [despachar, sacarDeCaja, s],
   );
 
   const confirmar = useCallback(async () => {
@@ -912,7 +985,8 @@ export default function EmplataGame(props: {
     try {
       const r = await enviarPedido({
         baseId,
-        proteinaId: proteinaId || proteinas[0]?.id || "",
+        proteinaId: proteinaIds[0] ?? "", // sin fallback silencioso: 0 proteínas = caja base honesta
+        proteinaId2: proteinaIds[1] ?? undefined,
         toppingIds,
         canal: "qr",
         tipo: "mesa",
@@ -929,7 +1003,7 @@ export default function EmplataGame(props: {
       world.current.selloHecho = false;
     }
     setEnviando(false);
-  }, [abierto, enviando, baseId, proteinaId, toppingIds, mesa, proteinas, s]);
+  }, [abierto, enviando, baseId, proteinaIds, toppingIds, mesa, s]);
 
   useEffect(() => {
     if (!pedido) return;
@@ -1328,27 +1402,113 @@ export default function EmplataGame(props: {
     const radioDe = (cat: string, sc: number) => SPR * sc * 0.35;
 
     /**
-     * FÍSICA DE APILADO: dónde reposa un círculo de radio r soltado en x local `lxIn`.
-     * Cae hasta tocar la cama (la base levanta el piso) o apoyarse SOBRE otro item ya
-     * asentado (colisión circular con solape buscado — la comida real se toca).
+     * EL NIDO SERVIBLE — coloca cada ingrediente en un SLOT determinista (rol + índice) formando
+     * un MONTÍCULO: cama al fondo, héroe(s) de proteína montados sobre ella, toppings dispuestos por
+     * ÁNGULO ÁUREO (Vogel) con keep-out de la cara del héroe y relajación de solapes. Da ESTRUCTURA
+     * y forma apetitosa en vez de un apilado al azar. Solo corre al cambiar la composición (flag),
+     * nunca por frame. Escribe fxT/ty/depth/rot/s (fx/fy fluyen hacia ellos con lerp en el dibujo).
      */
-    const reposo = (lxIn: number, r: number, excluirId?: string) => {
-      const { boxW, boxH } = geo();
+    const recomputeSlots = () => {
       const wd = world.current;
-      const hayBase = wd.pila.some((p) => find(p.id)?.categoria === "base");
-      const lim = boxW * 0.3;
-      const lx = Math.max(-lim, Math.min(lim, lxIn));
-      let y = (hayBase ? -0.16 : -0.04) * boxH - r * 0.35;
-      for (const p of wd.pila) {
-        if (p.id === excluirId || find(p.id)?.categoria === "base") continue;
-        const dx = lx - p.fx * boxW;
-        const md = (r + p.r * boxW) * 0.72;
-        if (Math.abs(dx) < md) {
-          const dy = Math.sqrt(md * md - dx * dx) * 0.8;
-          y = Math.min(y, p.ty * boxH - dy);
+      const { boxW } = geo();
+      const base = wd.pila.filter((p) => find(p.id)?.categoria === "base");
+      const prot = wd.pila.filter((p) => find(p.id)?.categoria === "proteina");
+      const tops = wd.pila.filter((p) => find(p.id)?.categoria === "topping");
+      const seed = hash01((base[0]?.id ?? "b") + prot.map((p) => p.id).join("_"));
+      const side = seed < 0.5 ? -1 : 1;
+      const setR = (p: PilaItem, sc: number) => {
+        p.s = sc;
+        p.r = radioDe(find(p.id)?.categoria ?? "topping", sc) / boxW;
+      };
+      // CAMA: llena el suelo, centrada, casi plana
+      for (const p of base) {
+        p.fxT = (hash01(p.id) - 0.5) * 0.03;
+        p.ty = YB;
+        p.depth = 0.55;
+        p.rot = (hash01(p.id + "r") - 0.5) * 0.08;
+        setR(p, 1.2);
+      }
+      // HÉROE(S): 1 en un tercio, o 2 como dúo jerárquico — su cara mira a cámara, nunca al centro muerto
+      const heroFaces: Array<{ fx: number; ty: number; rx: number; ry: number }> = [];
+      prot.forEach((p, i) => {
+        let fx: number;
+        let depth: number;
+        let sc: number;
+        let rot: number;
+        if (prot.length >= 2) {
+          fx = i === 0 ? -0.22 : 0.24;
+          depth = i === 0 ? 0.36 : 0.48;
+          sc = i === 0 ? 0.82 : 0.78;
+          rot = (i === 0 ? -1 : 1) * 0.12;
+        } else {
+          fx = side * 0.18;
+          depth = 0.4;
+          sc = 0.82;
+          rot = side * 0.12;
+        }
+        p.fxT = fx;
+        p.ty = moundY(fx, depth) - 0.02;
+        p.depth = depth;
+        p.rot = rot;
+        setR(p, sc);
+        heroFaces.push({ fx, ty: p.ty, rx: p.r * 0.95, ry: p.r * 1.15 });
+      });
+      // TOPPINGS: ángulo áureo (densidad areal uniforme, sin rejilla), keep-out de la cara del héroe
+      const N = tops.length;
+      const FRONT = [{ fx: 0.02, depth: 0.24 }, { fx: 0.2, depth: 0.3 }, { fx: -0.22, depth: 0.3 }];
+      tops.forEach((p, k) => {
+        let fx: number;
+        let depth: number;
+        if (N <= 2) {
+          fx = FRONT[k].fx; // pocos → slots frontales (no un anillo vacío)
+          depth = FRONT[k].depth;
+        } else {
+          const theta = k * GOLDEN;
+          const rho = Math.sqrt((k + 0.5) / N);
+          fx = Math.cos(theta) * rho * FXLIM;
+          depth = clamp(0.55 + Math.sin(theta) * rho * 0.5, 0, 1); // corona hacia el fondo = altura
+        }
+        let ty = moundY(fx, depth) + (hash01(p.id) - 0.5) * 0.02;
+        for (const hf of heroFaces) {
+          const dfx = fx - hf.fx;
+          const dty = ty - hf.ty;
+          const nd = (dfx / hf.rx) ** 2 + (dty / hf.ry) ** 2;
+          if (nd < 1) {
+            const push = (1 - Math.sqrt(Math.max(nd, 0.0001))) * 0.16 + 0.02;
+            fx += (dfx >= 0 ? 1 : -1) * push;
+            ty += push * 0.45; // empuje hacia el frente/abajo, jamás sobre la cara
+          }
+        }
+        p.fxT = clamp(fx, -FXLIM, FXLIM);
+        p.ty = ty;
+        p.depth = depth;
+        p.rot = (hash01(p.id + "r") - 0.5) * 1.0;
+        setR(p, 0.58);
+      });
+      // relajación de solapes (la comida se TOCA ~32%, sin torres) — O(N²), N≤12, trivial
+      const mov = [...prot, ...tops];
+      for (let iter = 0; iter < 2; iter++) {
+        for (let a = 0; a < mov.length; a++) {
+          for (let b = a + 1; b < mov.length; b++) {
+            const pa = mov[a];
+            const pb = mov[b];
+            const dfx = pa.fxT - pb.fxT;
+            const dty = pa.ty - pb.ty;
+            const dist = Math.hypot(dfx, dty) || 0.0001;
+            const min = (pa.r + pb.r) * 0.68;
+            if (dist < min) {
+              const push = (min - dist) * 0.5;
+              const ux = dfx / dist;
+              const uy = dty / dist;
+              pa.fxT += ux * push * 0.85; // esparce a los flancos (montículo), no torre
+              pa.ty += uy * push * 0.25;
+              pb.fxT -= ux * push * 0.85;
+              pb.ty -= uy * push * 0.25;
+            }
+          }
         }
       }
-      return { lx, y };
+      for (const p of mov) p.fxT = clamp(p.fxT, -FXLIM, FXLIM);
     };
 
     /** Aterrizaje: el item se queda DONDE la física lo dejó (x real del vuelo) + squash + precio. */
@@ -1356,30 +1516,15 @@ export default function EmplataGame(props: {
       const wd = world.current;
       const { boxW, boxH, boxX, boxY } = geo();
       const cat = ing.categoria;
-      wd.pila = wd.pila.filter((p) => !(cat !== "topping" && find(p.id)?.categoria === cat));
-      let fx = 0;
-      let ty = -0.1;
-      let rot = (Math.random() - 0.5) * 0.5;
-      let sc = 0.58;
-      if (cat === "base") {
-        // la CAMA: ancha, casi plana, al fondo
-        rot = (Math.random() - 0.5) * 0.06;
-        sc = 1.18;
-      } else {
-        sc = cat === "proteina" ? 0.8 : 0.58;
-        if (cat === "proteina") rot = (Math.random() - 0.5) * 0.25;
-        const r = radioDe(cat, sc);
-        // rueda hacia el hueco: prueba la x real ±8px y se queda en la MÁS asentada
-        let best = reposo(xScreen - boxX, r);
-        for (const dxTry of [-8, 8]) {
-          const c = reposo(xScreen - boxX + dxTry, r);
-          if (c.y > best.y) best = c;
-        }
-        fx = best.lx / boxW;
-        ty = best.y / boxH;
-      }
-      wd.pila.push({ id: ing.id, fx, fy: ty - 0.035, ty, rot, s: sc, r: radioDe(cat, sc) / boxW, land: 1 });
-      if (cat !== "topping") wd.resettle = true; // cambió la cama → el montón se reacomoda
+      if (cat === "base") wd.pila = wd.pila.filter((p) => find(p.id)?.categoria !== "base"); // solo la base reemplaza a la base
+      const sc = cat === "base" ? 1.2 : cat === "proteina" ? 0.8 : 0.58;
+      const fxDrop = clamp((xScreen - boxX) / boxW, -FXLIM, FXLIM); // desde donde cayó → FLUYE a su slot
+      wd.pila.push({ id: ing.id, fx: fxDrop, fxT: fxDrop, fy: YB - 0.05, ty: YB, rot: 0, s: sc, r: radioDe(cat, sc) / boxW, land: 1, depth: 0.5 });
+      recomputeSlots(); // EL NIDO decide el lugar determinista por rol + índice
+      const nuevo = wd.pila[wd.pila.length - 1];
+      nuevo.fy = nuevo.ty - 0.05; // cae el último tramo a su slot (micro-asentamiento)
+      const fx = nuevo.fxT;
+      const ty = nuevo.ty;
       wd.boxSquash = 1;
       s.caida(ing, energia); // suena al aterrizar, con energía cinética de la caída
       if (!reduce)
@@ -2051,6 +2196,52 @@ export default function EmplataGame(props: {
           ctx.restore();
         }
 
+        // ===== PAREDES LATERALES (volumen 3/4): la caja es un CONTENEDOR real, no una fachada.
+        // Izquierda LIT ↖, derecha en SOMBRA. Tras la pared trasera y bajo el suelo (la comida las tapa). =====
+        {
+          const wl = ctx.createLinearGradient(-boxW * 0.5, -boxH * 0.42, -boxW * 0.34, boxH * 0.08);
+          wl.addColorStop(0, "#E4BC80");
+          wl.addColorStop(0.5, "#C69A5B");
+          wl.addColorStop(1, "#9C7238");
+          ctx.fillStyle = wl;
+          ctx.beginPath();
+          ctx.moveTo(-boxW * 0.42, -boxH * 0.42);
+          ctx.lineTo(-boxW * 0.5, -boxH * 0.08);
+          ctx.lineTo(-boxW * 0.48, boxH * 0.08);
+          ctx.lineTo(-boxW * 0.34, boxH * 0.02);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = "rgba(255,238,200,0.5)"; // canto superior iluminado del rim izquierdo
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(-boxW * 0.42, -boxH * 0.42);
+          ctx.lineTo(-boxW * 0.5, -boxH * 0.08);
+          ctx.stroke();
+
+          const wr = ctx.createLinearGradient(boxW * 0.34, -boxH * 0.42, boxW * 0.5, boxH * 0.08);
+          wr.addColorStop(0, "#9A7038");
+          wr.addColorStop(1, "#5E3F1C");
+          ctx.fillStyle = wr;
+          ctx.beginPath();
+          ctx.moveTo(boxW * 0.42, -boxH * 0.42);
+          ctx.lineTo(boxW * 0.5, -boxH * 0.08);
+          ctx.lineTo(boxW * 0.48, boxH * 0.08);
+          ctx.lineTo(boxW * 0.34, boxH * 0.02);
+          ctx.closePath();
+          ctx.fill();
+          const wrAO = ctx.createLinearGradient(boxW * 0.34, 0, boxW * 0.5, 0); // se hunde al borde
+          wrAO.addColorStop(0, "rgba(40,22,8,0)");
+          wrAO.addColorStop(1, "rgba(40,22,8,0.35)");
+          ctx.fillStyle = wrAO;
+          ctx.beginPath();
+          ctx.moveTo(boxW * 0.42, -boxH * 0.42);
+          ctx.lineTo(boxW * 0.5, -boxH * 0.08);
+          ctx.lineTo(boxW * 0.48, boxH * 0.08);
+          ctx.lineTo(boxW * 0.34, boxH * 0.02);
+          ctx.closePath();
+          ctx.fill();
+        }
+
         // ===== SUELO interior: la comida se apoya en una superficie kraft (no flota en el vacío) =====
         const floorY = boxH * 0.0;
         const floorG = ctx.createLinearGradient(-boxW * 0.32, -boxH * 0.12, boxW * 0.3, boxH * 0.06);
@@ -2073,12 +2264,9 @@ export default function EmplataGame(props: {
         // LA COMIDA — montón FÍSICO: cada item está donde la física lo dejó; se asienta con
         // lerp hacia su y de reposo; SOBRESALE del borde; clip solo lateral
         if (wd.resettle) {
-          // se quitó algo o cambió la cama → los de arriba resbalan hacia los huecos
+          // se quitó/cambió algo → el nido se recompone y los items FLUYEN a sus nuevos slots
           wd.resettle = false;
-          for (const p of wd.pila) {
-            if (find(p.id)?.categoria === "base") continue;
-            p.ty = reposo(p.fx * boxW, p.r * boxW, p.id).y / boxH;
-          }
+          recomputeSlots();
         }
         ctx.save();
         ctx.beginPath();
@@ -2105,15 +2293,17 @@ export default function EmplataGame(props: {
           const c = find(id)?.categoria;
           return c === "base" ? 0 : c === "proteina" ? 1 : 2;
         };
-        // sort ESTABLE: capa (cama→proteína→toppings) y, dentro, orden de llegada = orden de apilado
-        const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id));
+        // sort: capa (cama→proteína→toppings) y, DENTRO de toppings, por profundidad desc → el fondo
+        // se dibuja primero y el frente lo ocluye (lectura 3/4 correcta del montículo)
+        const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id) || (b.depth ?? 0.5) - (a.depth ?? 0.5));
         for (const p of ordenada) {
           const spr = wd.sprites.get(p.id);
           if (!spr) continue;
-          p.fy += (p.ty - p.fy) * (1 - Math.pow(0.75, df)); // micro-asentamiento (dt-normalizado)
+          p.fy += (p.ty - p.fy) * (1 - Math.pow(0.75, df)); // asentamiento vertical (dt-normalizado)
+          p.fx += (p.fxT - p.fx) * (1 - Math.pow(0.75, df)); // FLUYE a su slot (la composición se recompone viva)
           const cp = capa(p.id);
           const lx = p.fx * boxW;
-          const ly = cp === 0 ? -boxH * 0.06 : p.fy * boxH; // la base descansa en el suelo
+          const ly = cp === 0 ? -boxH * 0.02 : p.fy * boxH; // la CAMA se apoya al frente, visible como lecho
           const rp = p.r * boxW;
           if (cp === 0) {
             // CAMA: sombra ancha y plana que la asienta en el suelo
@@ -2139,7 +2329,8 @@ export default function EmplataGame(props: {
           // SQUASH de aterrizaje con conservación de volumen (aplasta ancho, recupera)
           const sq = p.land * 0.32;
           ctx.scale(1 + sq, 1 - sq);
-          const sz = SPR * (cp === 0 ? p.s * 1.06 : p.s); // la cama, un poco más ancha
+          // escala por profundidad: frente un pelo mayor, fondo menor → refuerza el escorzo del montículo
+          const sz = SPR * (cp === 0 ? p.s * 1.24 : p.s * (0.93 + 0.12 * (1 - (p.depth ?? 0.5)))); // cama ancha (lecho)
           // niebla cálida de profundidad: los items más ALTOS (al fondo) se atenúan un pelo
           const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1);
           ctx.globalAlpha = 1 - prof * 0.14;
@@ -2405,7 +2596,7 @@ export default function EmplataGame(props: {
         const surfY =
           catV === "base"
             ? boxY - boxH * 0.1
-            : boxY + reposo(v.x - boxX, radioDe(catV, v.scT)).y;
+            : boxY + moundY(clamp((v.x - boxX) / boxW, -FXLIM, FXLIM), 0.5) * boxH;
         // sombra de caída: encoge y se oscurece al acercarse a la superficie (vende la caída)
         const alto = Math.max(0, surfY - v.y);
         if (v.vy > 0 && alto < boxH * 0.7 && catV !== "base") {
@@ -2473,7 +2664,7 @@ export default function EmplataGame(props: {
 
       // ===== vapor idle de la caja (más generoso cuando el plato está completo: "se ve rico") =====
       const completo =
-        !!sel.current.baseId && !!sel.current.proteinaId && sel.current.toppingIds.length > 0;
+        !!sel.current.baseId && sel.current.proteinaIds.length > 0 && sel.current.toppingIds.length > 0;
       if (!reduce && !wd.folding && wd.pila.length > 0 && Math.random() < (completo ? 0.05 : 0.03) * df) {
         wd.puffs.push({ x: boxX + (Math.random() - 0.5) * 26, y: boxY - boxH * 0.22, life: 1, max: 90, r: 5, tipo: "vapor" });
       }
@@ -2521,7 +2712,7 @@ export default function EmplataGame(props: {
         ctx.fillStyle = activo ? "#1E1611" : "rgba(251,241,222,0.85)";
         ctx.fillText(tabsTxt[k], tx, trayY - 2);
         // check de completado (ámbar, disciplina de color — nunca verde-UI)
-        const done = k === 0 ? !!sel.current.baseId : k === 1 ? !!sel.current.proteinaId : sel.current.toppingIds.length > 0;
+        const done = k === 0 ? !!sel.current.baseId : k === 1 ? sel.current.proteinaIds.length > 0 : sel.current.toppingIds.length > 0;
         if (done && !activo) {
           ctx.fillStyle = "#F2A516";
           ctx.beginPath();
@@ -2546,7 +2737,7 @@ export default function EmplataGame(props: {
         if (cx < -cardW || cx > W + cardW) continue;
         const selr =
           ing.id === sel.current.baseId ||
-          ing.id === sel.current.proteinaId ||
+          sel.current.proteinaIds.includes(ing.id) ||
           sel.current.toppingIds.includes(ing.id);
         // entrada escalonada al cambiar de pestaña
         const ap = Math.min(1, Math.max(0, (wd.t - wd.tabT - k * 2) / 10));
@@ -2933,7 +3124,7 @@ export default function EmplataGame(props: {
 
       // ===== TERMÓMETRO DEL ANTOJO — el carácter de tu caja, en vivo =====
       if (faseRef.current === "arma") {
-        const idsA = [sel.current.baseId, sel.current.proteinaId, ...sel.current.toppingIds].filter(Boolean);
+        const idsA = [sel.current.baseId, ...sel.current.proteinaIds, ...sel.current.toppingIds].filter(Boolean);
         const nA = idsA.length;
         if (nA > 0) {
           const agg: Sabor = { cro: 0, cre: 0, fre: 0, dul: 0 };
@@ -2958,22 +3149,29 @@ export default function EmplataGame(props: {
           tv.fre += (pf.fre - tv.fre) * kk;
           tv.dul += (pf.dul - tv.dul) * kk;
           const mw = Math.min(W * 0.68, 256);
-          const mh = 50;
+          const mh = 52;
           const myc = H * 0.11;
-          // píldora kraft translúcida
-          ctx.fillStyle = "rgba(30,20,10,0.24)";
+          // píldora kraft SÓLIDA (vive sobre el punto más claro de la escena → sin fondo real nada
+          // cumple contraste; 0.24 era ilegible). Borde crema tenue para asentarla.
+          ctx.fillStyle = "rgba(26,17,8,0.66)";
           ctx.beginPath();
           ctx.roundRect(W / 2 - mw / 2, myc - mh / 2, mw, mh, 14);
           ctx.fill();
-          // título evocador
-          ctx.font = fontD(11, 800);
+          ctx.strokeStyle = "rgba(255,244,220,0.14)";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          // título evocador (13px + sombra → legible a plena luz)
+          ctx.font = fontD(13, 800);
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillStyle = "rgba(251,241,222,0.92)";
-          ctx.fillText(tituloAntojo(pf, nA), W / 2, myc - mh / 2 + 12);
-          // 4 barras: crocante / cremoso / fresco / dulce
-          const bw = 40;
-          const gap = 8;
+          ctx.shadowColor = "rgba(0,0,0,0.45)";
+          ctx.shadowBlur = 3;
+          ctx.fillStyle = "rgba(255,248,232,0.98)";
+          ctx.fillText(tituloAntojo(pf, nA), W / 2, myc - mh / 2 + 13);
+          ctx.shadowBlur = 0;
+          // 4 barras: crocante / cremoso / fresco / dulce (anchas → los labels de 10px no se tocan)
+          const bw = 46;
+          const gap = 10;
           const totalB = EJES.length * bw + (EJES.length - 1) * gap;
           const bx0 = W / 2 - totalB / 2;
           const by = myc + mh / 2 - 15;
@@ -3003,8 +3201,8 @@ export default function EmplataGame(props: {
             ctx.beginPath();
             ctx.roundRect(bx, by, fw, 2, 2);
             ctx.fill();
-            ctx.font = fontB(8, 700);
-            ctx.fillStyle = k === domK ? "rgba(255,244,220,0.95)" : "rgba(251,241,222,0.65)";
+            ctx.font = fontB(10, 800); // 8px era el peor texto de la app; sube a 10 legible
+            ctx.fillStyle = k === domK ? "rgba(255,246,224,0.98)" : "rgba(251,241,222,0.9)";
             ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 8);
           });
         }
@@ -3069,7 +3267,7 @@ export default function EmplataGame(props: {
     faseRef.current = "arma";
     setPedido(null);
     setToppingIds([]);
-    setProteinaId("");
+    setProteinaIds([]);
     setEstado("recibido");
     estadoRef.current = "recibido";
     estadoAnimRef.current = { last: "recibido", campana: false };
@@ -3155,7 +3353,7 @@ export default function EmplataGame(props: {
         if (sp) g.drawImage(sp, x - sc / 2, y - sc / 2, sc, sc);
       };
       if (baseId) drawSpr(baseId, 0, -bh * 0.02, 360);
-      if (proteinaId) drawSpr(proteinaId, bw * 0.02, bh * 0.02, 300);
+      proteinaIds.forEach((id, i) => drawSpr(id, bw * 0.02 + (i - (proteinaIds.length - 1) / 2) * bw * 0.2, bh * 0.02, 300));
       const tl = toppingIds.map(find).filter(Boolean) as Ingrediente[];
       const FAN = [-0.5, 0.5, 0, -0.85, 0.85, -0.25, 0.25];
       tl.forEach((t, k) => drawSpr(t.id, FAN[k % 7] * bw * 0.28, -bh * 0.14 - (k % 3) * bh * 0.06, 210));
@@ -3197,7 +3395,7 @@ export default function EmplataGame(props: {
       g.fillText(nombreBase.toUpperCase(), 540, 1160);
       g.font = `600 32px ${FONT_BODY}`;
       g.fillStyle = "rgba(30,22,17,0.7)";
-      const extras = [find(proteinaId)?.nombre, ...tl.map((t) => t.nombre)].filter(Boolean) as string[];
+      const extras = [...proteinaIds.map((id) => find(id)?.nombre), ...tl.map((t) => t.nombre)].filter(Boolean) as string[];
       let ly = 1220;
       for (const ex of extras.slice(0, 6)) {
         g.fillText(`+ ${ex}`, 540, ly);
@@ -3241,7 +3439,7 @@ export default function EmplataGame(props: {
       setCompartiendo(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pedido, mesa, baseId, proteinaId, toppingIds]);
+  }, [pedido, mesa, baseId, proteinaIds, toppingIds]);
 
   /* Un solo árbol DOM: el canvas NUNCA se desmonta (arma → teatro de espera). La barra
      inferior cambia; un aria-live anuncia el estado para lectores de pantalla. */
