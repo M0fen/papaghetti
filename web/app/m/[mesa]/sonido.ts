@@ -150,8 +150,10 @@ export function useSonido() {
   /** Escala pentatónica para que toda seguidilla de emplatado sea musical. */
   const combo = useCallback(
     (n: number) => {
+      // pentatónica con envoltura de OCTAVA: la seguidilla sigue trepando cuando el jugador está "on fire"
       const escala = [392, 440, 523, 587, 698];
-      tone(escala[Math.min(n, escala.length - 1)], 0.09, "triangle", 0.1);
+      const oct = Math.floor(n / escala.length);
+      tone(escala[n % escala.length] * Math.pow(2, oct), 0.09, "triangle", 0.16);
     },
     [tone],
   );

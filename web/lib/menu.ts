@@ -378,7 +378,7 @@ export const ESTADOS: EstadoPedido[] = ["recibido", "cocina", "listo", "entregad
 export const estadoLabel: Record<EstadoPedido, string> = {
   recibido: "Recibido",
   cocina: "En cocina",
-  listo: "Listo 🔔",
+  listo: "Listo",
   entregado: "Entregado",
   cancelado: "Cancelado",
 };

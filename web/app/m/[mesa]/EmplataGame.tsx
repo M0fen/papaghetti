@@ -93,6 +93,29 @@ const fontD = (px: number, weight = 800) => `${weight} ${px}px ${FONT_DISPLAY}`;
 /** Cara body (Manrope) — labels, precios, small print. */
 const fontB = (px: number, weight = 600) => `${weight} ${px}px ${FONT_BODY}`;
 
+/** Envuelve `text` en hasta 2 líneas que quepan en maxW (px), con ELIPSIS real (measureText).
+ *  Requiere ctx.font ya seteado. Sustituye el slice(0,15) que partía palabras a la mitad. */
+function wrap2(ctx: CanvasRenderingContext2D, text: string, maxW: number): [string, string] {
+  const words = text.split(" ");
+  const lines: [string, string] = ["", ""];
+  let li = 0;
+  for (const w of words) {
+    const cand = lines[li] ? lines[li] + " " + w : w;
+    if (ctx.measureText(cand).width <= maxW || !lines[li]) lines[li] = cand;
+    else if (li === 0) {
+      li = 1;
+      lines[1] = w;
+    } else lines[1] = cand;
+  }
+  const elip = (str: string): string => {
+    if (ctx.measureText(str).width <= maxW) return str;
+    let t = str;
+    while (t.length > 1 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+    return t + "…";
+  };
+  return [elip(lines[0]), lines[1] ? elip(lines[1]) : ""];
+}
+
 /* =========================================================================
    PERFIL DE SABOR — cada ingrediente tiene un carácter en 4 ejes (0..1). Sirve al
    TERMÓMETRO DEL ANTOJO (perfil agregado de la caja) y a la REACCIÓN por ingrediente
@@ -299,17 +322,22 @@ function bakeSprite(ing: Ingrediente): Off {
     g.arc(cx - R * 0.2, cy - R * 0.24, R * 0.5, Math.PI * 0.9, Math.PI * 1.7);
     g.stroke();
   } else if (/criolla/.test(id)) {
-    // papitas criollas doradas (3 monedas rechonchas)
+    // papitas criollas — naranja SATURADO (distinto del pollo pálido y la piña ácida; no comparten mid+dark)
     const pts: Array<[number, number, number]> = [
       [cx - R * 0.42, cy + R * 0.2, R * 0.5],
       [cx + R * 0.4, cy + R * 0.12, R * 0.46],
       [cx - R * 0.02, cy - R * 0.3, R * 0.52],
     ];
+    // AO de contacto que AGRUPA las monedas (no flotan como stickers sueltos)
+    g.fillStyle = "rgba(74,42,8,0.42)";
+    g.beginPath();
+    g.ellipse(cx, cy + R * 0.28, R * 0.7, R * 0.26, 0, 0, TAU);
+    g.fill();
     for (const [px, py, pr] of pts) {
       volumen(g, () => {
         g.beginPath();
         g.ellipse(px, py, pr, pr * 0.82, 0, 0, TAU);
-      }, px, py, pr, "#FFE08A", "#F2C230", "#8A5A12");
+      }, px, py, pr, "#FFC94E", "#EC9A1E", "#6E3E08");
       spec(g, px - pr * 0.3, py - pr * 0.32, pr, false);
     }
     rim(g, () => {
@@ -376,11 +404,12 @@ function bakeSprite(ing: Ingrediente): Off {
     }
     spec(g, cx - R * 0.26, cy - R * 0.2, R, true);
   } else if (/pollo|crispy/.test(id)) {
-    volumen(g, blob(g, cx, cy, R * 0.86, 3.3), cx, cy, R * 0.86, "#FFD98A", "#E8A83E", "#8A5A12");
-    g.fillStyle = "rgba(138,90,18,0.5)";
+    // pollo apanado: dorado PÁLIDO (no la criolla naranja), moteado claro + oscuro = costra crujiente
+    volumen(g, blob(g, cx, cy, R * 0.86, 3.3), cx, cy, R * 0.86, "#FBE7AE", "#E6BC63", "#9A6A24");
     for (let k = 0; k < 9; k++) {
+      g.fillStyle = k % 2 ? "rgba(120,80,26,0.5)" : "rgba(255,240,200,0.55)";
       g.beginPath();
-      g.arc(cx + (Math.random() - 0.5) * R * 1.2, cy + (Math.random() - 0.5) * R * 0.9, 1.6, 0, TAU);
+      g.arc(cx + (Math.random() - 0.5) * R * 1.2, cy + (Math.random() - 0.5) * R * 0.9, k % 2 ? 1.6 : 1.9, 0, TAU);
       g.fill();
     }
     rim(g, blob(g, cx, cy, R * 0.86, 3.3), cx, cy, R * 0.86, 0.7);
@@ -455,7 +484,13 @@ function bakeSprite(ing: Ingrediente): Off {
       volumen(g, () => {
         g.beginPath();
         g.roundRect(-R * 0.3, -R * 0.26, R * 0.6, R * 0.52, R * 0.12);
-      }, 0, 0, R * 0.4, "#FFE79A", "#F2C230", "#8A5A12");
+      }, 0, 0, R * 0.4, "#FFF07A", "#F5CE2C", "#9A7A12");
+      // filo VERDE ácido de la cáscara (separa de criolla/pollo dorados)
+      g.strokeStyle = "rgba(122,166,74,0.7)";
+      g.lineWidth = R * 0.08;
+      g.beginPath();
+      g.roundRect(-R * 0.3, -R * 0.26, R * 0.6, R * 0.52, R * 0.12);
+      g.stroke();
       g.restore();
     }
     spec(g, cx - R * 0.2, cy - R * 0.36, R, true);
@@ -524,26 +559,34 @@ function bakeSprite(ing: Ingrediente): Off {
   return out;
 }
 
-/** Color dominante de un sprite horneado (promedio de píxeles opacos, sesgado a saturación).
- *  Sirve para el burst de partículas del aterrizaje (Fruit Ninja: partículas del color de la comida). */
+/** Color DOMINANTE de un sprite: media ponderada por SATURACIÓN² sobre TODA la región opaca. El
+ *  velo ámbar del horneado es de baja saturación → pesa casi nada, así el burst sale del color real
+ *  de la comida (Fruit Ninja). Antes era media aritmética del centro → todo tiraba a ámbar uniforme. */
 function muestrearColor(off: Off): string {
   try {
     const g = off.getContext("2d")!;
     const S = off.width;
-    const d = g.getImageData(S * 0.28, S * 0.28, S * 0.44, S * 0.44).data;
+    const d = g.getImageData(0, 0, S, S).data;
     let r = 0;
     let gr = 0;
     let b = 0;
-    let n = 0;
-    for (let i = 0; i < d.length; i += 16) {
+    let wsum = 0;
+    for (let i = 0; i < d.length; i += 8) {
       if (d[i + 3] < 180) continue;
-      r += d[i];
-      gr += d[i + 1];
-      b += d[i + 2];
-      n++;
+      const R = d[i];
+      const G = d[i + 1];
+      const B = d[i + 2];
+      const mx = Math.max(R, G, B);
+      const mn = Math.min(R, G, B);
+      const sat = mx === 0 ? 0 : (mx - mn) / mx;
+      const w = 0.12 + sat * sat; // el gris/ámbar de baja saturación apenas cuenta
+      r += R * w;
+      gr += G * w;
+      b += B * w;
+      wsum += w;
     }
-    if (!n) return "#F2A516";
-    return `rgb(${Math.round(r / n)},${Math.round(gr / n)},${Math.round(b / n)})`;
+    if (!wsum) return "#F2A516";
+    return `rgb(${Math.round(r / wsum)},${Math.round(gr / wsum)},${Math.round(b / wsum)})`;
   } catch {
     return "#F2A516";
   }
@@ -601,6 +644,42 @@ const F_GRAB = 6;
 const F_CARRY = 20;
 const F_SUBIR = 10;
 const F_LLEVAR = 20;
+
+/* =========================================================================
+   ICONOS SVG propios del shell — CERO emoji de sistema (mandato de marca).
+   stroke=currentColor → heredan el color del botón (espresso). Trazo 1.7.
+   ========================================================================= */
+const IcoSonido = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" />
+    <path d="M16.5 8.5a5 5 0 0 1 0 7" />
+    <path d="M19 6a8 8 0 0 1 0 12" />
+  </svg>
+);
+const IcoMute = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" />
+    <path d="m17 9 5 6" />
+    <path d="m22 9-5 6" />
+  </svg>
+);
+const IcoRayo = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" />
+  </svg>
+);
+const IcoLuna = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+  </svg>
+);
+const IcoCompartir = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 15V3" />
+    <path d="m8 7 4-4 4 4" />
+    <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7" />
+  </svg>
+);
 
 export default function EmplataGame(props: {
   mesa: number;
@@ -680,6 +759,7 @@ export default function EmplataGame(props: {
     shake: 0, // sacudida de escena (crocante)
     reactMode: -1, // modo de reacción de la mascota (-1 = ninguno)
     reactT: 0,
+    termoV: { cro: 0, cre: 0, fre: 0, dul: 0 }, // termómetro suavizado (las barras crecen animadas)
     combo: 0,
     comboT: -9999,
     lastTab: 0,
@@ -760,10 +840,19 @@ export default function EmplataGame(props: {
 
   const tapIngrediente = useCallback(
     (ing: Ingrediente, cx: number, cy: number) => {
-      if (ing.agotado || world.current.folding) return;
+      if (ing.agotado || world.current.folding) {
+        if (ing.agotado && !world.current.folding) {
+          s.tone(150, 0.08, "sine", 0.05); // "nope" grave: agotado ya no es un tap muerto silencioso
+          s.tone(110, 0.1, "sine", 0.04, undefined, 0.03);
+        }
+        return;
+      }
       const cat = ing.categoria;
       if (cat === "base") {
-        if (sel.current.baseId === ing.id) return;
+        if (sel.current.baseId === ing.id) {
+          s.tone(560, 0.05, "sine", 0.04); // ya elegida: acuse suave, no silencio
+          return;
+        }
         setBaseId(ing.id);
         world.current.pila = world.current.pila.filter((p) => {
           const it = find(p.id);
@@ -771,7 +860,10 @@ export default function EmplataGame(props: {
         });
         despachar(ing, cx, cy);
       } else if (cat === "proteina") {
-        if (sel.current.proteinaId === ing.id) return;
+        if (sel.current.proteinaId === ing.id) {
+          s.tone(560, 0.05, "sine", 0.04);
+          return;
+        }
         setProteinaId(ing.id);
         world.current.pila = world.current.pila.filter((p) => find(p.id)?.categoria !== "proteina");
         despachar(ing, cx, cy);
@@ -1134,8 +1226,7 @@ export default function EmplataGame(props: {
       g.lineWidth = 1.4;
       for (let k = -3; k <= 3; k++) {
         const xFront = W * 0.5 + k * W * 0.2;
-        const t = (H - woodY) / (H - vpy);
-        const xBack = vpx + (xFront - vpx) * (1 - t) * 0 + (xFront - vpx) * ((woodY - vpy) / (H - vpy));
+        const xBack = vpx + (xFront - vpx) * ((woodY - vpy) / (H - vpy));
         g.beginPath();
         g.moveTo(xBack, woodY);
         g.lineTo(xFront, H);
@@ -1164,8 +1255,8 @@ export default function EmplataGame(props: {
         }
         g.stroke();
       }
-      // GRANO monocromo (dithering barato) → mata el banding en OLED. Horneado, 0/frame.
-      const gn = 42;
+      // GRANO monocromo (dithering barato) → mata el banding en OLED. Horneado, 0/frame. (T5: tile 128px)
+      const gn = 128;
       const nc = document.createElement("canvas");
       nc.width = gn;
       nc.height = gn;
@@ -1291,18 +1382,19 @@ export default function EmplataGame(props: {
       if (cat !== "topping") wd.resettle = true; // cambió la cama → el montón se reacomoda
       wd.boxSquash = 1;
       s.caida(ing, energia); // suena al aterrizar, con energía cinética de la caída
-      for (let k = 0; k < 3; k++)
-        wd.puffs.push({
-          x: geo().boxX + (Math.random() - 0.5) * 30,
-          y: boxY - boxH * 0.2,
-          life: 1,
-          max: 60 + Math.random() * 30,
-          r: 5 + Math.random() * 6,
-          tipo: "vapor",
-        });
+      if (!reduce)
+        for (let k = 0; k < 3; k++)
+          wd.puffs.push({
+            x: geo().boxX + (Math.random() - 0.5) * 30,
+            y: boxY - boxH * 0.2,
+            life: 1,
+            max: 60 + Math.random() * 30,
+            r: 5 + Math.random() * 6,
+            tipo: "vapor",
+          });
       // BURST de partículas del color de la comida (Fruit Ninja) + micro-mancha en el kraft
       const col = wd.colores.get(ing.id) ?? "#F2A516";
-      const nP = 6 + Math.floor(energia * 5);
+      const nP = reduce ? 0 : 6 + Math.floor(energia * 5);
       const px0 = clamp(xScreen, boxX - boxW * 0.34, boxX + boxW * 0.34);
       const py0 = boxY + fx * 0 + ty * boxH * 0 - boxH * 0.14; // sobre la boca de la caja
       for (let k = 0; k < nP; k++) {
@@ -1314,7 +1406,7 @@ export default function EmplataGame(props: {
       const idxT = sel.current.toppingIds.indexOf(ing.id);
       const gratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
       // los pops vivos suben para dejar sitio (nunca ilegibles apilados); el nuevo nace en el borde
-      for (const pv of wd.pops) pv.y -= 22;
+      if (!reduce) for (const pv of wd.pops) pv.y -= 22;
       wd.pops.push({
         x: clamp(xScreen, boxX - boxW * 0.34, boxX + boxW * 0.34),
         y: boxY - boxH * 0.5,
@@ -1342,11 +1434,11 @@ export default function EmplataGame(props: {
             : rasgo === "dul"
               ? { r: 235, g: 160, b: 185 } // rosa dulce
               : { r: 240, g: 224, b: 180 }; // crema cremoso
-      wd.flash = { ...tinte, life: 1 };
-      if (rasgo === "cro" || esPrem) wd.shake = rasgo === "cro" ? 1 : 0.5; // crocante sacude
+      wd.flash = reduce ? { r: 0, g: 0, b: 0, life: 0 } : { ...tinte, life: 1 };
+      if (!reduce && (rasgo === "cro" || esPrem)) wd.shake = rasgo === "cro" ? 1 : 0.5; // crocante sacude
       // partículas temáticas EXTRA del color del rasgo (encima del burst del color de la comida)
       const tcol = `rgb(${tinte.r},${tinte.g},${tinte.b})`;
-      const nX = esPrem ? 10 : rasgo === "cro" ? 8 : 5;
+      const nX = reduce ? 0 : esPrem ? 10 : rasgo === "cro" ? 8 : 5;
       for (let k = 0; k < nX; k++) {
         const a = -Math.PI / 2 + (Math.random() - 0.5) * (esPrem ? TAU : 2.2);
         const sp = 2 + Math.random() * 3.5;
@@ -1374,7 +1466,7 @@ export default function EmplataGame(props: {
       const x0 = Math.max(14, (W - totalW) / 2) - world.current.trayScroll;
       for (let k = 0; k < lista.length; k++) {
         const cx = x0 + k * step + cardW / 2;
-        if (Math.abs(x - cx) < cardW / 2) return { ing: lista[k], cx };
+        if (Math.abs(x - cx) < step / 2) return { ing: lista[k], cx }; // step/2: sin franja muerta entre cartas
       }
       return null;
     };
@@ -1710,17 +1802,33 @@ export default function EmplataGame(props: {
       const foco = smooth(Math.min(1, f * 1.3));
       const focoScale = 1 + 0.1 * foco;
       const focoY = -foco * H * 0.06;
-      // ===== SOMBRA de la caja SOBRE LA MESA (espacio de pantalla, difusa) — la aterriza =====
-      // sin esto la caja "flota"; la sombra vive en la superficie, desplazada ↘ por la luz ↖.
+      // ===== SOMBRA DIRECCIONAL de la caja SOBRE LA MESA — la luz viene de ↖, la sombra cae ↘.
+      // Dos capas: núcleo de CONTACTO duro y ceñido (ancla la caja) + halo ambiente elongado y
+      // rotado sobre el eje luz→sombra; el gradiente se centra en el contacto → aclara en el
+      // extremo lejano. Antes era una elipse simétrica con offset +10x: delator nº1 de "sticker".
       {
-        const baseYm = boxY + boxH * 0.32 + entY + focoY + boxH * 0.16 * focoScale;
-        const grd = ctx.createRadialGradient(boxX + 10, baseYm, 4, boxX + 10, baseYm, boxW * 0.62 * focoScale);
-        grd.addColorStop(0, "rgba(30,16,6,0.42)");
-        grd.addColorStop(0.6, "rgba(30,16,6,0.22)");
-        grd.addColorStop(1, "rgba(30,16,6,0)");
-        ctx.fillStyle = grd;
+        const contX = boxX + boxW * 0.03;
+        const contY = boxY + boxH * 0.32 + entY + focoY + boxH * 0.19 * focoScale;
+        const rot = 0.26; // ~15°, alineada al eje ↖→↘
+        const haloX = contX + boxW * 0.1;
+        const haloY = contY + boxH * 0.03;
+        // halo ambiente: elipse larga desplazada ↘, gradiente anclado en el contacto (aclara lejos)
+        const halo = ctx.createRadialGradient(contX, contY, 6, contX, contY, boxW * 0.82 * focoScale);
+        halo.addColorStop(0, "rgba(28,15,6,0.24)");
+        halo.addColorStop(0.5, "rgba(28,15,6,0.11)");
+        halo.addColorStop(1, "rgba(28,15,6,0)");
+        ctx.fillStyle = halo;
         ctx.beginPath();
-        ctx.ellipse(boxX + 10, baseYm, boxW * 0.62 * focoScale, boxH * 0.16 * focoScale, 0, 0, TAU);
+        ctx.ellipse(haloX, haloY, boxW * 0.74 * focoScale, boxH * 0.15 * focoScale, rot, 0, TAU);
+        ctx.fill();
+        // núcleo de contacto: pequeño, oscuro, ceñido bajo la caja
+        const core = ctx.createRadialGradient(contX, contY, 2, contX, contY, boxW * 0.4 * focoScale);
+        core.addColorStop(0, "rgba(24,12,5,0.5)");
+        core.addColorStop(0.65, "rgba(24,12,5,0.22)");
+        core.addColorStop(1, "rgba(24,12,5,0)");
+        ctx.fillStyle = core;
+        ctx.beginPath();
+        ctx.ellipse(contX, contY, boxW * 0.4 * focoScale, boxH * 0.1 * focoScale, rot, 0, TAU);
         ctx.fill();
       }
 
@@ -2257,7 +2365,8 @@ export default function EmplataGame(props: {
         ctx.globalAlpha = 1;
       }
 
-      // ===== chispas doradas (sello) =====
+      // ===== chispas doradas (sello) — aditivas: se suman como brasas =====
+      if (wd.chispas.length) ctx.globalCompositeOperation = "lighter";
       for (let i = wd.chispas.length - 1; i >= 0; i--) {
         const ch = wd.chispas[i];
         ch.x += ch.vx * df;
@@ -2281,6 +2390,7 @@ export default function EmplataGame(props: {
         ctx.stroke();
         ctx.restore();
       }
+      ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
 
       // ===== física: vuelos (caen hasta la SUPERFICIE del montón bajo su x, no un piso fijo) =====
@@ -2309,12 +2419,13 @@ export default function EmplataGame(props: {
         }
         if (v.vy > 0 && v.y >= surfY) {
           if (v.bounces < 1) {
+            const e = clamp(v.vy / 14, 0, 1); // energía del impacto → intensidad del haptic
             v.bounces++;
             v.vy *= -0.38;
             v.vx *= 0.5;
             wd.boxSquash = 1;
             s.ruido(0.04, 0.05, 900);
-            if (navigator.vibrate) navigator.vibrate(10); // haptic SOLO en el 1er contacto
+            if (!reduce && navigator.vibrate && e > 0.15) navigator.vibrate(Math.round(4 + e * 16)); // haptic escalado, 1er contacto
           } else {
             aterrizar(v.ing, v.x, clamp(v.vy / 14, 0, 1));
             wd.vuelos.splice(i, 1);
@@ -2332,7 +2443,8 @@ export default function EmplataGame(props: {
         }
       }
 
-      // ===== partículas del color de la comida (burst de aterrizaje) =====
+      // ===== partículas del color de la comida (burst de aterrizaje) — blending ADITIVO (Fruit Ninja) =====
+      if (wd.parts.length) ctx.globalCompositeOperation = "lighter";
       for (let i = wd.parts.length - 1; i >= 0; i--) {
         const pa = wd.parts[i];
         pa.x += pa.vx * df;
@@ -2343,12 +2455,20 @@ export default function EmplataGame(props: {
           wd.parts.splice(i, 1);
           continue;
         }
+        const rr = pa.r * (0.4 + pa.life * 0.6);
         ctx.globalAlpha = Math.min(1, pa.life * 1.6);
         ctx.fillStyle = pa.color;
         ctx.beginPath();
-        ctx.arc(pa.x, pa.y, pa.r * (0.4 + pa.life * 0.6), 0, TAU);
+        ctx.arc(pa.x, pa.y, rr, 0, TAU);
+        ctx.fill();
+        // núcleo blanco-caliente (la chispa recién nacida quema; se apaga al color)
+        ctx.globalAlpha = Math.min(1, pa.life * pa.life * 1.4);
+        ctx.fillStyle = "#FFF6E6";
+        ctx.beginPath();
+        ctx.arc(pa.x, pa.y, rr * 0.45, 0, TAU);
         ctx.fill();
       }
+      ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
 
       // ===== vapor idle de la caja (más generoso cuando el plato está completo: "se ve rico") =====
@@ -2501,19 +2621,17 @@ export default function EmplataGame(props: {
           ctx.restore();
           ctx.globalAlpha = ea;
         }
-        // nombre (crema sobre la bandeja oscura, 2 líneas máx)
-        ctx.font = fontB(10, 700);
+        // nombre (crema sobre la bandeja oscura, 2 líneas máx con elipsis real vía measureText)
+        ctx.font = fontB(12, 700);
         ctx.textAlign = "center";
         ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.5)" : "#FBF1DE";
-        const words = ing.nombre.split(" ");
-        const l1 = words.slice(0, 2).join(" ").slice(0, 15);
-        const l2 = words.slice(2).join(" ").slice(0, 15);
-        ctx.fillText(l1, 0, cardH / 2 - (l2 ? 30 : 22));
-        if (l2) ctx.fillText(l2, 0, cardH / 2 - 20);
-        // precio / GRATIS chip
+        const [l1, l2] = wrap2(ctx, ing.nombre, cardW - 14);
+        ctx.fillText(l1, 0, cardH / 2 - (l2 ? 31 : 23));
+        if (l2) ctx.fillText(l2, 0, cardH / 2 - 19);
+        // precio / GRATIS chip (oro sobre bandeja oscura — legible; el espresso desaparecería)
         const idxT = sel.current.toppingIds.indexOf(ing.id);
         const esGratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
-        ctx.font = fontB(10, 800);
+        ctx.font = fontB(11, 800);
         if (esGratis && !ing.agotado) {
           ctx.fillStyle = "#C69A5B";
           ctx.beginPath();
@@ -2683,7 +2801,6 @@ export default function EmplataGame(props: {
         let tipX = 0;
         let tipY = 0;
         let holding = false;
-        let eyes = false;
         if (fd.dir === "traer") {
           if (age <= F_EXT) {
             // se estira DESDE su posición actual (sx,sy) hasta la carta — no desde el centro
@@ -2692,7 +2809,6 @@ export default function EmplataGame(props: {
             const cym = Math.min(fd.sy, fd.ty) - 50;
             tipX = bez2(fd.sx, cxm, fd.tx, u);
             tipY = bez2(fd.sy, cym, fd.ty, u);
-            eyes = true;
           } else if (age <= F_EXT + F_GRAB) {
             if (!fd.grabbed) {
               fd.grabbed = true;
@@ -2753,7 +2869,6 @@ export default function EmplataGame(props: {
             continue;
           }
         }
-        void eyes;
         // muelle de la cabeza: persigue el objetivo con lag → anticipación + whip + follow-through
         if (fd.hx === undefined) {
           fd.hx = fd.sx; // arranca donde estaba la mascota (continuidad perfecta)
@@ -2831,7 +2946,17 @@ export default function EmplataGame(props: {
             agg.fre += sv.fre;
             agg.dul += sv.dul;
           }
-          const pf: Sabor = { cro: agg.cro / nA, cre: agg.cre / nA, fre: agg.fre / nA, dul: agg.dul / nA };
+          // DOMINANCIA, no promedio: el eje líder llega alto y la barra CRECE al construir. Antes
+          // pf=agg/nA promediaba → más ingredientes = barras más cortas y "BIEN BALANCEADO" (valor invertido).
+          const maxA = Math.max(agg.cro, agg.cre, agg.fre, agg.dul, 0.0001);
+          const pf: Sabor = { cro: agg.cro / maxA, cre: agg.cre / maxA, fre: agg.fre / maxA, dul: agg.dul / maxA };
+          // suavizado dt-normalizado → las barras se animan al añadir/quitar (no saltan)
+          const tv = wd.termoV;
+          const kk = 1 - Math.pow(0.8, df);
+          tv.cro += (pf.cro - tv.cro) * kk;
+          tv.cre += (pf.cre - tv.cre) * kk;
+          tv.fre += (pf.fre - tv.fre) * kk;
+          tv.dul += (pf.dul - tv.dul) * kk;
           const mw = Math.min(W * 0.68, 256);
           const mh = 50;
           const myc = H * 0.11;
@@ -2851,21 +2976,35 @@ export default function EmplataGame(props: {
           const gap = 8;
           const totalB = EJES.length * bw + (EJES.length - 1) * gap;
           const bx0 = W / 2 - totalB / 2;
-          const by = myc + mh / 2 - 8;
-          const bh = 5;
+          const by = myc + mh / 2 - 15;
+          const bh = 9;
+          let domK = 0;
           EJES.forEach((e, k) => {
-            const v = pf[e.k];
+            if (tv[e.k] > tv[EJES[domK].k]) domK = k;
+          });
+          EJES.forEach((e, k) => {
+            const v = tv[e.k];
             const bx = bx0 + k * (bw + gap);
             ctx.fillStyle = "rgba(251,241,222,0.16)";
             ctx.beginPath();
-            ctx.roundRect(bx, by, bw, bh, 3);
+            ctx.roundRect(bx, by, bw, bh, 4);
             ctx.fill();
+            const fw = Math.max(4, bw * clamp(v, 0, 1));
+            if (k === domK && v > 0.15) {
+              ctx.shadowColor = e.color;
+              ctx.shadowBlur = 8;
+            }
             ctx.fillStyle = e.color;
             ctx.beginPath();
-            ctx.roundRect(bx, by, Math.max(3, bw * clamp(v, 0, 1)), bh, 3);
+            ctx.roundRect(bx, by, fw, bh, 4);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(255,255,255,0.22)"; // filo superior (relieve)
+            ctx.beginPath();
+            ctx.roundRect(bx, by, fw, 2, 2);
             ctx.fill();
             ctx.font = fontB(8, 700);
-            ctx.fillStyle = "rgba(251,241,222,0.7)";
+            ctx.fillStyle = k === domK ? "rgba(255,244,220,0.95)" : "rgba(251,241,222,0.65)";
             ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 8);
           });
         }
@@ -3086,7 +3225,7 @@ export default function EmplataGame(props: {
       const file = new File([blob], "mi-caja-papaghetti.png", { type: "image/png" });
       const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean };
       if (nav.canShare?.({ files: [file] }) && navigator.share) {
-        await navigator.share({ files: [file], title: "Mi caja Papaghetti", text: "Armé mi caja en Papaghetti 🍝" });
+        await navigator.share({ files: [file], title: "Mi caja Papaghetti", text: "Armé mi caja en Papaghetti" });
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -3094,7 +3233,7 @@ export default function EmplataGame(props: {
         a.download = "mi-caja-papaghetti.png";
         a.click();
         URL.revokeObjectURL(url);
-        window.open("https://wa.me/?text=" + encodeURIComponent("Armé mi caja en Papaghetti 🍝 papaghetti.vercel.app"), "_blank");
+        window.open("https://wa.me/?text=" + encodeURIComponent("Armé mi caja en Papaghetti — papaghetti.vercel.app"), "_blank");
       }
     } catch {
       /* usuario canceló el share o no soportado */
@@ -3114,17 +3253,21 @@ export default function EmplataGame(props: {
           <span>· MESA {mesa}</span>
         </div>
         <div className="emp-top__actions">
-          <button type="button" className="emp-mini" onClick={s.toggleMute} aria-label="Sonido">
-            {s.mute ? "🔇" : "🔊"}
+          <button type="button" className="emp-mini" onClick={s.toggleMute} aria-label={s.mute ? "Activar sonido" : "Silenciar"}>
+            {s.mute ? <IcoMute /> : <IcoSonido />}
           </button>
           {!pedido && (
             <button type="button" className="emp-mini emp-modo" onClick={props.onModoRapido}>
-              ⚡ PEDIR YA
+              <IcoRayo /> PEDIR YA
             </button>
           )}
         </div>
       </header>
-      {!abierto && !pedido && <div className="emp-cerrado emp-cerrado--game">😴 Estamos cerrados ahora.</div>}
+      {!abierto && !pedido && (
+        <div className="emp-cerrado emp-cerrado--game">
+          <IcoLuna /> Estamos cerrados ahora.
+        </div>
+      )}
       <canvas ref={canvasRef} className="emp-canvas" aria-label="Arma tu caja Papaghetti" />
 
       <p className="emp-sr" aria-live="polite">
@@ -3168,7 +3311,7 @@ export default function EmplataGame(props: {
           </div>
           <div className="emp-espera__acciones">
             <button type="button" className="emp-cta emp-cta--otra" onClick={compartirCaja} disabled={compartiendo}>
-              {compartiendo ? "…" : "📸 Compartir"}
+              {compartiendo ? "…" : (<><IcoCompartir /> Compartir</>)}
             </button>
             <button type="button" className="emp-cta emp-cta--sec emp-cta--otra" onClick={otraCaja}>
               Otra
