@@ -895,6 +895,9 @@ export default function EmplataGame(props: {
     frontBand: null as Off | null, // banda frontal ESTÁTICA horneada (perf: drawImage vs patrón/frame)
     fbMeta: null as { left: number; top: number; w: number; h: number } | null,
     entered: false, // one-shot del squash de entrada de la caja
+    espT: 0, // 0→1: transición de la caja al retirarse en la espera (deja sitio al mesero)
+    tiltX: 0, // luz interactiva: inclinación del teléfono suavizada (−1..1)
+    tiltY: 0,
     // MASCOTA: el fideo SIEMPRE presente, con hogar fijo (detrás de la caja, a un lado) y
     // muchos modos de movimiento aleatorios. hx/hy = cabeza gobernada por muelle.
     masc: {
@@ -1703,8 +1706,40 @@ export default function EmplataGame(props: {
       return null;
     };
 
+    // ===== LUZ INTERACTIVA (tilt-to-relight): la "biblia de una luz" del dibujo se vuelve INTERACTIVA
+    // — al inclinar el móvil, la luz ↖ se desplaza un poco y la sombra + un brillo cálido la siguen.
+    // Subtil, dentro del concepto (no exagerado). iOS pide permiso en el primer toque. =====
+    let tiltTX = 0;
+    let tiltTY = 0;
+    const onOrient = (e: DeviceOrientationEvent) => {
+      const g = e.gamma ?? 0; // izq/der (−90..90)
+      const bt = e.beta ?? 0; // adelante/atrás
+      tiltTX = clamp(g / 28, -1, 1);
+      tiltTY = clamp((bt - 45) / 28, -1, 1); // reposo ~45° (móvil sostenido en la mano)
+    };
+    let tiltOn = false;
+    const setupTilt = () => {
+      if (tiltOn || reduce || typeof window === "undefined") return;
+      const DOE = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
+      if (!DOE) return;
+      if (typeof DOE.requestPermission === "function") {
+        DOE.requestPermission()
+          .then((st) => {
+            if (st === "granted") {
+              window.addEventListener("deviceorientation", onOrient);
+              tiltOn = true;
+            }
+          })
+          .catch(() => {});
+      } else {
+        window.addEventListener("deviceorientation", onOrient);
+        tiltOn = true;
+      }
+    };
+
     const onDown = (e: PointerEvent) => {
       s.unlock();
+      setupTilt(); // activa la luz interactiva en el primer gesto (permiso iOS)
       if (faseRef.current !== "arma") return; // en espera la escena no recibe toques
       const r = canvas.getBoundingClientRect();
       downX = e.clientX - r.left;
@@ -2019,6 +2054,9 @@ export default function EmplataGame(props: {
       wd.dt = dt;
       wd.df = df;
       wd.t += df;
+      // suaviza la inclinación del móvil → la luz se mueve con calma, no nerviosa (luz interactiva)
+      wd.tiltX += (tiltTX - wd.tiltX) * (1 - Math.pow(0.9, df));
+      wd.tiltY += (tiltTY - wd.tiltY) * (1 - Math.pow(0.9, df));
       const { boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH } = geo();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       // sacudida de escena (crocante) — decae; se suma a la caja y la mascota (no al fondo)
@@ -2070,6 +2108,13 @@ export default function EmplataGame(props: {
       const foco = smooth(Math.min(1, f * 1.3));
       const focoScale = 1 + 0.1 * foco;
       const focoY = -foco * H * 0.06;
+      // ESPERA: la caja se RETIRA (se corre a la derecha y encoge un pelo) para dejar sitio limpio al
+      // MESERO parado a la izquierda, sobre la mesa. Transición suave al entrar en la fase de espera.
+      if (faseRef.current === "espera") wd.espT = Math.min(1, wd.espT + 0.03 * df);
+      else wd.espT = 0;
+      const espMix = smooth(wd.espT);
+      const boxXE = boxX + espMix * boxW * 0.17; // caja corrida a la derecha en espera
+      const focoScaleE = focoScale * (1 - espMix * 0.16); // y encogida un pelo
       // ===== SOMBRA DIRECCIONAL de la caja SOBRE LA MESA — la luz viene de ↖, la sombra cae ↘.
       // Dos capas: núcleo de CONTACTO duro y ceñido (ancla la caja) + halo ambiente elongado y
       // rotado sobre el eje luz→sombra; el gradiente se centra en el contacto → aclara en el
@@ -2080,40 +2125,41 @@ export default function EmplataGame(props: {
         // diagonal (era el "borrón extraño"). Al SELLAR la caja se alza → la sombra se ensancha
         // pero se ACLARA (objeto que se levanta), en vez de agigantarse oscura.
         const base = boxY + boxH * 0.32 + entY + focoY;
-        const cy2 = base + boxH * 0.12 * focoScale;
+        const cy2 = base + boxH * 0.12 * focoScaleE;
         const lift = clamp(-focoY / (H * 0.06), 0, 1); // 0 apoyada → 1 alzada (al sellar)
         const spread = 1 + lift * 0.4;
         const fade = 1 - lift * 0.4;
-        const cxs = boxX + boxW * 0.02;
+        // sigue a la caja (corrida en espera) y se desplaza un pelo OPUESTO a la luz interactiva (tilt)
+        const cxs = boxXE + boxW * 0.02 - wd.tiltX * boxW * 0.08;
         ctx.save();
         ctx.globalCompositeOperation = "multiply"; // la mesa asoma su tono cálido a través de la sombra (una-luz)
         // AMBIENTE: ancha, tenuísima, apenas ↘ (única capa con dirección de luz)
-        const amb = ctx.createRadialGradient(cxs + boxW * 0.05, cy2 + boxH * 0.02, boxW * 0.06, cxs + boxW * 0.06, cy2 + boxH * 0.02, boxW * 0.85 * focoScale * spread);
+        const amb = ctx.createRadialGradient(cxs + boxW * 0.05, cy2 + boxH * 0.02, boxW * 0.06, cxs + boxW * 0.06, cy2 + boxH * 0.02, boxW * 0.85 * focoScaleE * spread);
         amb.addColorStop(0, `rgba(74,44,20,${0.1 * fade})`);
         amb.addColorStop(0.55, `rgba(74,44,20,${0.05 * fade})`);
         amb.addColorStop(1, "rgba(74,44,20,0)");
         ctx.fillStyle = amb;
         ctx.beginPath();
-        ctx.ellipse(cxs + boxW * 0.06, cy2 + boxH * 0.02, boxW * 0.85 * focoScale * spread, boxH * 0.14 * focoScale * spread, 0, 0, TAU);
+        ctx.ellipse(cxs + boxW * 0.06, cy2 + boxH * 0.02, boxW * 0.85 * focoScaleE * spread, boxH * 0.14 * focoScaleE * spread, 0, 0, TAU);
         ctx.fill();
         // MEDIA (penumbra)
-        const med = ctx.createRadialGradient(cxs, cy2, boxW * 0.04, cxs, cy2, boxW * 0.42 * focoScale);
+        const med = ctx.createRadialGradient(cxs, cy2, boxW * 0.04, cxs, cy2, boxW * 0.42 * focoScaleE);
         med.addColorStop(0, `rgba(74,44,20,${0.16 * fade})`);
         med.addColorStop(0.6, `rgba(74,44,20,${0.07 * fade})`);
         med.addColorStop(1, "rgba(74,44,20,0)");
         ctx.fillStyle = med;
         ctx.beginPath();
-        ctx.ellipse(cxs, cy2, boxW * 0.42 * focoScale, boxH * 0.08 * focoScale, 0, 0, TAU);
+        ctx.ellipse(cxs, cy2, boxW * 0.42 * focoScaleE, boxH * 0.08 * focoScaleE, 0, 0, TAU);
         ctx.fill();
         // CONTACTO: ceñido, stops que se desploman → línea de contacto casi dura (contact-hardening)
-        const con = ctx.createRadialGradient(cxs, cy2, 1, cxs, cy2, boxW * 0.22 * focoScale);
+        const con = ctx.createRadialGradient(cxs, cy2, 1, cxs, cy2, boxW * 0.22 * focoScaleE);
         con.addColorStop(0, `rgba(58,32,14,${0.5 * fade})`);
         con.addColorStop(0.25, `rgba(58,32,14,${0.34 * fade})`);
         con.addColorStop(0.5, `rgba(58,32,14,${0.12 * fade})`);
         con.addColorStop(1, "rgba(58,32,14,0)");
         ctx.fillStyle = con;
         ctx.beginPath();
-        ctx.ellipse(cxs, cy2, boxW * 0.22 * focoScale, boxH * 0.05 * focoScale, 0, 0, TAU);
+        ctx.ellipse(cxs, cy2, boxW * 0.22 * focoScaleE, boxH * 0.05 * focoScaleE, 0, 0, TAU);
         ctx.fill();
         ctx.restore();
       }
@@ -2224,8 +2270,8 @@ export default function EmplataGame(props: {
       }
 
       ctx.save();
-      ctx.translate(boxX + shX, boxY + boxH * 0.32 + entY + focoY + shY);
-      ctx.scale((1 + wd.boxSquash * 0.05) * focoScale, (squash - wd.boxSquash * 0.05) * focoScale);
+      ctx.translate(boxXE + shX, boxY + boxH * 0.32 + entY + focoY + shY);
+      ctx.scale((1 + wd.boxSquash * 0.05) * focoScaleE, (squash - wd.boxSquash * 0.05) * focoScaleE);
       ctx.translate(0, -boxH * 0.32);
 
       // ---- vista 3/4: pared TRASERA interior → COMIDA (sobresale) → banda FRONTAL ----
@@ -3062,13 +3108,13 @@ export default function EmplataGame(props: {
         // corto, escalado con la caja) y actúa el estado con gestos pequeños — no una hebra larga que
         // arquea desde la base (eso se veía como un hilo suelto).
         const wob = Math.sin(wd.t * 0.06);
-        const fs = focoScale;
+        const fs = focoScaleE;
         const base = boxY + boxH * 0.32 + entY + focoY; // base de la caja = nivel de la mesa
-        // MESERO AL LADO: el fideo PARADO en la mesa a la izquierda de la caja, cuerpo entero,
-        // que actúa el estado del pedido (trae la comanda / atiza / toca la campana / hace la venia).
-        const anchXe = boxX - boxW * 0.44 * fs; // pies en el frente-izquierdo, sobre la mesa
-        const anchYe = base + boxH * 0.5 * fs; // PIES ABAJO, sobre la mesa
-        const stand = boxH * 0.4 * fs; // stocky: cuerpo robusto y bajo, no un bastón largo
+        // MESERO AL LADO: como la caja se corrió a la derecha en la espera, el fideo tiene sitio LIMPIO
+        // a la izquierda: parado sobre la mesa, cuerpo entero, actuando el estado (comanda/atiza/campana/venia).
+        const anchXe = boxXE - boxW * 0.66 * fs; // pies en el sitio libre a la izquierda de la caja
+        const anchYe = base + boxH * 0.48 * fs; // PIES ABAJO, sobre la mesa
+        const stand = boxH * 0.5 * fs; // cuerpo entero con presencia (ya no un bastón)
         let tipXe = anchXe;
         let tipYe = anchYe - stand;
         let ticket = false;
@@ -3375,6 +3421,27 @@ export default function EmplataGame(props: {
         }
       }
 
+      // ===== LUZ INTERACTIVA: un brillo cálido que SIGUE la inclinación del móvil (la luz es "real";
+      // la sombra ya se desplaza opuesta arriba). Solo con inclinación real (sensor concedido). Subtil.
+      if (!reduce && (Math.abs(wd.tiltX) > 0.015 || Math.abs(wd.tiltY) > 0.015)) {
+        const lgX = W * 0.32 + wd.tiltX * W * 0.3;
+        const lgY = H * 0.14 + wd.tiltY * H * 0.14;
+        ctx.globalCompositeOperation = "soft-light";
+        const lg = ctx.createRadialGradient(lgX, lgY, 10, lgX, lgY, H * 0.6);
+        lg.addColorStop(0, "rgba(255,242,205,0.6)");
+        lg.addColorStop(1, "rgba(255,242,205,0)");
+        ctx.fillStyle = lg;
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalCompositeOperation = "screen"; // especular que barre la caja/comida con el tilt
+        const sgX = boxXE + wd.tiltX * boxW * 0.45;
+        const sgY = boxY + boxH * 0.1 + wd.tiltY * boxH * 0.35;
+        const sg = ctx.createRadialGradient(sgX, sgY, 4, sgX, sgY, boxW * 0.55);
+        sg.addColorStop(0, "rgba(255,246,222,0.14)");
+        sg.addColorStop(1, "rgba(255,246,222,0)");
+        ctx.fillStyle = sg;
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalCompositeOperation = "source-over";
+      }
       // ===== grado final: velo cálido (soft-light) + viñeta (multiply) — temperatura unificada =====
       ctx.globalCompositeOperation = "soft-light";
       ctx.fillStyle = "rgba(242,165,22,0.06)";
@@ -3393,6 +3460,7 @@ export default function EmplataGame(props: {
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
+      window.removeEventListener("deviceorientation", onOrient);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bases, proteinas, toppings, incluidos]);
