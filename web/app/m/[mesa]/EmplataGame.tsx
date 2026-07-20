@@ -1987,28 +1987,32 @@ export default function EmplataGame(props: {
       // rotado sobre el eje luz→sombra; el gradiente se centra en el contacto → aclara en el
       // extremo lejano. Antes era una elipse simétrica con offset +10x: delator nº1 de "sticker".
       {
-        const contX = boxX + boxW * 0.03;
-        const contY = boxY + boxH * 0.32 + entY + focoY + boxH * 0.19 * focoScale;
-        const rot = 0.26; // ~15°, alineada al eje ↖→↘
-        const haloX = contX + boxW * 0.1;
-        const haloY = contY + boxH * 0.03;
-        // halo ambiente: elipse larga desplazada ↘, gradiente anclado en el contacto (aclara lejos)
-        const halo = ctx.createRadialGradient(contX, contY, 6, contX, contY, boxW * 0.82 * focoScale);
-        halo.addColorStop(0, "rgba(28,15,6,0.24)");
-        halo.addColorStop(0.5, "rgba(28,15,6,0.11)");
-        halo.addColorStop(1, "rgba(28,15,6,0)");
-        ctx.fillStyle = halo;
+        // SOMBRA DE CONTACTO CREÍBLE (contact-hardening): un núcleo ceñido y oscuro justo bajo la
+        // base + una penumbra ancha muy suave. Cálida (matiz de la mesa, no gris). SIN rotación
+        // diagonal (era el "borrón extraño"). Al SELLAR la caja se alza → la sombra se ensancha
+        // pero se ACLARA (objeto que se levanta), en vez de agigantarse oscura.
+        const base = boxY + boxH * 0.32 + entY + focoY;
+        const cy2 = base + boxH * 0.13 * focoScale; // justo bajo la base
+        const lift = clamp(-focoY / (H * 0.06), 0, 1); // 0 apoyada → 1 alzada (al sellar)
+        const spread = 1 + lift * 0.35;
+        const fade = 1 - lift * 0.45;
+        // penumbra ambiente: ancha, MUY suave, cálida, apenas desplazada ↘
+        const amb = ctx.createRadialGradient(boxX + boxW * 0.04, cy2, boxW * 0.05, boxX + boxW * 0.05, cy2 + boxH * 0.01, boxW * 0.5 * focoScale * spread);
+        amb.addColorStop(0, `rgba(40,23,10,${0.15 * fade})`);
+        amb.addColorStop(0.6, `rgba(40,23,10,${0.06 * fade})`);
+        amb.addColorStop(1, "rgba(40,23,10,0)");
+        ctx.fillStyle = amb;
         ctx.beginPath();
-        ctx.ellipse(haloX, haloY, boxW * 0.74 * focoScale, boxH * 0.15 * focoScale, rot, 0, TAU);
+        ctx.ellipse(boxX + boxW * 0.05, cy2 + boxH * 0.01, boxW * 0.5 * focoScale * spread, boxH * 0.09 * focoScale * spread, 0, 0, TAU);
         ctx.fill();
-        // núcleo de contacto: pequeño, oscuro, ceñido bajo la caja
-        const core = ctx.createRadialGradient(contX, contY, 2, contX, contY, boxW * 0.4 * focoScale);
-        core.addColorStop(0, "rgba(24,12,5,0.5)");
-        core.addColorStop(0.65, "rgba(24,12,5,0.22)");
-        core.addColorStop(1, "rgba(24,12,5,0)");
-        ctx.fillStyle = core;
+        // contacto: ceñido, más oscuro, nítido bajo la base (contact-hardening)
+        const con = ctx.createRadialGradient(boxX + boxW * 0.02, cy2, 2, boxX + boxW * 0.02, cy2, boxW * 0.34 * focoScale);
+        con.addColorStop(0, `rgba(30,16,6,${0.34 * fade})`);
+        con.addColorStop(0.7, `rgba(30,16,6,${0.11 * fade})`);
+        con.addColorStop(1, "rgba(30,16,6,0)");
+        ctx.fillStyle = con;
         ctx.beginPath();
-        ctx.ellipse(contX, contY, boxW * 0.4 * focoScale, boxH * 0.1 * focoScale, rot, 0, TAU);
+        ctx.ellipse(boxX + boxW * 0.02, cy2, boxW * 0.34 * focoScale, boxH * 0.055 * focoScale, 0, 0, TAU);
         ctx.fill();
       }
 
@@ -2955,28 +2959,35 @@ export default function EmplataGame(props: {
           if (!reduce && Math.random() < 0.5 * df)
             wd.puffs.push({ x: boxX + (Math.random() - 0.5) * boxW * 0.5, y: by - boxH * 0.28, life: 1, max: 70, r: 6 + Math.random() * 5, tipo: "vapor" });
         }
-        // el FIDEO MESERO camarero: asoma junto a la caja y actúa el estado
+        // el FIDEO MESERO asoma COMPACTO sobre el borde superior-derecho de la caja sellada (cuello
+        // corto, escalado con la caja) y actúa el estado con gestos pequeños — no una hebra larga que
+        // arquea desde la base (eso se veía como un hilo suelto).
         const wob = Math.sin(wd.t * 0.06);
-        const anchXe = boxX - boxW * 0.32;
-        const anchYe = by - boxH * 0.02;
+        const fs = focoScale;
+        // borde superior VISIBLE de la caja SELLADA (en espera no se dibuja pared trasera; la tapa
+        // queda más abajo). Empírico y escalado con fs. El fideo apoya el cuello ahí y asoma la cabeza.
+        const boxTopY = by - boxH * 0.28 * fs;
+        const anchXe = boxX + boxW * 0.17 * fs; // sobre el borde superior-derecho
+        const anchYe = boxTopY + boxH * 0.06 * fs; // cuello apoyado dentro del borde (conectado)
+        const up = boxH * 0.16 * fs; // cuánto asoma la cabeza sobre la caja
         let tipXe = anchXe;
-        let tipYe = by - boxH * 0.4;
+        let tipYe = anchYe - up;
         let ticket = false;
         if (est === "recibido") {
-          tipXe = boxX - boxW * 0.08 + wob * 8; // lleva la comanda a la caja
-          tipYe = by - boxH * 0.52;
+          tipXe = anchXe + wob * 5; // presenta la comanda y asiente
+          tipYe = anchYe - up * (0.95 + 0.08 * Math.sin(wd.t * 0.12));
           ticket = true;
         } else if (est === "cocina") {
-          tipXe = anchXe + 6 + wob * 12; // atiza el horno (sube y baja)
-          tipYe = by - boxH * 0.5 + Math.sin(wd.t * 0.13) * 12;
+          tipXe = anchXe + wob * 6; // atiza el horno: sube y baja
+          tipYe = anchYe - up * (0.78 + 0.22 * Math.abs(Math.sin(wd.t * 0.14)));
         } else if (est === "listo") {
-          tipXe = boxX + Math.sin(wd.t * 0.26) * 18; // toca la campanita
-          tipYe = by - boxH * 0.62;
+          tipXe = anchXe + Math.sin(wd.t * 0.26) * 10; // toca la campanita, estirado arriba
+          tipYe = anchYe - up * 1.25;
         } else {
-          tipXe = anchXe - 10; // reverencia y se va
-          tipYe = by - boxH * 0.24 + Math.sin(wd.t * 0.05) * 6;
+          tipXe = anchXe; // reverencia
+          tipYe = anchYe - up * (0.5 + 0.06 * Math.sin(wd.t * 0.05));
         }
-        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, 0.4);
+        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, est === "cocina" ? 1.1 : 0.4);
         // la comanda kraft que lleva el fideo (recibido)
         if (ticket) {
           ctx.save();
