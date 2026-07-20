@@ -32,6 +32,13 @@ const easeOutBack = (t: number) => {
 const bez2 = (a: number, b: number, c: number, t: number) =>
   (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+/* Muelle amortiguado 1-D (integrador semi-implícito). Da anticipación/overshoot/follow-through.
+   Presets típicos: crítico k=170 c=26 · subamortiguado (juguetón) k=180 c=12 · golpe k=320 c=22. */
+function springStep(pos: number, vel: number, target: number, k: number, c: number, dt: number): [number, number] {
+  const h = dt > 1 / 30 ? 1 / 30 : dt;
+  const v = vel + (-k * (pos - target) - c * vel) * h;
+  return [pos + v * h, v];
+}
 
 /* =========================================================================
    TIPOGRAFÍA — Canvas2D NO resuelve var(--…) en ctx.font. Hay que leer las
@@ -443,7 +450,8 @@ type Vuelo = {
   vr: number;
   bounces: number;
 };
-/** EL FIDEO MESERO — una hebra viva que trae/saca comida entre la carta y la caja. */
+/** EL FIDEO MESERO — una hebra viva que trae/saca comida entre la carta y la caja.
+ *  hx/hy = posición de la CABEZA gobernada por muelle (persigue al objetivo con lag → whip). */
 type Fideo = {
   ing: Ingrediente;
   tx: number; // objetivo (la carta)
@@ -454,6 +462,10 @@ type Fideo = {
   drop: number; // [-1,1] dónde suelta sobre la caja (dispersa el montón)
   seed: number;
   grabbed?: boolean; // ya sonó el agarre
+  hx?: number; // muelle de la cabeza (init al primer frame)
+  hy?: number;
+  hvx?: number;
+  hvy?: number;
 };
 /** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
  *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
@@ -526,6 +538,11 @@ export default function EmplataGame(props: {
     folding: false,
     resettle: false, // el montón debe reacomodarse (cambió la cama o se sacó algo)
     selloHecho: false,
+    hitStop: 0, // segundos de congelación al aterrizar el sello (golpe de juego de pelea)
+    selloScale: 0, // muelle de escala del sello (cae 1.7→1 con overshoot)
+    selloScaleV: 0,
+    selloRot: 0, // rotación aleatoria del sello (±6°)
+    ondas: [] as { r: number; life: number }[], // anillos de la onda de impacto del sello
     combo: 0,
     comboT: -9999,
     lastTab: 0,
@@ -886,9 +903,11 @@ export default function EmplataGame(props: {
         });
       const idxT = sel.current.toppingIds.indexOf(ing.id);
       const gratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
+      // los pops vivos suben para dejar sitio (nunca ilegibles apilados); el nuevo nace en el borde
+      for (const pv of wd.pops) pv.y -= 22;
       wd.pops.push({
-        x: boxX,
-        y: boxY - boxH * 0.56,
+        x: clamp(xScreen, boxX - boxW * 0.34, boxX + boxW * 0.34),
+        y: boxY - boxH * 0.5,
         life: 1,
         texto: gratis ? "GRATIS" : ing.precio > 0 ? `+${formatCOP(ing.precio)}` : ing.nombre,
         gratis,
@@ -988,10 +1007,16 @@ export default function EmplataGame(props: {
       ctx.fill();
     };
 
+    // scratch buffers para la hebra (cero alocación por frame)
+    const FN = 22;
+    const fx0 = new Float32Array(FN + 1);
+    const fy0 = new Float32Array(FN + 1);
+
     /**
-     * EL FIDEO MESERO — hebra de spaghetti viva desde el ancla (boca de la caja) hasta la punta.
-     * 3 pasadas como el personaje del juego: sombra propia ↘, cuerpo ámbar, filo de brillo ↖.
-     * Con `holdSpr` lleva el ingrediente colgando envuelto en un rizo; con `eyes`, ojitos en la punta.
+     * EL FIDEO MESERO como SER VIVO — cinta de spaghetti con TAPER (gruesa en la base, fina
+     * en el cuello), CABEZA con volumen y OJITOS SIEMPRE visibles (también al cargar), sombra
+     * propia ↘ y filo ↖. La curva sale de la boca de la caja y llega a la cabeza (hx,hy) que el
+     * loop gobierna con muelle → whip natural. `holdSpr` = ingrediente colgando envuelto en rizo.
      */
     const drawFideo = (
       ax: number,
@@ -1008,89 +1033,146 @@ export default function EmplataGame(props: {
       const wob2 = Math.cos(wd.t * 0.18 + seed * 1.7) * 6;
       const dx = tipX - ax;
       const dy = tipY - ay;
-      const c1x = ax + dx * 0.18 + wob;
-      const c1y = ay - 46 + wob2 * 0.6 + dy * 0.1;
-      const c2x = ax + dx * 0.72 - wob * 0.6;
-      const c2y = Math.min(ay, tipY) - 40 + wob2;
-      const N = 20;
-      const pts: Array<[number, number]> = [];
-      for (let k = 0; k <= N; k++) {
-        const t = k / N;
+      // control points: la S nace hacia arriba (sale de la caja) y llega a la cabeza
+      const c1x = ax + dx * 0.16 + wob;
+      const c1y = ay - 48 + wob2 * 0.6 + dy * 0.1;
+      const c2x = ax + dx * 0.74 - wob * 0.6;
+      const c2y = Math.min(ay, tipY) - 42 + wob2;
+      for (let k = 0; k <= FN; k++) {
+        const t = k / FN;
         const mt = 1 - t;
-        const px =
-          mt * mt * mt * ax + 3 * mt * mt * t * c1x + 3 * mt * t * t * c2x + t * t * t * tipX;
-        const py =
-          mt * mt * mt * ay + 3 * mt * mt * t * c1y + 3 * mt * t * t * c2y + t * t * t * tipY;
-        pts.push([px, py]);
+        fx0[k] = mt * mt * mt * ax + 3 * mt * mt * t * c1x + 3 * mt * t * t * c2x + t * t * t * tipX;
+        fy0[k] = mt * mt * mt * ay + 3 * mt * mt * t * c1y + 3 * mt * t * t * c2y + t * t * t * tipY;
       }
-      const trazo = (offY: number) => {
-        ctx.beginPath();
-        ctx.moveTo(pts[0][0], pts[0][1] + offY);
-        for (let k = 1; k <= N; k++) ctx.lineTo(pts[k][0], pts[k][1] + offY);
-        ctx.stroke();
-      };
-      ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      // el ingrediente cuelga bajo la punta, envuelto en un rizo del fideo
-      const hr = SPR * 0.36;
+      ctx.lineCap = "round";
+
+      // ancho por nodo: TAPER de la base (7.5) al cuello (3.2), con leve respiración
+      const wBase = 7.6;
+      const wTip = 3.2;
+      // construye la cinta como polígono (borde izq de ida, borde der de vuelta)
+      const ribbon = (grow: number, offx: number, offy: number) => {
+        ctx.beginPath();
+        for (let k = 0; k <= FN; k++) {
+          const t = k / FN;
+          const pkx = k === 0 ? fx0[0] : fx0[k - 1];
+          const pky = k === 0 ? fy0[0] : fy0[k - 1];
+          let nx = fx0[k] - pkx;
+          let ny = fy0[k] - pky;
+          const nl = Math.hypot(nx, ny) || 1;
+          nx /= nl;
+          ny /= nl;
+          const hw = ((wBase + (wTip - wBase) * t) * 0.5 + grow) ;
+          const lx = fx0[k] - ny * hw + offx;
+          const ly = fy0[k] + nx * hw + offy;
+          if (k === 0) ctx.moveTo(lx, ly);
+          else ctx.lineTo(lx, ly);
+        }
+        for (let k = FN; k >= 0; k--) {
+          const t = k / FN;
+          const pkx = k === 0 ? fx0[0] : fx0[k - 1];
+          const pky = k === 0 ? fy0[0] : fy0[k - 1];
+          let nx = fx0[k] - pkx;
+          let ny = fy0[k] - pky;
+          const nl = Math.hypot(nx, ny) || 1;
+          nx /= nl;
+          ny /= nl;
+          const hw = ((wBase + (wTip - wBase) * t) * 0.5 + grow);
+          const rx = fx0[k] + ny * hw + offx;
+          const ry = fy0[k] - nx * hw + offy;
+          ctx.lineTo(rx, ry);
+        }
+        ctx.closePath();
+      };
+
+      // el ingrediente cuelga bajo la cabeza, envuelto en un rizo
+      const hr = SPR * 0.34;
       if (holdSpr) {
         ctx.save();
-        ctx.translate(tipX, tipY + hr * 0.6);
+        ctx.translate(tipX, tipY + hr * 0.72);
         ctx.rotate(Math.sin(wd.t * 0.15 + seed) * 0.12);
         ctx.drawImage(holdSpr, -hr, -hr, hr * 2, hr * 2);
         ctx.restore();
       }
       // sombra propia ↘
-      ctx.strokeStyle = "rgba(50,28,10,0.32)";
-      ctx.lineWidth = 8.5;
-      trazo(2.5);
-      // cuerpo ámbar (más claro hacia la punta)
+      ribbon(0.6, 2.4, 2.8);
+      ctx.fillStyle = "rgba(50,28,10,0.3)";
+      ctx.fill();
+      // cuerpo ámbar (degradado a lo largo)
+      ribbon(0, 0, 0);
       const bodyG = ctx.createLinearGradient(ax, ay, tipX, tipY);
-      bodyG.addColorStop(0, "#B97A24");
-      bodyG.addColorStop(1, "#F2AE38");
-      ctx.strokeStyle = bodyG;
-      ctx.lineWidth = 6.5;
-      trazo(0);
-      // filo de brillo ↖
-      ctx.strokeStyle = "rgba(255,242,205,0.85)";
-      ctx.lineWidth = 2;
-      trazo(-1.6);
+      bodyG.addColorStop(0, "#B27821");
+      bodyG.addColorStop(1, "#F0AC36");
+      ctx.fillStyle = bodyG;
+      ctx.fill();
+      // filo de brillo ↖ (línea fina sobre el borde superior-izquierdo)
+      ctx.strokeStyle = "rgba(255,244,210,0.7)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      for (let k = 0; k <= FN; k++) {
+        const t = k / FN;
+        const pkx = k === 0 ? fx0[0] : fx0[k - 1];
+        const pky = k === 0 ? fy0[0] : fy0[k - 1];
+        let nx = fx0[k] - pkx;
+        let ny = fy0[k] - pky;
+        const nl = Math.hypot(nx, ny) || 1;
+        nx /= nl;
+        ny /= nl;
+        const hw = (wBase + (wTip - wBase) * t) * 0.42;
+        const lx = fx0[k] - ny * hw;
+        const ly = fy0[k] + nx * hw;
+        if (k === 0) ctx.moveTo(lx, ly);
+        else ctx.lineTo(lx, ly);
+      }
+      ctx.stroke();
+
       // rizo que envuelve el ingrediente
       if (holdSpr) {
-        ctx.strokeStyle = "#E9A32C";
+        ctx.strokeStyle = "#E29A2A";
         ctx.lineWidth = 5;
+        ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.ellipse(tipX, tipY + hr * 0.3, hr * 0.62, hr * 0.26, 0.18, Math.PI * 0.85, Math.PI * 2.15);
+        ctx.ellipse(tipX, tipY + hr * 0.42, hr * 0.66, hr * 0.28, 0.18, Math.PI * 0.85, Math.PI * 2.15);
         ctx.stroke();
         ctx.strokeStyle = "rgba(255,242,205,0.8)";
         ctx.lineWidth = 1.6;
         ctx.beginPath();
-        ctx.ellipse(tipX, tipY + hr * 0.26, hr * 0.6, hr * 0.24, 0.18, Math.PI * 1.05, Math.PI * 1.7);
+        ctx.ellipse(tipX, tipY + hr * 0.38, hr * 0.64, hr * 0.26, 0.18, Math.PI * 1.05, Math.PI * 1.7);
         ctx.stroke();
       }
-      // punta rechoncha + especular
-      ctx.fillStyle = "#F6C566";
+
+      // ===== CABEZA con volumen (elipse orientada según el avance) =====
+      let dirX = tipX - fx0[FN - 2];
+      let dirY = tipY - fy0[FN - 2];
+      const dl = Math.hypot(dirX, dirY) || 1;
+      dirX /= dl;
+      dirY /= dl;
+      const ang = Math.atan2(dirY, dirX);
+      ctx.save();
+      ctx.translate(tipX, tipY);
+      ctx.rotate(ang + Math.PI / 2); // el eje largo sigue la hebra
+      const headG = ctx.createRadialGradient(-2, -3, 1, 0, 0, 9);
+      headG.addColorStop(0, "#FBD27A");
+      headG.addColorStop(0.6, "#EEAE3C");
+      headG.addColorStop(1, "#B67C22");
+      ctx.fillStyle = headG;
       ctx.beginPath();
-      ctx.arc(tipX, tipY, 4.4, 0, TAU);
+      ctx.ellipse(0, 0, 5.4, 6.6, 0, 0, TAU);
       ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillStyle = "rgba(255,252,240,0.8)";
       ctx.beginPath();
-      ctx.arc(tipX - 1.4, tipY - 1.6, 1.2, 0, TAU);
+      ctx.arc(-1.8, -2.4, 1.5, 0, TAU);
       ctx.fill();
-      // ojitos (el ADN del personaje de EL ENREDO: pequeños, con vida)
-      if (eyes && !holdSpr) {
-        const [px2, py2] = pts[N - 2];
-        let dirX = tipX - px2;
-        let dirY = tipY - py2;
-        const dl = Math.hypot(dirX, dirY) || 1;
-        dirX /= dl;
-        dirY /= dl;
+      ctx.restore();
+
+      // ===== OJITOS — SIEMPRE (el ADN del personaje). Perpendiculares al avance =====
+      if (eyes) {
         const perX = -dirY;
         const perY = dirX;
-        const blink = wd.t % 190 < 7 ? 0.16 : 1;
+        const blink = wd.t % 190 < 7 ? 0.14 : 1;
         for (const sd of [-1, 1]) {
-          const ex = tipX - dirX * 1.6 + perX * sd * 3;
-          const ey = tipY - dirY * 1.6 + perY * sd * 3;
+          const ex = tipX - dirX * 0.5 + perX * sd * 2.7;
+          const ey = tipY - dirY * 0.5 + perY * sd * 2.7;
           ctx.fillStyle = "#2A1608";
           ctx.save();
           ctx.translate(ex, ey + pupilDown);
@@ -1100,9 +1182,9 @@ export default function EmplataGame(props: {
           ctx.fill();
           ctx.restore();
           if (blink === 1) {
-            ctx.fillStyle = "rgba(255,255,255,0.9)";
+            ctx.fillStyle = "rgba(255,255,255,0.92)";
             ctx.beginPath();
-            ctx.arc(ex - 0.6, ey - 0.6 + pupilDown, 0.6, 0, TAU);
+            ctx.arc(ex - 0.6, ey - 0.7 + pupilDown, 0.65, 0, TAU);
             ctx.fill();
           }
         }
@@ -1114,8 +1196,14 @@ export default function EmplataGame(props: {
       const wd = world.current;
       // reloj real → dt en segundos; df = factor de frame (1.0 a 60fps). Toda la coreografía
       // y la física se escalan por df, así corre igual a 60/90/120Hz.
-      const dt = lastT ? Math.min((now - lastT) / 1000, 1 / 30) : 1 / 60;
+      const dtReal = lastT ? Math.min((now - lastT) / 1000, 1 / 30) : 1 / 60;
       lastT = now;
+      // HIT-STOP: al aterrizar el sello, el TIEMPO DEL JUEGO se congela ~90ms (el frame sigue vivo)
+      let dt = dtReal;
+      if (wd.hitStop > 0) {
+        wd.hitStop -= dtReal;
+        dt = dtReal * 0.18;
+      }
       const df = dt * 60;
       wd.dt = dt;
       wd.df = df;
@@ -1163,9 +1251,13 @@ export default function EmplataGame(props: {
       wd.boxSquash *= Math.pow(0.86, df);
       if (wd.folding && wd.fold < 1) wd.fold = Math.min(1, wd.fold + 0.022 * df);
       const f = wd.fold;
+      // al cerrar, la caja crece y SUBE a centro-escena (foco total en el clímax)
+      const foco = smooth(Math.min(1, f * 1.3));
+      const focoScale = 1 + 0.1 * foco;
+      const focoY = -foco * H * 0.06;
       ctx.save();
-      ctx.translate(boxX, boxY + boxH * 0.32 + entY);
-      ctx.scale(1 + wd.boxSquash * 0.05, squash - wd.boxSquash * 0.05);
+      ctx.translate(boxX, boxY + boxH * 0.32 + entY + focoY);
+      ctx.scale((1 + wd.boxSquash * 0.05) * focoScale, (squash - wd.boxSquash * 0.05) * focoScale);
       ctx.translate(0, -boxH * 0.32);
       // sombra de contacto (cálida, ceñida)
       ctx.fillStyle = "rgba(70,40,16,0.3)";
@@ -1262,6 +1354,25 @@ export default function EmplataGame(props: {
           ctx.restore();
         }
 
+        // ===== SUELO interior: la comida se apoya en una superficie kraft (no flota en el vacío) =====
+        const floorY = boxH * 0.0;
+        const floorG = ctx.createLinearGradient(-boxW * 0.32, -boxH * 0.12, boxW * 0.3, boxH * 0.06);
+        floorG.addColorStop(0, "#A6793C");
+        floorG.addColorStop(1, "#6A4620");
+        ctx.fillStyle = floorG;
+        ctx.beginPath();
+        ctx.ellipse(0, floorY, boxW * 0.4, boxH * 0.14, 0, 0, TAU);
+        ctx.fill();
+        // AO del suelo (hondo abajo-derecha, luz ↖) — suave, sin borde de "plato"
+        const floorAO = ctx.createRadialGradient(-boxW * 0.12, floorY - boxH * 0.06, boxH * 0.03, boxW * 0.04, floorY + boxH * 0.02, boxW * 0.46);
+        floorAO.addColorStop(0, "rgba(40,22,8,0)");
+        floorAO.addColorStop(0.7, "rgba(40,22,8,0.12)");
+        floorAO.addColorStop(1, "rgba(40,22,8,0.34)");
+        ctx.fillStyle = floorAO;
+        ctx.beginPath();
+        ctx.ellipse(0, floorY, boxW * 0.41, boxH * 0.15, 0, 0, TAU);
+        ctx.fill();
+
         // LA COMIDA — montón FÍSICO: cada item está donde la física lo dejó; se asienta con
         // lerp hacia su y de reposo; SOBRESALE del borde; clip solo lateral
         if (wd.resettle) {
@@ -1286,21 +1397,36 @@ export default function EmplataGame(props: {
           const spr = wd.sprites.get(p.id);
           if (!spr) continue;
           p.fy += (p.ty - p.fy) * (1 - Math.pow(0.75, df)); // micro-asentamiento (dt-normalizado)
+          const cp = capa(p.id);
           const lx = p.fx * boxW;
-          const ly = p.fy * boxH;
+          const ly = cp === 0 ? -boxH * 0.06 : p.fy * boxH; // la base descansa en el suelo
           const rp = p.r * boxW;
-          // sombra de contacto: lo pega al montón
-          if (capa(p.id) > 0) {
-            ctx.fillStyle = "rgba(50,28,10,0.22)";
+          if (cp === 0) {
+            // CAMA: sombra ancha y plana que la asienta en el suelo
+            ctx.fillStyle = "rgba(40,22,8,0.34)";
             ctx.beginPath();
-            ctx.ellipse(lx + 2, ly + rp * 0.6, rp * 0.9, rp * 0.34, 0, 0, TAU);
+            ctx.ellipse(lx + 2, ly + boxH * 0.05, boxW * 0.32, boxH * 0.07, 0, 0, TAU);
+            ctx.fill();
+          } else {
+            // DOBLE sombra: halo ambiente (grande, suave) + contacto (ceñido) — pega el item al montón
+            ctx.fillStyle = "rgba(40,22,8,0.1)";
+            ctx.beginPath();
+            ctx.ellipse(lx + 2, ly + rp * 0.55, rp * 1.5, rp * 0.6, 0, 0, TAU);
+            ctx.fill();
+            ctx.fillStyle = "rgba(40,22,8,0.3)";
+            ctx.beginPath();
+            ctx.ellipse(lx + 2, ly + rp * 0.62, rp * 0.85, rp * 0.32, 0, 0, TAU);
             ctx.fill();
           }
           ctx.save();
-          ctx.translate(lx, capa(p.id) === 0 ? -boxH * 0.13 : ly);
+          ctx.translate(lx, ly);
           ctx.rotate(p.rot);
-          const sz = SPR * p.s;
+          const sz = SPR * (cp === 0 ? p.s * 1.06 : p.s); // la cama, un poco más ancha
+          // niebla cálida de profundidad: los items más ALTOS (al fondo) se atenúan un pelo
+          const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1);
+          ctx.globalAlpha = 1 - prof * 0.14;
           ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
+          ctx.globalAlpha = 1;
           ctx.restore();
         }
         ctx.restore();
@@ -1343,20 +1469,41 @@ export default function EmplataGame(props: {
       ctx.fillStyle = "rgba(90,58,24,0.9)";
       ctx.fillText("P A P A G H E T T I", 0, boxH * 0.23);
 
-      // tapa plegada + sello (al confirmar)
-      if (f > 0.55) {
-        const ta = (f - 0.55) / 0.45;
-        if (!wd.selloHecho) {
-          // el sello ATERRIZA: golpe seco + chispas doradas de fideo
+      // ===== CIERRE ORIGAMI REAL + SELLO con hit-stop (el clímax fotografiable) =====
+      if (f > 0.5) {
+        const ta = clamp((f - 0.5) / 0.5, 0, 1);
+        // LA TAPA se PLIEGA hacia abajo (pivota en su borde trasero, no crossfade); slap con overshoot
+        const lidS = easeOutBack(Math.min(1, ta * 1.25));
+        const lidTop = -boxH * 0.235;
+        ctx.save();
+        ctx.translate(0, lidTop);
+        ctx.scale(1, Math.max(0.02, lidS));
+        ctx.translate(0, -lidTop);
+        kraft(0, -boxH * 0.06, boxW * 0.98, boxH * 0.34, 8, 14);
+        // canto iluminado del pliegue + brillo de lacre en el borde
+        ctx.strokeStyle = "rgba(255,240,205,0.5)";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(-boxW * 0.46, -boxH * 0.06 - boxH * 0.155);
+        ctx.lineTo(boxW * 0.46, -boxH * 0.06 - boxH * 0.155);
+        ctx.stroke();
+        ctx.restore();
+
+        // el SELLO cae cuando la tapa está abajo: golpe seco, hit-stop, onda, chispas, campanita
+        if (!wd.selloHecho && ta > 0.72) {
           wd.selloHecho = true;
-          wd.boxSquash = 1.3;
-          s.tone(196, 0.14, "sine", 0.18);
-          for (let k = 0; k < 12; k++) {
-            const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
-            const sp = 3 + Math.random() * 4;
+          wd.selloScale = 1.7;
+          wd.selloScaleV = 0;
+          wd.selloRot = (Math.random() - 0.5) * 0.2;
+          wd.hitStop = 0.09; // ← congela el tiempo del juego 90ms
+          wd.boxSquash = 1.5;
+          wd.ondas.push({ r: 0, life: 1 });
+          for (let k = 0; k < 16; k++) {
+            const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
+            const sp = 3.5 + Math.random() * 4.5;
             wd.chispas.push({
               x: boxX,
-              y: boxY - boxH * 0.06,
+              y: boxY - boxH * 0.06 + entY + focoY,
               vx: Math.cos(a) * sp,
               vy: Math.sin(a) * sp,
               rot: Math.random() * TAU,
@@ -1364,43 +1511,70 @@ export default function EmplataGame(props: {
               life: 1,
             });
           }
+          s.ruido(0.12, 0.06, 900); // crinkle de papel
+          s.tone(80, 0.2, "sine", 0.22); // thump grave
+          s.tone(1568, 0.42, "triangle", 0.1, undefined, 0.06); // campanita
+          if (navigator.vibrate) navigator.vibrate([12, 30, 8]);
         }
-        ctx.globalAlpha = ta;
-        kraft(0, -boxH * 0.06, boxW * 0.98, boxH * 0.34, 8, 14);
-        // sello de lacre: borde festoneado + volumen radial + emboss del monograma
-        const selloS = easeOutBack(Math.min(1, ta * 1.6));
-        const sr = 16 * selloS;
-        const syc = -boxH * 0.06;
-        ctx.save();
-        ctx.translate(0, syc);
-        ctx.beginPath();
-        for (let k = 0; k <= 44; k++) {
-          const a = (k / 44) * TAU;
-          const rr = sr * (1 + 0.08 * Math.sin(a * 11));
-          const px = Math.cos(a) * rr;
-          const py = Math.sin(a) * rr;
-          if (k === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
+        // onda(s) de impacto sobre la tapa
+        for (let oi = wd.ondas.length - 1; oi >= 0; oi--) {
+          const o = wd.ondas[oi];
+          o.r += boxW * 0.02 * df;
+          o.life -= 0.03 * df;
+          if (o.life <= 0) {
+            wd.ondas.splice(oi, 1);
+            continue;
+          }
+          ctx.globalAlpha = o.life * 0.5;
+          ctx.strokeStyle = "#F6C566";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(0, -boxH * 0.06, o.r, o.r * 0.5, 0, 0, TAU);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
         }
-        ctx.closePath();
-        const lacre = ctx.createRadialGradient(-sr * 0.3, -sr * 0.35, sr * 0.1, 0, 0, sr * 1.15);
-        lacre.addColorStop(0, "#E4553A");
-        lacre.addColorStop(0.6, "#C8321E");
-        lacre.addColorStop(1, "#8E1E10");
-        ctx.fillStyle = lacre;
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255,220,200,0.35)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.font = fontD(11, 800);
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = "rgba(90,20,10,0.6)";
-        ctx.fillText("PG", 0, sr * 0.06 + 1);
-        ctx.fillStyle = "#FBE7DD";
-        ctx.fillText("PG", 0, sr * 0.06);
-        ctx.restore();
-        ctx.globalAlpha = 1;
+        // el SELLO de lacre (muelle de escala + rotación aleatoria + contra-rotación del monograma)
+        if (wd.selloHecho) {
+          [wd.selloScale, wd.selloScaleV] = springStep(wd.selloScale, wd.selloScaleV, 1, 320, 20, dt);
+          const sr = 16.5 * wd.selloScale;
+          ctx.save();
+          ctx.translate(0, -boxH * 0.06);
+          ctx.rotate(wd.selloRot);
+          ctx.beginPath();
+          for (let k = 0; k <= 44; k++) {
+            const a = (k / 44) * TAU;
+            const rr = sr * (1 + 0.08 * Math.sin(a * 11));
+            const px = Math.cos(a) * rr;
+            const py = Math.sin(a) * rr;
+            if (k === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          const lacre = ctx.createRadialGradient(-sr * 0.3, -sr * 0.35, sr * 0.1, 0, 0, sr * 1.15);
+          lacre.addColorStop(0, "#E4553A");
+          lacre.addColorStop(0.6, "#C8321E");
+          lacre.addColorStop(1, "#8E1E10");
+          ctx.fillStyle = lacre;
+          ctx.fill();
+          ctx.strokeStyle = "rgba(255,220,200,0.4)";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          // brillo especular de lacre ↖
+          ctx.fillStyle = "rgba(255,230,215,0.4)";
+          ctx.beginPath();
+          ctx.ellipse(-sr * 0.32, -sr * 0.38, sr * 0.3, sr * 0.18, -0.6, 0, TAU);
+          ctx.fill();
+          // monograma con contra-rotación (efecto de sello mecánico)
+          ctx.rotate(-wd.selloRot * 1.4);
+          ctx.font = fontD(11, 800);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "rgba(90,20,10,0.6)";
+          ctx.fillText("PG", 0, sr * 0.06 + 1);
+          ctx.fillStyle = "#FBE7DD";
+          ctx.fillText("PG", 0, sr * 0.06);
+          ctx.restore();
+        }
       }
       ctx.restore();
 
@@ -1531,7 +1705,9 @@ export default function EmplataGame(props: {
         ctx.globalAlpha = 1;
       }
 
-      // ===== BANDEJA (pestañas + cartas) =====
+      // ===== BANDEJA (pestañas + cartas) — se desliza fuera al cerrar (foco en la caja) =====
+      ctx.save();
+      if (foco > 0.001) ctx.translate(0, foco * (H - trayY + 40));
       // panel
       const panel = ctx.createLinearGradient(0, trayY - 30, 0, H);
       panel.addColorStop(0, "rgba(30,18,8,0.0)");
@@ -1691,6 +1867,7 @@ export default function EmplataGame(props: {
         ctx.lineWidth = 3.4;
         onda(tx0, tx0 + th);
       }
+      ctx.restore(); // fin del slide de la bandeja
 
       // ===== EL FIDEO MESERO (encima de la bandeja: agarra sobre las cartas) =====
       const mouthYBase = boxY - boxH * 0.34;
@@ -1767,21 +1944,52 @@ export default function EmplataGame(props: {
             continue;
           }
         }
-        drawFideo(anchX, anchY, tipX, tipY, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, eyes);
+        void eyes;
+        // muelle de la cabeza: persigue el objetivo con lag → anticipación + whip + follow-through
+        if (fd.hx === undefined) {
+          fd.hx = anchX;
+          fd.hy = anchY;
+          fd.hvx = 0;
+          fd.hvy = 0;
+        }
+        [fd.hx, fd.hvx] = springStep(fd.hx!, fd.hvx!, tipX, 320, 26, dt);
+        [fd.hy, fd.hvy] = springStep(fd.hy!, fd.hvy!, tipY, 320, 26, dt);
+        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true);
       }
 
-      // ===== fideo curioso: si nadie toca nada, se asoma y mira la bandeja (~3s, no 7s) =====
+      // ===== fideo curioso: si nadie toca nada, se asoma con VARIANTES (~3s, no 7s) =====
       const idle = wd.t - wd.lastAct;
-      if (idle > 180 && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding) {
-        const cycle = (idle - 180) % 640;
-        if (cycle < 270) {
-          const kIn = easeOutCubic(Math.min(1, cycle / 30));
-          const kOut = cycle > 215 ? Math.max(0, 1 - (cycle - 215) / 55) : 1;
+      if (idle > 180 && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding && !reduce) {
+        const period = 640;
+        const n = Math.floor((idle - 180) / period);
+        const cycle = (idle - 180) % period;
+        if (cycle < 300) {
+          const kIn = easeOutCubic(Math.min(1, cycle / 32));
+          const kOut = cycle > 240 ? Math.max(0, 1 - (cycle - 240) / 60) : 1;
           const kk = kIn * kOut;
           if (kk > 0.01) {
-            const tipY2 = mouthYBase - 52 * kk;
-            const tipX2 = boxX + Math.sin(cycle * 0.045) * 12 * kk;
-            drawFideo(boxX, boxY - boxH * 0.1, tipX2, tipY2, 3.7, null, true, 1.3);
+            const variante = n % 3;
+            let tipX2: number;
+            let tipY2: number;
+            let anchXi = boxX;
+            let pupil = 1.3;
+            if (variante === 0) {
+              // asomarse y mirar la bandeja (mira hacia abajo)
+              tipX2 = boxX + Math.sin(cycle * 0.04) * 12 * kk;
+              tipY2 = mouthYBase - 54 * kk;
+            } else if (variante === 1) {
+              // asomarse por una esquina y mirar a cámara
+              anchXi = boxX - boxW * 0.28;
+              tipX2 = anchXi - 6 + Math.sin(cycle * 0.05) * 5 * kk;
+              tipY2 = mouthYBase - 46 * kk;
+              pupil = 0.2;
+            } else {
+              // mini noodle-dance (guiño a EL ENREDO): se contonea de lado a lado
+              tipX2 = boxX + Math.sin(cycle * 0.13) * 26 * kk;
+              tipY2 = mouthYBase - (58 + Math.sin(cycle * 0.26) * 8) * kk;
+              pupil = 0.6;
+            }
+            drawFideo(anchXi, boxY - boxH * 0.1, tipX2, tipY2, 3.7 + variante, null, true, pupil);
           }
         }
       }
