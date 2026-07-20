@@ -1722,17 +1722,22 @@ export default function EmplataGame(props: {
       holdSpr: Off | null,
       eyes: boolean,
       pupilDown = 0,
+      hvx = 0,
+      hvy = 0,
     ) => {
       const wd = world.current;
       const wob = Math.sin(wd.t * 0.22 + seed) * 7;
       const wob2 = Math.cos(wd.t * 0.18 + seed * 1.7) * 6;
       const dx = tipX - ax;
       const dy = tipY - ay;
-      // control points: la S nace hacia arriba (sale de la caja) y llega a la cabeza
-      const c1x = ax + dx * 0.16 + wob;
-      const c1y = ay - 48 + wob2 * 0.6 + dy * 0.1;
-      const c2x = ax + dx * 0.74 - wob * 0.6;
-      const c2y = Math.min(ay, tipY) - 42 + wob2;
+      // WHIP: el cuerpo TRAILA la velocidad de la cabeza (follow-through) → ondula como ser vivo,
+      // no es un cable rígido. El nodo cercano a la cabeza (c2) se retrasa opuesto al movimiento.
+      const whipX = clamp(hvx * 0.05, -15, 15);
+      const whipY = clamp(hvy * 0.05, -15, 15);
+      const c1x = ax + dx * 0.16 + wob - whipX * 0.35;
+      const c1y = ay - 48 + wob2 * 0.6 + dy * 0.1 - whipY * 0.35;
+      const c2x = ax + dx * 0.74 - wob * 0.6 - whipX;
+      const c2y = Math.min(ay, tipY) - 42 + wob2 - whipY;
       for (let k = 0; k <= FN; k++) {
         const t = k / FN;
         const mt = 1 - t;
@@ -1846,13 +1851,15 @@ export default function EmplataGame(props: {
       ctx.save();
       ctx.translate(tipX, tipY);
       ctx.rotate(ang + Math.PI / 2); // el eje largo sigue la hebra
+      const spd = Math.hypot(hvx, hvy);
+      const st = clamp(spd * 0.0016, 0, 0.3); // squash&stretch: la cabeza se estira al ir rápido
       const headG = ctx.createRadialGradient(-2, -3, 1, 0, 0, 9);
       headG.addColorStop(0, "#FBD27A");
       headG.addColorStop(0.6, "#EEAE3C");
       headG.addColorStop(1, "#B67C22");
       ctx.fillStyle = headG;
       ctx.beginPath();
-      ctx.ellipse(0, 0, 5.4, 6.6, 0, 0, TAU);
+      ctx.ellipse(0, 0, 5.4 * (1 - st * 0.6), 6.6 * (1 + st), 0, 0, TAU);
       ctx.fill();
       ctx.fillStyle = "rgba(255,252,240,0.8)";
       ctx.beginPath();
@@ -1860,29 +1867,50 @@ export default function EmplataGame(props: {
       ctx.fill();
       ctx.restore();
 
-      // ===== OJITOS — SIEMPRE (el ADN del personaje). Perpendiculares al avance =====
+      // ===== OJITOS con esclerótica + PUPILA DIRECCIONAL (mira hacia donde se mueve / al ingrediente) =====
       if (eyes) {
         const perX = -dirY;
         const perY = dirX;
-        const blink = wd.t % 190 < 7 ? 0.14 : 1;
+        const blink = (wd.t + seed * 53) % 190 < 7 ? 0.12 : 1; // parpadeo DESINCRONIZADO por seed
+        const spd2 = Math.hypot(hvx, hvy);
+        const lx = spd2 > 10 ? clamp(hvx / spd2, -1, 1) * 1.3 : 0; // la pupila mira hacia el movimiento
+        const ly = clamp((spd2 > 10 ? clamp(hvy / spd2, -1, 1) * 1.1 : 0) + pupilDown * 0.7, -1.15, 1.15);
         for (const sd of [-1, 1]) {
           const ex = tipX - dirX * 0.5 + perX * sd * 2.7;
           const ey = tipY - dirY * 0.5 + perY * sd * 2.7;
-          ctx.fillStyle = "#2A1608";
           ctx.save();
-          ctx.translate(ex, ey + pupilDown);
+          ctx.translate(ex, ey);
           ctx.scale(1, blink);
+          ctx.fillStyle = "#FCF3DE"; // esclerótica (da dirección a la mirada)
           ctx.beginPath();
-          ctx.arc(0, 0, 1.9, 0, TAU);
+          ctx.arc(0, 0, 2.4, 0, TAU);
           ctx.fill();
-          ctx.restore();
-          if (blink === 1) {
-            ctx.fillStyle = "rgba(255,255,255,0.92)";
+          ctx.fillStyle = "#2A1608"; // pupila
+          ctx.beginPath();
+          ctx.arc(lx, ly, 1.35, 0, TAU);
+          ctx.fill();
+          if (blink > 0.5) {
+            ctx.fillStyle = "rgba(255,255,255,0.95)";
             ctx.beginPath();
-            ctx.arc(ex - 0.6, ey - 0.7 + pupilDown, 0.65, 0, TAU);
+            ctx.arc(lx - 0.5, ly - 0.6, 0.5, 0, TAU);
             ctx.fill();
           }
+          ctx.restore();
         }
+        // BOCA mínima hacia el frente de la cabeza: sonríe, o "o" de esfuerzo al cargar / ir rápido
+        const mx = tipX + dirX * 2.6;
+        const my = tipY + dirY * 2.6;
+        ctx.strokeStyle = "rgba(58,28,10,0.85)";
+        ctx.lineWidth = 1;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        if (holdSpr || spd2 > 150) {
+          ctx.arc(mx, my, 1.15, 0, TAU); // boca abierta
+        } else {
+          ctx.moveTo(mx - 1.3, my - 0.2);
+          ctx.quadraticCurveTo(mx, my + 1, mx + 1.3, my - 0.2); // sonrisa sutil
+        }
+        ctx.stroke();
       }
     };
 
@@ -2086,7 +2114,7 @@ export default function EmplataGame(props: {
         [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, react ? 240 : 170, react ? 22 : 19, dt);
         [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, react ? 240 : 170, react ? 22 : 19, dt);
         m.pupil += (pupil - m.pupil) * (1 - Math.pow(0.86, df));
-        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil);
+        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy);
       }
 
       ctx.save();
@@ -3083,7 +3111,7 @@ export default function EmplataGame(props: {
         }
         [fd.hx, fd.hvx] = springStep(fd.hx!, fd.hvx!, tipX, 320, 26, dt);
         [fd.hy, fd.hvy] = springStep(fd.hy!, fd.hvy!, tipY, 320, 26, dt);
-        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true);
+        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true, 0.35, fd.hvx ?? 0, fd.hvy ?? 0);
       }
 
 
