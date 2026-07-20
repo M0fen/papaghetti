@@ -32,6 +32,23 @@ const easeOutBack = (t: number) => {
 const bez2 = (a: number, b: number, c: number, t: number) =>
   (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+/* HOGARES de la mascota: de dónde sale el fideo. Lados + POR ENCIMA de la caja. Tras cada
+   agarre se reubica a otro al azar, así el siguiente agarre nace en un lugar distinto.
+   axf/ayf = offset del ancla (fracción de boxW/boxH desde la base de la caja); up = cuánto se
+   asoma; io = hacia dónde queda el interior de la caja. */
+const HOMES = [
+  { axf: -0.42, ayf: -0.3, up: 0.62, io: 1 }, // costado izquierdo
+  { axf: 0.42, ayf: -0.3, up: 0.62, io: -1 }, // costado derecho
+  { axf: 0.0, ayf: -0.52, up: 0.44, io: 0 }, // asoma por ARRIBA (centro)
+  { axf: -0.24, ayf: -0.48, up: 0.48, io: 1 }, // arriba-izquierda
+  { axf: 0.24, ayf: -0.48, up: 0.48, io: -1 }, // arriba-derecha
+];
+const otroHome = (cur: number) => {
+  let n = Math.floor(Math.random() * HOMES.length);
+  if (n === cur) n = (n + 1) % HOMES.length;
+  return n;
+};
+
 /* Muelle amortiguado 1-D (integrador semi-implícito). Da anticipación/overshoot/follow-through.
    Presets típicos: crítico k=170 c=26 · subamortiguado (juguetón) k=180 c=12 · golpe k=320 c=22. */
 function springStep(pos: number, vel: number, target: number, k: number, c: number, dt: number): [number, number] {
@@ -560,7 +577,8 @@ type Fideo = {
   seed: number;
   sx: number; // posición de la cabeza al ARRANCAR (la mascota donde estaba) — no el centro de la caja
   sy: number;
-  lado: 1 | -1; // de qué lado sale (el hogar de la mascota)
+  haxf: number; // ancla del hogar desde el que sale (fracción de boxW/boxH)
+  hayf: number;
   grabbed?: boolean; // ya sonó el agarre
   hx?: number; // muelle de la cabeza (init al primer frame)
   hy?: number;
@@ -673,6 +691,8 @@ export default function EmplataGame(props: {
     dotSprite: null as Off | null, // partícula de vapor horneada (dot suave)
     kraftPat: null as CanvasPattern | null, // textura de cartón (fibra + corrugado)
     stamp: null as Off | null, // sello "recién hecho" horneado
+    frontBand: null as Off | null, // banda frontal ESTÁTICA horneada (perf: drawImage vs patrón/frame)
+    fbMeta: null as { left: number; top: number; w: number; h: number } | null,
     entered: false, // one-shot del squash de entrada de la caja
     // MASCOTA: el fideo SIEMPRE presente, con hogar fijo (detrás de la caja, a un lado) y
     // muchos modos de movimiento aleatorios. hx/hy = cabeza gobernada por muelle.
@@ -685,7 +705,7 @@ export default function EmplataGame(props: {
       modeT: 0,
       dur: 90,
       pupil: 0.4,
-      lado: 1 as 1 | -1, // de qué lado de la caja sale (alterna)
+      home: 0, // índice en HOMES (se reubica tras cada agarre y de vez en cuando)
       init: false,
     },
     t: 0,
@@ -716,6 +736,7 @@ export default function EmplataGame(props: {
       if (navigator.vibrate) navigator.vibrate(10);
       const wd = world.current;
       const m = wd.masc;
+      const h = HOMES[m.home];
       wd.fideos.push({
         ing,
         tx: cx,
@@ -727,8 +748,12 @@ export default function EmplataGame(props: {
         seed: Math.random() * 10,
         sx: m.init ? m.hx : cx, // ARRANCA donde está la mascota ahora (no el centro de la caja)
         sy: m.init ? m.hy : cy - 80,
-        lado: m.lado,
+        haxf: h.axf,
+        hayf: h.ayf,
       });
+      // reubica la mascota → el SIGUIENTE agarre nacerá en otro lugar (lado distinto o por arriba)
+      m.home = otroHome(m.home);
+      m.modeT = wd.t;
     },
     [s],
   );
@@ -757,6 +782,7 @@ export default function EmplataGame(props: {
           world.current.pila = world.current.pila.filter((p) => p.id !== ing.id);
           world.current.resettle = true; // los de arriba caen al hueco que dejó
           const mm = world.current.masc;
+          const hh = HOMES[mm.home];
           world.current.fideos.push({
             ing,
             tx: cx,
@@ -768,8 +794,11 @@ export default function EmplataGame(props: {
             seed: Math.random() * 10,
             sx: mm.init ? mm.hx : cx,
             sy: mm.init ? mm.hy : cy - 80,
-            lado: mm.lado,
+            haxf: hh.axf,
+            hayf: hh.ayf,
           });
+          mm.home = otroHome(mm.home);
+          mm.modeT = world.current.t;
           s.ruido(0.05, 0.04, 1400);
           return;
         }
@@ -841,6 +870,7 @@ export default function EmplataGame(props: {
       fdoc.fonts.ready.then(() => {
         fontsResolved = false;
         resolveFonts();
+        bakeFrontBand(); // re-hornear con la fuente de marca ya cargada (wordmark/sello)
       });
     }
 
@@ -939,6 +969,106 @@ export default function EmplataGame(props: {
       }
       g.globalAlpha = 1;
       world.current.stamp = c;
+    };
+
+    // ---- BANDA FRONTAL horneada (perf): todo lo estático de la banda (kraft+textura+canto
+    // corrugado+motivo+wordmark+sello) en UN sprite → drawImage/frame en vez de patrón+arcos+texto.
+    const bakeFrontBand = () => {
+      const boxW = Math.min(W * 0.66, 300);
+      const boxH = boxW * 0.78;
+      if (boxW < 10) return;
+      const eh = boxH * 0.028;
+      const left = -boxW / 2 - 3;
+      const top = boxH * 0.05 - eh - 4;
+      const bw = boxW + 6;
+      const bh = boxH * 0.39 + 4 - top;
+      const SS = 2; // supersampling → nítido al escalar con foco
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(bw * SS);
+      cv.height = Math.round(bh * SS);
+      const g = cv.getContext("2d")!;
+      g.scale(SS, SS);
+      g.translate(-left, -top); // ahora g usa las MISMAS coords box-local que el dibujo procedural
+
+      // banda kraft + textura de cartón
+      g.beginPath();
+      g.roundRect(-boxW / 2, boxH * 0.05, boxW, boxH * 0.34, 9);
+      const grad = g.createLinearGradient(-boxW / 2, boxH * 0.05, boxW / 2, boxH * 0.39);
+      grad.addColorStop(0, "rgba(224,181,116,1)");
+      grad.addColorStop(0.5, "#C69A5B");
+      grad.addColorStop(1, "#A87B42");
+      g.fillStyle = grad;
+      g.fill();
+      const kp = world.current.kraftPat;
+      if (kp) {
+        g.fillStyle = kp;
+        g.fill();
+      }
+      // sheen
+      const sheen = g.createLinearGradient(-boxW / 2, boxH * 0.05, boxW / 2, boxH * 0.4);
+      sheen.addColorStop(0, "rgba(255,240,210,0.4)");
+      sheen.addColorStop(0.45, "rgba(255,240,210,0)");
+      g.fillStyle = sheen;
+      g.beginPath();
+      g.roundRect(-boxW / 2, boxH * 0.05, boxW, boxH * 0.34, 9);
+      g.fill();
+      // canto de cartón corrugado (la flauta)
+      const edgeY = boxH * 0.05;
+      g.save();
+      g.beginPath();
+      g.rect(-boxW / 2 + 6, edgeY - eh, boxW - 12, eh + 1);
+      g.clip();
+      const edgeG = g.createLinearGradient(0, edgeY - eh, 0, edgeY);
+      edgeG.addColorStop(0, "#D8B27A");
+      edgeG.addColorStop(1, "#B98E52");
+      g.fillStyle = edgeG;
+      g.fillRect(-boxW / 2, edgeY - eh, boxW, eh + 1);
+      g.strokeStyle = "rgba(90,58,24,0.38)";
+      g.lineWidth = 1;
+      g.beginPath();
+      for (let fx = -boxW / 2; fx < boxW / 2; fx += 8) {
+        g.moveTo(fx + 8, edgeY);
+        g.arc(fx + 4, edgeY, 4, 0, Math.PI, false);
+      }
+      g.stroke();
+      g.restore();
+      // pliegue central
+      g.strokeStyle = "rgba(90,58,24,0.14)";
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(0, boxH * 0.08);
+      g.lineTo(0, boxH * 0.37);
+      g.stroke();
+      // motivo de fideos impreso
+      g.strokeStyle = "rgba(120,80,40,0.12)";
+      g.lineWidth = 2;
+      g.lineCap = "round";
+      for (const my of [boxH * 0.15, boxH * 0.31]) {
+        g.beginPath();
+        for (let mx = -boxW * 0.42; mx <= boxW * 0.42; mx += 5) {
+          const yy = my + Math.sin(mx * 0.12) * 2.4;
+          if (mx === -boxW * 0.42) g.moveTo(mx, yy);
+          else g.lineTo(mx, yy);
+        }
+        g.stroke();
+      }
+      // wordmark letterpress
+      g.font = fontD(11, 800);
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillStyle = "rgba(255,240,210,0.55)";
+      g.fillText("P A P A G H E T T I", 0, boxH * 0.23 + 1);
+      g.fillStyle = "rgba(90,58,24,0.9)";
+      g.fillText("P A P A G H E T T I", 0, boxH * 0.23);
+      // sello "recién hecho"
+      if (world.current.stamp) {
+        const ss = boxH * 0.19;
+        g.globalAlpha = 0.9;
+        g.drawImage(world.current.stamp, boxW * 0.3 - ss / 2, boxH * 0.32 - ss / 2, ss, ss);
+        g.globalAlpha = 1;
+      }
+      world.current.frontBand = cv;
+      world.current.fbMeta = { left, top, w: bw, h: bh };
     };
 
     // ---- ESCENARIO horneado: crema + pool de luz ↖ + mostrador con canto + veta + GRANO ----
@@ -1081,6 +1211,7 @@ export default function EmplataGame(props: {
       if (!world.current.stamp) bakeStamp();
       bakeBg();
       bakeVig();
+      bakeFrontBand();
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -1599,9 +1730,10 @@ export default function EmplataGame(props: {
       if (faseRef.current === "arma" && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding) {
         const m = wd.masc;
         const mby = boxY + boxH * 0.32 + entY + focoY; // base de la caja en pantalla
-        const ax = boxX + m.lado * boxW * 0.4 + shX; // hogar: justo detrás del costado de la caja
-        const ay = mby - boxH * 0.3 + shY; // ancla a media altura, tras la caja
-        const up = boxH * 0.62;
+        const h = HOMES[m.home];
+        const ax = boxX + h.axf * boxW + shX; // hogar actual (lado o por encima de la caja)
+        const ay = mby + h.ayf * boxH + shY;
+        const up = boxH * h.up;
         if (!m.init) {
           m.init = true;
           m.hx = ax;
@@ -1616,11 +1748,11 @@ export default function EmplataGame(props: {
           m.mode = nm;
           m.modeT = wd.t;
           m.dur = 55 + Math.random() * 130; // ~1-3s por modo
-          if (Math.random() < 0.32) m.lado = m.lado === 1 ? -1 : 1;
+          if (Math.random() < 0.28) m.home = otroHome(m.home); // se muda de vez en cuando
         }
         const em = react ? wd.reactMode : m.mode;
         const age = react ? wd.t - wd.reactT : wd.t - m.modeT;
-        const io = -m.lado; // hacia la caja
+        const io = h.io; // hacia la caja
         let tx = ax;
         let ty = ay - up;
         let pupil = 0.4;
@@ -1964,71 +2096,13 @@ export default function EmplataGame(props: {
         ctx.fillRect(-boxW * 0.42, -boxH * 0.06, boxW * 0.84, boxH * 0.12);
       }
 
-      // banda FRONTAL kraft (baja: deja ver la comida) + wordmark emboss
-      kraft(0, boxH * 0.22, boxW, boxH * 0.34, 9, 8);
-      const sheen = ctx.createLinearGradient(-boxW / 2, boxH * 0.05, boxW / 2, boxH * 0.4);
-      sheen.addColorStop(0, "rgba(255,240,210,0.4)");
-      sheen.addColorStop(0.45, "rgba(255,240,210,0)");
-      ctx.fillStyle = sheen;
-      ctx.beginPath();
-      ctx.roundRect(-boxW / 2, boxH * 0.05, boxW, boxH * 0.34, 9);
-      ctx.fill();
-      // CANTO de cartón CORRUGADO (la flauta): grosor visible en el borde superior de la banda
-      const edgeY = boxH * 0.05;
-      const eh = boxH * 0.028;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(-boxW / 2 + 6, edgeY - eh, boxW - 12, eh + 1);
-      ctx.clip();
-      const edgeG = ctx.createLinearGradient(0, edgeY - eh, 0, edgeY);
-      edgeG.addColorStop(0, "#D8B27A");
-      edgeG.addColorStop(1, "#B98E52");
-      ctx.fillStyle = edgeG;
-      ctx.fillRect(-boxW / 2, edgeY - eh, boxW, eh + 1);
-      // los arcos de la flauta (ondas del corrugado) — una pasada, un solo path
-      ctx.strokeStyle = "rgba(90,58,24,0.38)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let fx = -boxW / 2; fx < boxW / 2; fx += 8) {
-        ctx.moveTo(fx + 8, edgeY);
-        ctx.arc(fx + 4, edgeY, 4, 0, Math.PI, false);
-      }
-      ctx.stroke();
-      ctx.restore();
-      // pliegue central del kraft (relieve)
-      ctx.strokeStyle = "rgba(90,58,24,0.14)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, boxH * 0.08);
-      ctx.lineTo(0, boxH * 0.37);
-      ctx.stroke();
-      // motivo impreso sutil: fideos ondulados detrás del wordmark (empaque de marca)
-      ctx.strokeStyle = "rgba(120,80,40,0.12)";
-      ctx.lineWidth = 2;
-      ctx.lineCap = "round";
-      for (const my of [boxH * 0.15, boxH * 0.31]) {
-        ctx.beginPath();
-        for (let mx = -boxW * 0.42; mx <= boxW * 0.42; mx += 5) {
-          const yy = my + Math.sin(mx * 0.12) * 2.4;
-          if (mx === -boxW * 0.42) ctx.moveTo(mx, yy);
-          else ctx.lineTo(mx, yy);
-        }
-        ctx.stroke();
-      }
-      // wordmark con letterpress (luz ↖: brillo arriba, tinta abajo)
-      ctx.font = fontD(11, 800);
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "rgba(255,240,210,0.55)";
-      ctx.fillText("P A P A G H E T T I", 0, boxH * 0.23 + 1);
-      ctx.fillStyle = "rgba(90,58,24,0.9)";
-      ctx.fillText("P A P A G H E T T I", 0, boxH * 0.23);
-      // SELLO "recién hecho" en la esquina de la banda (empaque de marca)
-      if (wd.stamp && f < 0.5) {
-        const ss = boxH * 0.19;
-        ctx.globalAlpha = 0.9;
-        ctx.drawImage(wd.stamp, boxW * 0.3 - ss / 2, boxH * 0.32 - ss / 2, ss, ss);
-        ctx.globalAlpha = 1;
+      // banda FRONTAL kraft (baja: deja ver la comida) — SPRITE horneado (kraft+textura+canto
+      // corrugado+motivo+wordmark+sello en 1 drawImage; el patrón/arcos/texto ya no van por frame).
+      if (wd.frontBand && wd.fbMeta) {
+        const fm = wd.fbMeta;
+        ctx.drawImage(wd.frontBand, fm.left, fm.top, fm.w, fm.h);
+      } else {
+        kraft(0, boxH * 0.22, boxW, boxH * 0.34, 9, 8);
       }
 
       // ===== CIERRE ORIGAMI REAL + SELLO con hit-stop (el clímax fotografiable) =====
@@ -2571,8 +2645,8 @@ export default function EmplataGame(props: {
       for (let i = wd.fideos.length - 1; i >= 0; i--) {
         const fd = wd.fideos[i];
         const age = wd.t - fd.t0;
-        const anchX = boxX + fd.lado * boxW * 0.4 + shX; // ancla = hogar de la mascota (costado, media altura)
-        const anchY = mby2 - boxH * 0.3 + shY;
+        const anchX = boxX + fd.haxf * boxW + shX; // ancla = hogar desde el que salió (lado o arriba)
+        const anchY = mby2 + fd.hayf * boxH + shY;
         let tipX = 0;
         let tipY = 0;
         let holding = false;
