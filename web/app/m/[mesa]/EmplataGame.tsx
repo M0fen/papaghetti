@@ -2986,30 +2986,30 @@ export default function EmplataGame(props: {
         // arquea desde la base (eso se veía como un hilo suelto).
         const wob = Math.sin(wd.t * 0.06);
         const fs = focoScale;
-        // borde superior VISIBLE de la caja SELLADA (en espera no se dibuja pared trasera; la tapa
-        // queda más abajo). Empírico y escalado con fs. El fideo apoya el cuello ahí y asoma la cabeza.
-        const boxTopY = by - boxH * 0.28 * fs;
-        const anchXe = boxX + boxW * 0.17 * fs; // sobre el borde superior-derecho
-        const anchYe = boxTopY + boxH * 0.06 * fs; // cuello apoyado dentro del borde (conectado)
-        const up = boxH * 0.16 * fs; // cuánto asoma la cabeza sobre la caja
+        const base = boxY + boxH * 0.32 + entY + focoY; // base de la caja = nivel de la mesa
+        // MESERO AL LADO: el fideo PARADO en la mesa a la izquierda de la caja, cuerpo entero,
+        // que actúa el estado del pedido (trae la comanda / atiza / toca la campana / hace la venia).
+        const anchXe = boxX - boxW * 0.44 * fs; // pies en el frente-izquierdo, sobre la mesa
+        const anchYe = base + boxH * 0.5 * fs; // PIES ABAJO, sobre la mesa
+        const stand = boxH * 0.4 * fs; // stocky: cuerpo robusto y bajo, no un bastón largo
         let tipXe = anchXe;
-        let tipYe = anchYe - up;
+        let tipYe = anchYe - stand;
         let ticket = false;
         if (est === "recibido") {
-          tipXe = anchXe + wob * 5; // presenta la comanda y asiente
-          tipYe = anchYe - up * (0.95 + 0.08 * Math.sin(wd.t * 0.12));
+          tipXe = anchXe + boxW * 0.05 * fs + wob * 4; // presenta la comanda hacia la caja
+          tipYe = anchYe - stand * (0.94 + 0.05 * Math.sin(wd.t * 0.12));
           ticket = true;
         } else if (est === "cocina") {
-          tipXe = anchXe + wob * 6; // atiza el horno: sube y baja
-          tipYe = anchYe - up * (0.78 + 0.22 * Math.abs(Math.sin(wd.t * 0.14)));
+          tipXe = anchXe + boxW * 0.06 * fs + wob * 5; // atiza hacia la caja, sube y baja
+          tipYe = anchYe - stand * (0.82 + 0.16 * Math.abs(Math.sin(wd.t * 0.14)));
         } else if (est === "listo") {
-          tipXe = anchXe + Math.sin(wd.t * 0.26) * 10; // toca la campanita, estirado arriba
-          tipYe = anchYe - up * 1.25;
+          tipXe = anchXe + boxW * 0.03 * fs + Math.sin(wd.t * 0.26) * 6; // se estira ALTO a la campana
+          tipYe = anchYe - stand * 1.35;
         } else {
-          tipXe = anchXe; // reverencia
-          tipYe = anchYe - up * (0.5 + 0.06 * Math.sin(wd.t * 0.05));
+          tipXe = anchXe + boxW * 0.04 * fs; // reverencia
+          tipYe = anchYe - stand * (0.55 + 0.05 * Math.sin(wd.t * 0.05));
         }
-        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, est === "cocina" ? 1.1 : 0.4, 0, 0, fs * 1.15);
+        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, est === "cocina" ? 1.0 : 0.4, 0, 0, fs * 1.4);
         // la comanda kraft que lleva el fideo (recibido)
         if (ticket) {
           ctx.save();
