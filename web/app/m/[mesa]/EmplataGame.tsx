@@ -77,6 +77,71 @@ const fontD = (px: number, weight = 800) => `${weight} ${px}px ${FONT_DISPLAY}`;
 const fontB = (px: number, weight = 600) => `${weight} ${px}px ${FONT_BODY}`;
 
 /* =========================================================================
+   PERFIL DE SABOR — cada ingrediente tiene un carácter en 4 ejes (0..1). Sirve al
+   TERMÓMETRO DEL ANTOJO (perfil agregado de la caja) y a la REACCIÓN por ingrediente
+   (el rasgo dominante decide el tinte de escena, las partículas y el gesto del fideo).
+   No hay picante en el catálogo → los ejes que de verdad varían: cro/cre/fre/dul.
+   ========================================================================= */
+type Sabor = { cro: number; cre: number; fre: number; dul: number };
+const EJES = [
+  { k: "cro" as const, label: "Crocante", color: "#E0930C" },
+  { k: "cre" as const, label: "Cremoso", color: "#EAD9A0" },
+  { k: "fre" as const, label: "Fresco", color: "#7FA64A" },
+  { k: "dul" as const, label: "Dulce", color: "#E89BB0" },
+];
+const SABOR_MAP: Record<string, Sabor> = {
+  "papa-criolla": { cro: 0.35, cre: 0.8, fre: 0.1, dul: 0.25 },
+  "papa-francesa": { cro: 0.95, cre: 0.2, fre: 0, dul: 0.1 },
+  spaghetti: { cro: 0.1, cre: 0.75, fre: 0.15, dul: 0.1 },
+  chicharron: { cro: 0.95, cre: 0.1, fre: 0, dul: 0 },
+  bolonesa: { cro: 0.15, cre: 0.7, fre: 0.25, dul: 0.15 },
+  "pollo-crispy": { cro: 0.9, cre: 0.25, fre: 0, dul: 0 },
+  mixta: { cro: 0.55, cre: 0.5, fre: 0, dul: 0 },
+  champinon: { cro: 0.2, cre: 0.45, fre: 0.75, dul: 0 },
+  maicitos: { cro: 0.35, cre: 0.5, fre: 0.2, dul: 0.7 },
+  "nuggets-pina": { cro: 0.6, cre: 0.1, fre: 0.35, dul: 0.95 },
+  tocineta: { cro: 0.85, cre: 0.1, fre: 0, dul: 0.1 },
+  hogao: { cro: 0, cre: 0.5, fre: 0.75, dul: 0.25 },
+  parmesano: { cro: 0.25, cre: 0.75, fre: 0, dul: 0 },
+  aguacate: { cro: 0, cre: 0.85, fre: 0.7, dul: 0.1 },
+  perejil: { cro: 0, cre: 0, fre: 1, dul: 0 },
+  "chicharron-crocante": { cro: 1, cre: 0, fre: 0, dul: 0 },
+};
+/** Perfil de un ingrediente (con defaults por categoría si es nuevo del admin). */
+function saborDe(ing: Ingrediente): Sabor {
+  const s = SABOR_MAP[ing.id];
+  if (s) return s;
+  if (ing.categoria === "base") return { cro: 0.4, cre: 0.5, fre: 0.1, dul: 0.15 };
+  if (ing.categoria === "proteina") return { cro: 0.6, cre: 0.3, fre: 0.1, dul: 0.05 };
+  return { cro: 0.3, cre: 0.4, fre: 0.4, dul: 0.3 };
+}
+/** Rasgo dominante de un ingrediente → tema de la reacción. */
+function rasgoDominante(ing: Ingrediente): "cro" | "cre" | "fre" | "dul" {
+  const s = saborDe(ing);
+  let best: keyof Sabor = "cre";
+  let bv = -1;
+  (["cro", "cre", "fre", "dul"] as const).forEach((k) => {
+    if (s[k] > bv) {
+      bv = s[k];
+      best = k;
+    }
+  });
+  return best;
+}
+/** Título evocador según el perfil agregado (para el termómetro). */
+function tituloAntojo(p: Sabor, n: number): string {
+  if (n === 0) return "TU ANTOJO";
+  const orden = (["cro", "cre", "fre", "dul"] as const).slice().sort((a, b) => p[b] - p[a]);
+  const top = orden[0];
+  const label = { cro: "CROCANTE", cre: "CREMOSO", fre: "FRESCO", dul: "DULCE" }[top];
+  const seg = orden[1];
+  const equilibrado = p[top] - p[seg] < 0.12 && p[top] > 0.2;
+  if (equilibrado) return "BIEN BALANCEADO";
+  const seg2 = { cro: "y crocante", cre: "y cremoso", fre: "y fresco", dul: "y dulce" }[seg];
+  return p[seg] > 0.35 ? `${label} ${seg2}` : label;
+}
+
+/* =========================================================================
    SPRITES — comida horneada con el modelo de luz del juego (una luz ↖).
    ========================================================================= */
 type Off = HTMLCanvasElement;
@@ -493,6 +558,9 @@ type Fideo = {
   off: number; // desplazamiento del ancla (hebras concurrentes)
   drop: number; // [-1,1] dónde suelta sobre la caja (dispersa el montón)
   seed: number;
+  sx: number; // posición de la cabeza al ARRANCAR (la mascota donde estaba) — no el centro de la caja
+  sy: number;
+  lado: 1 | -1; // de qué lado sale (el hogar de la mascota)
   grabbed?: boolean; // ya sonó el agarre
   hx?: number; // muelle de la cabeza (init al primer frame)
   hy?: number;
@@ -590,6 +658,10 @@ export default function EmplataGame(props: {
     selloScaleV: 0,
     selloRot: 0, // rotación aleatoria del sello (±6°)
     ondas: [] as { r: number; life: number }[], // anillos de la onda de impacto del sello
+    flash: { r: 0, g: 0, b: 0, life: 0 }, // tinte de escena breve al elegir (reacción por sabor)
+    shake: 0, // sacudida de escena (crocante)
+    reactMode: -1, // modo de reacción de la mascota (-1 = ninguno)
+    reactT: 0,
     combo: 0,
     comboT: -9999,
     lastTab: 0,
@@ -641,6 +713,7 @@ export default function EmplataGame(props: {
       s.tone(240, 0.09, "sine", 0.05, 640); // latigazo hacia arriba
       if (navigator.vibrate) navigator.vibrate(10);
       const wd = world.current;
+      const m = wd.masc;
       wd.fideos.push({
         ing,
         tx: cx,
@@ -650,6 +723,9 @@ export default function EmplataGame(props: {
         off: ((wd.fideoN++ % 3) - 1) * 26,
         drop: (Math.random() - 0.5) * 2,
         seed: Math.random() * 10,
+        sx: m.init ? m.hx : cx, // ARRANCA donde está la mascota ahora (no el centro de la caja)
+        sy: m.init ? m.hy : cy - 80,
+        lado: m.lado,
       });
     },
     [s],
@@ -678,6 +754,7 @@ export default function EmplataGame(props: {
           setToppingIds((prev) => prev.filter((t) => t !== ing.id));
           world.current.pila = world.current.pila.filter((p) => p.id !== ing.id);
           world.current.resettle = true; // los de arriba caen al hueco que dejó
+          const mm = world.current.masc;
           world.current.fideos.push({
             ing,
             tx: cx,
@@ -687,6 +764,9 @@ export default function EmplataGame(props: {
             off: ((world.current.fideoN++ % 3) - 1) * 22,
             drop: 0,
             seed: Math.random() * 10,
+            sx: mm.init ? mm.hx : cx,
+            sy: mm.init ? mm.hy : cy - 80,
+            lado: mm.lado,
           });
           s.ruido(0.05, 0.04, 1400);
           return;
@@ -1032,6 +1112,33 @@ export default function EmplataGame(props: {
       wd.comboT = wd.t;
       if (wd.combo >= 2) s.combo(wd.combo - 1); // seguidilla musical (pentatónica)
       if (wd.combo >= 3 && navigator.vibrate) navigator.vibrate(8);
+
+      // ===== CADA INGREDIENTE SU CARÁCTER: la escena reacciona al rasgo dominante =====
+      const esPrem = ing.tags?.includes("premium");
+      const rasgo = rasgoDominante(ing);
+      // tinte de escena breve (premium manda: destello dorado)
+      const tinte = esPrem
+        ? { r: 245, g: 200, b: 90 }
+        : rasgo === "cro"
+          ? { r: 230, g: 150, b: 40 } // ámbar cálido
+          : rasgo === "fre"
+            ? { r: 130, g: 180, b: 90 } // verde fresco
+            : rasgo === "dul"
+              ? { r: 235, g: 160, b: 185 } // rosa dulce
+              : { r: 240, g: 224, b: 180 }; // crema cremoso
+      wd.flash = { ...tinte, life: 1 };
+      if (rasgo === "cro" || esPrem) wd.shake = rasgo === "cro" ? 1 : 0.5; // crocante sacude
+      // partículas temáticas EXTRA del color del rasgo (encima del burst del color de la comida)
+      const tcol = `rgb(${tinte.r},${tinte.g},${tinte.b})`;
+      const nX = esPrem ? 10 : rasgo === "cro" ? 8 : 5;
+      for (let k = 0; k < nX; k++) {
+        const a = -Math.PI / 2 + (Math.random() - 0.5) * (esPrem ? TAU : 2.2);
+        const sp = 2 + Math.random() * 3.5;
+        wd.parts.push({ x: px0, y: py0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.2, life: 1, r: 1.4 + Math.random() * 1.8, color: tcol });
+      }
+      // el FIDEO reacciona: modo de gesto temático (crunch-nod / sniff / bounce / bow)
+      wd.reactMode = esPrem ? 11 : rasgo === "cro" ? 8 : rasgo === "fre" ? 9 : 10;
+      wd.reactT = wd.t;
     };
 
     // ---------- input: tap vs drag de bandeja ----------
@@ -1332,6 +1439,10 @@ export default function EmplataGame(props: {
       wd.t += df;
       const { boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH } = geo();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // sacudida de escena (crocante) — decae; se suma a la caja y la mascota (no al fondo)
+      wd.shake *= Math.pow(0.72, df);
+      const shX = wd.shake > 0.015 && !reduce ? (Math.random() - 0.5) * 9 * wd.shake : 0;
+      const shY = wd.shake > 0.015 && !reduce ? (Math.random() - 0.5) * 6 * wd.shake : 0;
 
       // cambio de pestaña → animación de entrada de cartas + reset de scroll
       if (sel.current.tab !== wd.lastTab) {
@@ -1397,8 +1508,8 @@ export default function EmplataGame(props: {
       if (faseRef.current === "arma" && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding) {
         const m = wd.masc;
         const mby = boxY + boxH * 0.32 + entY + focoY; // base de la caja en pantalla
-        const ax = boxX + m.lado * boxW * 0.4; // hogar: justo detrás del costado de la caja
-        const ay = mby - boxH * 0.3; // ancla a media altura, tras la caja
+        const ax = boxX + m.lado * boxW * 0.4 + shX; // hogar: justo detrás del costado de la caja
+        const ay = mby - boxH * 0.3 + shY; // ancla a media altura, tras la caja
         const up = boxH * 0.62;
         if (!m.init) {
           m.init = true;
@@ -1406,7 +1517,9 @@ export default function EmplataGame(props: {
           m.hy = ay - up * 0.6;
           m.modeT = wd.t;
         }
-        if (wd.t - m.modeT > m.dur) {
+        // REACCIÓN por sabor: al aterrizar un ingrediente, el fideo hace un gesto temático
+        const react = wd.reactMode >= 0 && wd.t - wd.reactT < 48;
+        if (wd.t - m.modeT > m.dur && !react) {
           let nm = Math.floor(Math.random() * 8);
           if (nm === m.mode) nm = (nm + 1) % 8;
           m.mode = nm;
@@ -1414,7 +1527,8 @@ export default function EmplataGame(props: {
           m.dur = 55 + Math.random() * 130; // ~1-3s por modo
           if (Math.random() < 0.32) m.lado = m.lado === 1 ? -1 : 1;
         }
-        const age = wd.t - m.modeT;
+        const em = react ? wd.reactMode : m.mode;
+        const age = react ? wd.t - wd.reactT : wd.t - m.modeT;
         const io = -m.lado; // hacia la caja
         let tx = ax;
         let ty = ay - up;
@@ -1422,7 +1536,7 @@ export default function EmplataGame(props: {
         if (reduce) {
           ty = ay - up * 0.7;
         } else {
-          switch (m.mode) {
+          switch (em) {
             case 0: // mirar alrededor
               tx = ax + Math.sin(age * 0.05) * boxW * 0.14;
               ty = ay - up * (0.92 + 0.08 * Math.sin(age * 0.08));
@@ -1458,21 +1572,42 @@ export default function EmplataGame(props: {
               ty = ay - up * 1.02;
               pupil = 0.45;
               break;
-            default: // 7: esconderse tras la caja y reasomar
+            case 7: // esconderse tras la caja y reasomar
               ty = ay - up * (age < m.dur * 0.45 ? 0.1 : 0.95);
               tx = ax;
               pupil = 0.4;
               break;
+            // ---- gestos de REACCIÓN por sabor ----
+            case 8: // crocante: asiente con fuerza (crunch-nod)
+              tx = ax + io * boxW * 0.06;
+              ty = ay - up * (0.9 - 0.28 * Math.abs(Math.sin(age * 0.45)));
+              pupil = 1.2;
+              break;
+            case 9: // fresco: se inclina y huele, aprobando
+              tx = ax + io * boxW * 0.16;
+              ty = ay - up * (0.72 + 0.06 * Math.sin(age * 0.6));
+              pupil = 1.2;
+              break;
+            case 10: // dulce/cremoso: brinca contento
+              tx = ax + Math.sin(age * 0.4) * 6;
+              ty = ay - up * (1.02 + 0.14 * Math.abs(Math.sin(age * 0.42)));
+              pupil = 0.3;
+              break;
+            default: // 11: premium: reverencia (baja y sube con gracia)
+              ty = ay - up * (age < 18 ? 0.42 : 1.06);
+              tx = ax;
+              pupil = 0.5;
+              break;
           }
         }
-        [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, 170, 19, dt);
-        [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, 170, 19, dt);
+        [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, react ? 240 : 170, react ? 22 : 19, dt);
+        [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, react ? 240 : 170, react ? 22 : 19, dt);
         m.pupil += (pupil - m.pupil) * (1 - Math.pow(0.86, df));
         drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil);
       }
 
       ctx.save();
-      ctx.translate(boxX, boxY + boxH * 0.32 + entY + focoY);
+      ctx.translate(boxX + shX, boxY + boxH * 0.32 + entY + focoY + shY);
       ctx.scale((1 + wd.boxSquash * 0.05) * focoScale, (squash - wd.boxSquash * 0.05) * focoScale);
       ctx.translate(0, -boxH * 0.32);
 
@@ -2234,25 +2369,27 @@ export default function EmplataGame(props: {
         }
       }
 
-      // ===== EL FIDEO MESERO (encima de la bandeja: agarra sobre las cartas) =====
-      const mouthYBase = boxY - boxH * 0.34;
+      // ===== EL FIDEO MESERO — sale DESDE LA MASCOTA (su posición actual, su hogar), no del
+      // centro de la caja: se estira desde donde estaba, agarra la carta y vuelve a emplatar. =====
+      const mby2 = boxY + boxH * 0.32 + entY + focoY;
+      const mouthYBase = boxY - boxH * 0.34; // punto de SOLTADO: encima de la caja (el item cae dentro)
       for (let i = wd.fideos.length - 1; i >= 0; i--) {
         const fd = wd.fideos[i];
         const age = wd.t - fd.t0;
-        const mouthX = boxX + fd.off;
-        const anchX = boxX + fd.off * 0.5;
-        const anchY = boxY - boxH * 0.1;
+        const anchX = boxX + fd.lado * boxW * 0.4 + shX; // ancla = hogar de la mascota (costado, media altura)
+        const anchY = mby2 - boxH * 0.3 + shY;
         let tipX = 0;
         let tipY = 0;
         let holding = false;
         let eyes = false;
         if (fd.dir === "traer") {
           if (age <= F_EXT) {
+            // se estira DESDE su posición actual (sx,sy) hasta la carta — no desde el centro
             const u = easeOutCubic(age / F_EXT);
-            const cxm = (mouthX + fd.tx) / 2;
-            const cym = Math.min(mouthYBase, fd.ty) - 60;
-            tipX = bez2(mouthX, cxm, fd.tx, u);
-            tipY = bez2(mouthYBase, cym, fd.ty, u);
+            const cxm = (fd.sx + fd.tx) / 2;
+            const cym = Math.min(fd.sy, fd.ty) - 50;
+            tipX = bez2(fd.sx, cxm, fd.tx, u);
+            tipY = bez2(fd.sy, cym, fd.ty, u);
             eyes = true;
           } else if (age <= F_EXT + F_GRAB) {
             if (!fd.grabbed) {
@@ -2291,18 +2428,20 @@ export default function EmplataGame(props: {
             continue;
           }
         } else {
-          // sacar: levanta el ingrediente de la caja y lo devuelve a su carta
+          // sacar: se estira hacia DENTRO de la caja, levanta el ingrediente y lo devuelve a su carta
+          const inX = boxX + fd.off * 0.2;
+          const outY = mby2 - boxH * 0.6; // altura a la que lo saca de la caja
           if (age <= F_SUBIR) {
             const u = easeOutCubic(age / F_SUBIR);
-            tipX = mouthX;
-            tipY = mouthYBase - u * boxH * 0.35;
-            holding = true;
+            tipX = inX;
+            tipY = (mby2 - boxH * 0.08) - u * (boxH * 0.52); // desde dentro de la caja, sube
+            holding = age > F_SUBIR * 0.35;
           } else if (age <= F_SUBIR + F_LLEVAR) {
             const u = smooth((age - F_SUBIR) / F_LLEVAR);
-            const apexX = (mouthX + fd.tx) / 2;
-            const apexY = Math.min(mouthYBase - boxH * 0.5, fd.ty - 80);
-            tipX = bez2(mouthX, apexX, fd.tx, u);
-            tipY = bez2(mouthYBase - boxH * 0.35, apexY, fd.ty, u);
+            const apexX = (inX + fd.tx) / 2;
+            const apexY = Math.min(outY - boxH * 0.2, fd.ty - 80);
+            tipX = bez2(inX, apexX, fd.tx, u);
+            tipY = bez2(outY, apexY, fd.ty, u);
             holding = true;
           } else {
             for (let k = 0; k < 3; k++)
@@ -2315,8 +2454,8 @@ export default function EmplataGame(props: {
         void eyes;
         // muelle de la cabeza: persigue el objetivo con lag → anticipación + whip + follow-through
         if (fd.hx === undefined) {
-          fd.hx = anchX;
-          fd.hy = anchY;
+          fd.hx = fd.sx; // arranca donde estaba la mascota (continuidad perfecta)
+          fd.hy = fd.sy;
           fd.hvx = 0;
           fd.hvy = 0;
         }
@@ -2373,6 +2512,76 @@ export default function EmplataGame(props: {
           ctx.stroke();
         }
         ctx.globalAlpha = 1;
+      }
+
+      // ===== TERMÓMETRO DEL ANTOJO — el carácter de tu caja, en vivo =====
+      if (faseRef.current === "arma") {
+        const idsA = [sel.current.baseId, sel.current.proteinaId, ...sel.current.toppingIds].filter(Boolean);
+        const nA = idsA.length;
+        if (nA > 0) {
+          const agg: Sabor = { cro: 0, cre: 0, fre: 0, dul: 0 };
+          for (const id of idsA) {
+            const it = find(id);
+            if (!it) continue;
+            const sv = saborDe(it);
+            agg.cro += sv.cro;
+            agg.cre += sv.cre;
+            agg.fre += sv.fre;
+            agg.dul += sv.dul;
+          }
+          const pf: Sabor = { cro: agg.cro / nA, cre: agg.cre / nA, fre: agg.fre / nA, dul: agg.dul / nA };
+          const mw = Math.min(W * 0.68, 256);
+          const mh = 50;
+          const myc = H * 0.11;
+          // píldora kraft translúcida
+          ctx.fillStyle = "rgba(30,20,10,0.24)";
+          ctx.beginPath();
+          ctx.roundRect(W / 2 - mw / 2, myc - mh / 2, mw, mh, 14);
+          ctx.fill();
+          // título evocador
+          ctx.font = fontD(11, 800);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "rgba(251,241,222,0.92)";
+          ctx.fillText(tituloAntojo(pf, nA), W / 2, myc - mh / 2 + 12);
+          // 4 barras: crocante / cremoso / fresco / dulce
+          const bw = 40;
+          const gap = 8;
+          const totalB = EJES.length * bw + (EJES.length - 1) * gap;
+          const bx0 = W / 2 - totalB / 2;
+          const by = myc + mh / 2 - 8;
+          const bh = 5;
+          EJES.forEach((e, k) => {
+            const v = pf[e.k];
+            const bx = bx0 + k * (bw + gap);
+            ctx.fillStyle = "rgba(251,241,222,0.16)";
+            ctx.beginPath();
+            ctx.roundRect(bx, by, bw, bh, 3);
+            ctx.fill();
+            ctx.fillStyle = e.color;
+            ctx.beginPath();
+            ctx.roundRect(bx, by, Math.max(3, bw * clamp(v, 0, 1)), bh, 3);
+            ctx.fill();
+            ctx.font = fontB(8, 700);
+            ctx.fillStyle = "rgba(251,241,222,0.7)";
+            ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 8);
+          });
+        }
+      }
+
+      // ===== FLASH de sabor (destello cálido de la reacción por ingrediente) =====
+      if (wd.flash.life > 0) {
+        wd.flash.life -= 0.05 * df;
+        if (wd.flash.life > 0) {
+          const fl = wd.flash;
+          ctx.globalCompositeOperation = "lighter";
+          const fg = ctx.createRadialGradient(boxX, boxY + boxH * 0.1, 10, boxX, boxY + boxH * 0.1, W * 0.8);
+          fg.addColorStop(0, `rgba(${fl.r},${fl.g},${fl.b},${fl.life * 0.22})`);
+          fg.addColorStop(1, `rgba(${fl.r},${fl.g},${fl.b},0)`);
+          ctx.fillStyle = fg;
+          ctx.fillRect(0, 0, W, H);
+          ctx.globalCompositeOperation = "source-over";
+        }
       }
 
       // ===== grado final: velo cálido (soft-light) + viñeta (multiply) — temperatura unificada =====
