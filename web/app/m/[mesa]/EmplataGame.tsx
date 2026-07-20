@@ -671,6 +671,8 @@ export default function EmplataGame(props: {
     bg: null as Off | null, // fondo horneado (crema+luz+mostrador+grano) por resize
     vig: null as Off | null, // viñeta + velo cálido cacheados por resize
     dotSprite: null as Off | null, // partícula de vapor horneada (dot suave)
+    kraftPat: null as CanvasPattern | null, // textura de cartón (fibra + corrugado)
+    stamp: null as Off | null, // sello "recién hecho" horneado
     entered: false, // one-shot del squash de entrada de la caja
     // MASCOTA: el fideo SIEMPRE presente, con hogar fijo (detrás de la caja, a un lado) y
     // muchos modos de movimiento aleatorios. hx/hy = cabeza gobernada por muelle.
@@ -858,6 +860,87 @@ export default function EmplataGame(props: {
       world.current.dotSprite = c;
     };
 
+    // ---- TEXTURA de CARTÓN kraft (fibra + corrugado) horneada como patrón tileable ----
+    const bakeKraft = () => {
+      const T = 72;
+      const c = document.createElement("canvas");
+      c.width = T;
+      c.height = T;
+      const g = c.getContext("2d")!;
+      // fibra: motas cálidas claras y oscuras (papel reciclado)
+      const img = g.createImageData(T, T);
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = (Math.random() * 2 - 1) * 26;
+        // mota ocasional oscura (impureza del cartón)
+        const mota = Math.random() < 0.015 ? -40 : 0;
+        img.data[i] = 200 + v + mota;
+        img.data[i + 1] = 150 + v * 0.7 + mota;
+        img.data[i + 2] = 90 + v * 0.4 + mota;
+        img.data[i + 3] = 40; // el patrón va tenue sobre el color base
+      }
+      g.putImageData(img, 0, 0);
+      // corrugado sutil: líneas verticales apenas visibles (la flauta del cartón)
+      g.globalAlpha = 0.05;
+      g.strokeStyle = "#5A3A18";
+      g.lineWidth = 1;
+      for (let x = 3; x < T; x += 6) {
+        g.beginPath();
+        g.moveTo(x, 0);
+        g.lineTo(x, T);
+        g.stroke();
+      }
+      g.globalAlpha = 0.04;
+      g.strokeStyle = "#FFE8C0";
+      for (let x = 5; x < T; x += 6) {
+        g.beginPath();
+        g.moveTo(x, 0);
+        g.lineTo(x, T);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+      world.current.kraftPat = ctx.createPattern(c, "repeat");
+    };
+
+    // ---- SELLO "RECIÉN HECHO" horneado (tinta ámbar desgastada, ligeramente rotado) ----
+    const bakeStamp = () => {
+      const S = 120;
+      const c = document.createElement("canvas");
+      c.width = S;
+      c.height = S;
+      const g = c.getContext("2d")!;
+      g.translate(S / 2, S / 2);
+      g.rotate(-0.18);
+      g.strokeStyle = "rgba(150,60,30,0.72)";
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc(0, 0, 50, 0, TAU);
+      g.stroke();
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(0, 0, 44, 0, TAU);
+      g.stroke();
+      g.fillStyle = "rgba(150,60,30,0.72)";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.font = `800 17px ${FONT_DISPLAY}`;
+      g.fillText("RECIÉN", 0, -9);
+      g.fillText("HECHO", 0, 11);
+      // estrellitas a los lados
+      g.font = `800 12px ${FONT_DISPLAY}`;
+      g.fillText("★", -34, 0);
+      g.fillText("★", 34, 0);
+      // desgaste: borra motas al azar (tinta imperfecta de sello)
+      g.globalCompositeOperation = "destination-out";
+      for (let k = 0; k < 60; k++) {
+        g.globalAlpha = 0.5 + Math.random() * 0.5;
+        g.beginPath();
+        g.arc((Math.random() - 0.5) * 110, (Math.random() - 0.5) * 110, 1 + Math.random() * 2.5, 0, TAU);
+        g.fill();
+      }
+      g.globalAlpha = 1;
+      world.current.stamp = c;
+    };
+
     // ---- ESCENARIO horneado: crema + pool de luz ↖ + mostrador con canto + veta + GRANO ----
     const bakeBg = () => {
       const c = document.createElement("canvas");
@@ -994,6 +1077,8 @@ export default function EmplataGame(props: {
       canvas.width = Math.round(W * dpr);
       canvas.height = Math.round(H * dpr);
       if (!world.current.dotSprite) bakeDot();
+      if (!world.current.kraftPat) bakeKraft();
+      if (!world.current.stamp) bakeStamp();
       bakeBg();
       bakeVig();
     };
@@ -1226,14 +1311,20 @@ export default function EmplataGame(props: {
 
     // ---------- helpers de dibujo ----------
     const kraft = (x: number, y: number, w: number, h: number, r0: number, light: number) => {
+      ctx.beginPath();
+      ctx.roundRect(x - w / 2, y - h / 2, w, h, r0);
       const grad = ctx.createLinearGradient(x - w / 2, y - h / 2, x + w / 2, y + h / 2);
       grad.addColorStop(0, `rgba(${216 + light},${173 + light},${108 + light},1)`);
       grad.addColorStop(0.5, "#C69A5B");
       grad.addColorStop(1, "#A87B42");
       ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.roundRect(x - w / 2, y - h / 2, w, h, r0);
       ctx.fill();
+      // textura de cartón encima (fibra + corrugado) — recortada al panel
+      const kp = world.current.kraftPat;
+      if (kp) {
+        ctx.fillStyle = kp;
+        ctx.fill();
+      }
     };
 
     // scratch buffers para la hebra (cero alocación por frame)
@@ -1637,6 +1728,17 @@ export default function EmplataGame(props: {
         ctx.beginPath();
         ctx.roundRect(-boxW * 0.42, -boxH * 0.42, boxW * 0.84, boxH * 0.48, 8);
         ctx.fill();
+        // corrugado interior: líneas verticales de la flauta (la comida las irá tapando)
+        ctx.globalAlpha = 0.09;
+        ctx.strokeStyle = "#3A2410";
+        ctx.lineWidth = 1;
+        for (let vx = -boxW * 0.36; vx < boxW * 0.4; vx += boxW * 0.09) {
+          ctx.beginPath();
+          ctx.moveTo(vx, -boxH * 0.42);
+          ctx.lineTo(vx, boxH * 0.0);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
         // canto superior iluminado ↖ (la luz marca el borde del pliegue)
         ctx.strokeStyle = "rgba(255,236,195,0.5)";
         ctx.lineWidth = 1.6;
@@ -1679,6 +1781,15 @@ export default function EmplataGame(props: {
           ctx.save();
           ctx.translate(side * boxW * 0.42, -boxH * 0.34);
           ctx.rotate(side * 0.85 * abre);
+          // GROSOR del cartón: canto oscuro en el borde inferior de la solapa (se ve el espesor)
+          ctx.fillStyle = "#8A6636";
+          ctx.beginPath();
+          ctx.moveTo(0, boxH * 0.1);
+          ctx.lineTo(side * flapW, -flapW * 0.35);
+          ctx.lineTo(side * flapW, -flapW * 0.35 + 4);
+          ctx.lineTo(0, boxH * 0.1 + 4);
+          ctx.closePath();
+          ctx.fill();
           const grad = ctx.createLinearGradient(0, 0, side * flapW, -flapW * 0.5);
           grad.addColorStop(0, "#C69A5B");
           grad.addColorStop(1, "#E2BA7E");
@@ -1691,7 +1802,7 @@ export default function EmplataGame(props: {
           ctx.closePath();
           ctx.fill();
           // canto iluminado del pliegue
-          ctx.strokeStyle = "rgba(255,236,195,0.35)";
+          ctx.strokeStyle = "rgba(255,236,195,0.4)";
           ctx.lineWidth = 1.2;
           ctx.beginPath();
           ctx.moveTo(0, -boxH * 0.02);
@@ -1797,6 +1908,54 @@ export default function EmplataGame(props: {
           ctx.restore();
         }
         ctx.restore();
+        // PICK de marca clavado en la comida (banderita kraft con el fideo del logo)
+        if (wd.pila.length >= 2 && f < 0.5 && abre > 0.9) {
+          const px = -boxW * 0.06;
+          const baseYp = -boxH * 0.2;
+          const topYp = -boxH * 0.44;
+          const sway = Math.sin(wd.t * 0.05) * 0.04;
+          ctx.save();
+          ctx.translate(px, baseYp);
+          ctx.rotate(0.08 + sway);
+          // palillo
+          ctx.strokeStyle = "#8A6636";
+          ctx.lineWidth = 2;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(0, topYp - baseYp);
+          ctx.stroke();
+          ctx.strokeStyle = "rgba(255,240,205,0.5)";
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(-0.8, 0);
+          ctx.lineTo(-0.8, topYp - baseYp);
+          ctx.stroke();
+          // banderita triangular kraft
+          const fy0p = topYp - baseYp;
+          ctx.fillStyle = "#D8B27A";
+          ctx.beginPath();
+          ctx.moveTo(0, fy0p);
+          ctx.lineTo(boxW * 0.16, fy0p + boxH * 0.03);
+          ctx.lineTo(0, fy0p + boxH * 0.06);
+          ctx.closePath();
+          ctx.fill();
+          const kpk = world.current.kraftPat;
+          if (kpk) {
+            ctx.fillStyle = kpk;
+            ctx.fill();
+          }
+          ctx.strokeStyle = "rgba(90,58,24,0.25)";
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+          // el fideo del logo (mini swirl ámbar en la banderita)
+          ctx.strokeStyle = "#C8321E";
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(boxW * 0.05, fy0p + boxH * 0.03, boxH * 0.012, 0.4, TAU);
+          ctx.stroke();
+          ctx.restore();
+        }
         // labio interior: la sombra del borde frontal CAE sobre la comida (está DENTRO)
         const lip = ctx.createLinearGradient(0, boxH * 0.06, 0, -boxH * 0.06);
         lip.addColorStop(0, "rgba(40,22,8,0.4)");
@@ -1814,19 +1973,48 @@ export default function EmplataGame(props: {
       ctx.beginPath();
       ctx.roundRect(-boxW / 2, boxH * 0.05, boxW, boxH * 0.34, 9);
       ctx.fill();
-      // canto superior iluminado ↖ + pliegue central del kraft
-      ctx.strokeStyle = "rgba(255,240,205,0.55)";
-      ctx.lineWidth = 1.5;
+      // CANTO de cartón CORRUGADO (la flauta): grosor visible en el borde superior de la banda
+      const edgeY = boxH * 0.05;
+      const eh = boxH * 0.028;
+      ctx.save();
       ctx.beginPath();
-      ctx.moveTo(-boxW / 2 + 9, boxH * 0.056);
-      ctx.lineTo(boxW / 2 - 9, boxH * 0.056);
+      ctx.rect(-boxW / 2 + 6, edgeY - eh, boxW - 12, eh + 1);
+      ctx.clip();
+      const edgeG = ctx.createLinearGradient(0, edgeY - eh, 0, edgeY);
+      edgeG.addColorStop(0, "#D8B27A");
+      edgeG.addColorStop(1, "#B98E52");
+      ctx.fillStyle = edgeG;
+      ctx.fillRect(-boxW / 2, edgeY - eh, boxW, eh + 1);
+      // los arcos de la flauta (ondas del corrugado) — una pasada, un solo path
+      ctx.strokeStyle = "rgba(90,58,24,0.38)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let fx = -boxW / 2; fx < boxW / 2; fx += 8) {
+        ctx.moveTo(fx + 8, edgeY);
+        ctx.arc(fx + 4, edgeY, 4, 0, Math.PI, false);
+      }
       ctx.stroke();
+      ctx.restore();
+      // pliegue central del kraft (relieve)
       ctx.strokeStyle = "rgba(90,58,24,0.14)";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(0, boxH * 0.07);
+      ctx.moveTo(0, boxH * 0.08);
       ctx.lineTo(0, boxH * 0.37);
       ctx.stroke();
+      // motivo impreso sutil: fideos ondulados detrás del wordmark (empaque de marca)
+      ctx.strokeStyle = "rgba(120,80,40,0.12)";
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      for (const my of [boxH * 0.15, boxH * 0.31]) {
+        ctx.beginPath();
+        for (let mx = -boxW * 0.42; mx <= boxW * 0.42; mx += 5) {
+          const yy = my + Math.sin(mx * 0.12) * 2.4;
+          if (mx === -boxW * 0.42) ctx.moveTo(mx, yy);
+          else ctx.lineTo(mx, yy);
+        }
+        ctx.stroke();
+      }
       // wordmark con letterpress (luz ↖: brillo arriba, tinta abajo)
       ctx.font = fontD(11, 800);
       ctx.textAlign = "center";
@@ -1835,6 +2023,13 @@ export default function EmplataGame(props: {
       ctx.fillText("P A P A G H E T T I", 0, boxH * 0.23 + 1);
       ctx.fillStyle = "rgba(90,58,24,0.9)";
       ctx.fillText("P A P A G H E T T I", 0, boxH * 0.23);
+      // SELLO "recién hecho" en la esquina de la banda (empaque de marca)
+      if (wd.stamp && f < 0.5) {
+        const ss = boxH * 0.19;
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(wd.stamp, boxW * 0.3 - ss / 2, boxH * 0.32 - ss / 2, ss, ss);
+        ctx.globalAlpha = 1;
+      }
 
       // ===== CIERRE ORIGAMI REAL + SELLO con hit-stop (el clímax fotografiable) =====
       if (f > 0.5) {
