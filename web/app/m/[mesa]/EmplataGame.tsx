@@ -852,7 +852,7 @@ export default function EmplataGame(props: {
 
   // ------- mundo del juego (refs, cero re-render) -------
   const world = useRef({
-    sprites: new Map<string, Off>(),
+    sprites: new Map<string, CanvasImageSource>(), // Off procedural o Image de IA (drawImage acepta ambos)
     colores: new Map<string, string>(), // color dominante por ingrediente (partículas)
     vuelos: [] as Vuelo[],
     fideos: [] as Fideo[],
@@ -924,6 +924,28 @@ export default function EmplataGame(props: {
       const spr = bakeSprite(ing);
       m.set(ing.id, spr);
       col.set(ing.id, muestrearColor(spr));
+    }
+    // ASSETS DE COMIDA (IA plana en /public/food/{id}.webp) — carga DIFERIDA tras el procedural:
+    // el procedural es el placeholder instantáneo (LCP intacto); al llegar el asset reemplaza el
+    // sprite y re-muestrea el color, y TODOS los drawImage lo usan sin cambios. Si el asset no
+    // existe (404), onload no dispara → se queda el procedural. Rollout incremental sin riesgo.
+    for (const ing of all) {
+      const img = new Image();
+      img.decoding = "async";
+      img.onload = () => {
+        world.current.sprites.set(ing.id, img);
+        try {
+          const c = document.createElement("canvas");
+          c.width = 64;
+          c.height = 64;
+          const g = c.getContext("2d")!;
+          g.drawImage(img, 0, 0, 64, 64);
+          world.current.colores.set(ing.id, muestrearColor(c));
+        } catch {
+          /* mantener color procedural */
+        }
+      };
+      img.src = `/food/${ing.id}.webp`;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bases, proteinas, toppings]);
@@ -1777,7 +1799,7 @@ export default function EmplataGame(props: {
       tipX: number,
       tipY: number,
       seed: number,
-      holdSpr: Off | null,
+      holdSpr: CanvasImageSource | null,
       eyes: boolean,
       pupilDown = 0,
       hvx = 0,
