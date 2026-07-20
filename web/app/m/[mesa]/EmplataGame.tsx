@@ -1419,7 +1419,7 @@ export default function EmplataGame(props: {
       world.current.pressed = "";
       world.current.lastAct = world.current.t;
       if (moved > 8) return; // fue drag
-      const { trayY, cardY } = geo();
+      const { trayY, cardY, cardH } = geo();
       // pestañas
       if (y > trayY - 26 && y < trayY + 24) {
         const tw = Math.min(W / 3 - 8, 128);
@@ -1432,9 +1432,9 @@ export default function EmplataGame(props: {
           }
         }
       }
-      // cartas
+      // platos: el fideo se estira hasta el INGREDIENTE en su plato (arriba del ítem)
       const c = cartaEn(x, y);
-      if (c) tapIngrediente(c.ing, c.cx, cardY);
+      if (c) tapIngrediente(c.ing, c.cx, cardY - cardH / 2 + 42);
     };
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
@@ -2437,77 +2437,110 @@ export default function EmplataGame(props: {
         ctx.translate(cx, cardY + bob + (1 - ea) * 30);
         ctx.scale(press, press);
         ctx.globalAlpha = ea;
-        // carta (coordenadas locales: centro en 0,0)
-        ctx.fillStyle = "rgba(30,16,8,0.35)";
-        ctx.beginPath();
-        ctx.roundRect(-cardW / 2 + 2, -cardH / 2 + 4, cardW, cardH, 14);
-        ctx.fill();
-        ctx.fillStyle = selr ? "#FFF3D6" : "#FBF1DE";
-        ctx.beginPath();
-        ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 14);
-        ctx.fill();
+        // ===== PLATO de cerámica (mise-en-place): el ingrediente servido en su plato =====
+        // el TAMAÑO del plato cambia por categoría (base grande → topping pequeño)
+        const plCat = ing.categoria;
+        const prx = plCat === "base" ? 43 : plCat === "proteina" ? 38 : 33;
+        const pry = prx * 0.42;
+        const ply = -cardH / 2 + 42; // el plato arriba; nombre/precio abajo
+        // glow ámbar de selección tras el plato
         if (selr) {
-          ctx.lineWidth = 3 + Math.sin(wd.t * 0.09 + k) * 0.6;
-          ctx.strokeStyle = "#F2A516";
+          const gsz = prx + 8 + Math.sin(wd.t * 0.09 + k) * 1.5;
+          const gg = ctx.createRadialGradient(0, ply, 2, 0, ply, gsz * 1.7);
+          gg.addColorStop(0, "rgba(242,165,22,0.45)");
+          gg.addColorStop(1, "rgba(242,165,22,0)");
+          ctx.fillStyle = gg;
           ctx.beginPath();
-          ctx.roundRect(-cardW / 2 + 1.5, -cardH / 2 + 1.5, cardW - 3, cardH - 3, 12);
-          ctx.stroke();
+          ctx.ellipse(0, ply, gsz * 1.7, gsz * 0.95, 0, 0, TAU);
+          ctx.fill();
         }
-        // sprite (los elegidos se mecen contentos)
+        // sombra de contacto del plato en la bandeja
+        ctx.fillStyle = "rgba(18,9,3,0.32)";
+        ctx.beginPath();
+        ctx.ellipse(2, ply + pry * 0.85, prx * 1.06, pry * 0.66, 0, 0, TAU);
+        ctx.fill();
+        // cuerpo de cerámica (luz ↖)
+        const pg = ctx.createRadialGradient(-prx * 0.32, ply - pry * 0.55, 2, 0, ply, prx * 1.15);
+        pg.addColorStop(0, "#FFFDF7");
+        pg.addColorStop(0.68, "#F2E7CF");
+        pg.addColorStop(1, "#D8C6A2");
+        ctx.fillStyle = pg;
+        ctx.beginPath();
+        ctx.ellipse(0, ply, prx, pry, 0, 0, TAU);
+        ctx.fill();
+        // aro exterior + filo iluminado ↖ + well interior (relieve del plato)
+        ctx.strokeStyle = "rgba(120,90,50,0.22)";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(0, ply, prx, pry, 0, 0, TAU);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(255,255,255,0.6)";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(0, ply - 0.5, prx, pry, 0, Math.PI * 1.02, Math.PI * 1.78);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(120,90,50,0.12)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(0, ply, prx * 0.62, pry * 0.62, 0, 0, TAU);
+        ctx.stroke();
+        // el INGREDIENTE servido sobre el plato (se mece contento si está elegido)
         const spr = wd.sprites.get(ing.id);
         if (spr) {
+          const isz = plCat === "base" ? 70 : plCat === "proteina" ? 62 : 56;
+          ctx.save();
+          ctx.translate(0, ply - pry * 0.4 + (selr ? Math.sin(wd.t * 0.09 + k * 1.3) * 2 : 0));
+          if (selr) ctx.rotate(Math.sin(wd.t * 0.09 + k * 1.3) * 0.06);
+          ctx.globalAlpha = ea * 0.18;
+          ctx.fillStyle = "#5A3A18";
+          ctx.beginPath();
+          ctx.ellipse(2, isz * 0.3, isz * 0.28, isz * 0.1, 0, 0, TAU);
+          ctx.fill();
           ctx.globalAlpha = ea * (ing.agotado ? 0.35 : 1);
-          if (selr) {
-            ctx.save();
-            ctx.translate(0, -cardH / 2 + 37);
-            ctx.rotate(Math.sin(wd.t * 0.09 + k * 1.3) * 0.07);
-            ctx.drawImage(spr, -33, -33, 66, 66);
-            ctx.restore();
-          } else {
-            ctx.drawImage(spr, -33, -cardH / 2 + 4, 66, 66);
-          }
+          ctx.drawImage(spr, -isz / 2, -isz / 2, isz, isz);
+          ctx.restore();
           ctx.globalAlpha = ea;
         }
-        // nombre (2 líneas máx)
+        // nombre (crema sobre la bandeja oscura, 2 líneas máx)
         ctx.font = fontB(10, 700);
         ctx.textAlign = "center";
-        ctx.fillStyle = "#1E1611";
+        ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.5)" : "#FBF1DE";
         const words = ing.nombre.split(" ");
-        const l1 = words.slice(0, 2).join(" ").slice(0, 14);
-        const l2 = words.slice(2).join(" ").slice(0, 14);
-        ctx.fillText(l1, 0, cardH / 2 - (l2 ? 34 : 26));
-        if (l2) ctx.fillText(l2, 0, cardH / 2 - 24);
-        // precio — disciplina de color: espresso, nunca rojo; GRATIS como chip kraft
+        const l1 = words.slice(0, 2).join(" ").slice(0, 15);
+        const l2 = words.slice(2).join(" ").slice(0, 15);
+        ctx.fillText(l1, 0, cardH / 2 - (l2 ? 30 : 22));
+        if (l2) ctx.fillText(l2, 0, cardH / 2 - 20);
+        // precio / GRATIS chip
         const idxT = sel.current.toppingIds.indexOf(ing.id);
         const esGratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
         ctx.font = fontB(10, 800);
         if (esGratis && !ing.agotado) {
           ctx.fillStyle = "#C69A5B";
           ctx.beginPath();
-          ctx.roundRect(-24, cardH / 2 - 20, 48, 15, 8);
+          ctx.roundRect(-24, cardH / 2 - 9, 48, 15, 8);
           ctx.fill();
           ctx.fillStyle = "#2A1C0E";
-          ctx.fillText("GRATIS", 0, cardH / 2 - 11.5);
+          ctx.fillText("GRATIS", 0, cardH / 2 - 0.5);
         } else {
-          ctx.fillStyle = ing.agotado ? "#9A8C7A" : "#5A3A18";
+          ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.45)" : "#F4D08A";
           ctx.fillText(
             ing.agotado ? "AGOTADO" : ing.precio > 0 ? formatCOP(ing.precio) : "—",
             0,
-            cardH / 2 - 11,
+            cardH / 2 - 2,
           );
         }
-        // check
+        // check de seleccionado (en el borde del plato)
         if (selr) {
           ctx.fillStyle = "#F2A516";
           ctx.beginPath();
-          ctx.arc(cardW / 2 - 13, -cardH / 2 + 13, 9, 0, TAU);
+          ctx.arc(prx - 4, ply - pry - 1, 9, 0, TAU);
           ctx.fill();
           ctx.strokeStyle = "#1E1611";
           ctx.lineWidth = 2.2;
           ctx.beginPath();
-          ctx.moveTo(cardW / 2 - 17, -cardH / 2 + 13);
-          ctx.lineTo(cardW / 2 - 14, -cardH / 2 + 16.5);
-          ctx.lineTo(cardW / 2 - 9, -cardH / 2 + 9);
+          ctx.moveTo(prx - 8, ply - pry - 1);
+          ctx.lineTo(prx - 5, ply - pry + 2.5);
+          ctx.lineTo(prx, ply - pry - 5);
           ctx.stroke();
         }
         ctx.restore();
