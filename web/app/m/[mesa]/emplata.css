@@ -50,7 +50,7 @@
   font-family: var(--font-body, system-ui);
   font-weight: 700;
   font-size: 12px;
-  color: rgba(30, 22, 17, 0.5); /* MESA en espresso tenue, no rojo (disciplina de color) */
+  color: rgba(30, 22, 17, 0.62); /* MESA en espresso tenue (0.5 fallaba AA), no rojo */
 }
 .emp-top__actions {
   display: flex;
@@ -409,28 +409,58 @@
   z-index: 30;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
-  background: rgba(251, 241, 222, 0.94);
+  gap: 12px;
+  padding: 12px 14px calc(11px + env(safe-area-inset-bottom));
+  /* EL PASE DE COCINA: papel de comanda kraft (lavado kraft al pie), no panel plano */
+  background:
+    linear-gradient(180deg, rgba(251, 241, 222, 0.96) 0%, rgba(251, 241, 222, 0.96) 55%, color-mix(in srgb, var(--kraft) 16%, rgba(251, 241, 222, 0.96)) 100%);
   backdrop-filter: blur(10px);
-  border-top: 1px solid rgba(30, 22, 17, 0.1);
+  border-top: none;
+  box-shadow: 0 -6px 16px rgba(30, 22, 17, 0.1); /* papel despegado de la mesa, no pegado */
+}
+/* borde superior = riel del pase (hilo tomate) + troquel perforado del ticket de cocina */
+.emp-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  background:
+    linear-gradient(var(--tomate), var(--tomate)) top / 100% 2.5px no-repeat,
+    repeating-linear-gradient(90deg, rgba(30, 22, 17, 0.2) 0 6px, transparent 6px 12px) bottom / 100% 1.5px no-repeat;
+  pointer-events: none;
 }
 .emp-total {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
+  padding-right: 12px;
+  border-right: 1.5px dotted rgba(30, 22, 17, 0.16); /* campo de ticket */
 }
 .emp-total small {
-  font-size: 10.5px;
-  color: rgba(30, 22, 17, 0.55);
+  font-size: 12px; /* dato fiscal legible (antes 10.5px al 55% = falla AA); envuelve, no se corta el impuesto */
+  line-height: 1.25;
+  color: rgba(30, 22, 17, 0.72);
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+.emp-total__row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.emp-total__label {
+  font-family: var(--font-body, system-ui);
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: rgba(30, 22, 17, 0.5);
 }
 .emp-total b {
   font-family: var(--font-display, Georgia, serif);
-  font-size: 20px;
+  font-size: 21px;
+  font-variant-numeric: tabular-nums; /* los pesos no bailan al sumar toppings/proteínas */
 }
 .emp-cta {
   display: inline-flex;
@@ -456,6 +486,12 @@
 }
 .emp-cta:active {
   transform: translateY(1px) scale(0.97);
+}
+.emp-cta__sello {
+  transition: transform 0.12s ease;
+}
+.emp-cta:active .emp-cta__sello {
+  transform: scale(0.86); /* prensa de lacre al confirmar (encadena con el cierre origami) */
 }
 .emp-cta:disabled {
   /* deshabilitado = kraft desaturado (nunca ámbar desvaído que parezca roto) */
@@ -484,6 +520,12 @@
 @media (prefers-reduced-motion: reduce) {
   .emp-cta--vivo:not(:disabled) {
     animation: none;
+  }
+  .emp-cta__sello {
+    transition: none;
+  }
+  .emp-cta:active .emp-cta__sello {
+    transform: none;
   }
 }
 
@@ -622,13 +664,21 @@
   flex-wrap: wrap;
 }
 .emp-espera__id {
-  font-size: 12px;
-  color: rgba(30, 22, 17, 0.7);
+  font-size: 12.5px;
+  color: rgba(30, 22, 17, 0.78);
   white-space: nowrap;
+}
+.emp-espera__k {
+  font-family: var(--font-body, system-ui);
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: rgba(30, 22, 17, 0.5);
 }
 .emp-espera__id b {
   font-family: var(--font-display, Georgia, serif);
   color: var(--espresso);
+  font-variant-numeric: tabular-nums;
 }
 .emp-pasos {
   display: flex;
@@ -641,9 +691,9 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
-  color: rgba(30, 22, 17, 0.35);
+  color: rgba(30, 22, 17, 0.5); /* pasos pendientes: 0.35 era casi ilegible */
 }
 .emp-pasos li i {
   width: 9px;

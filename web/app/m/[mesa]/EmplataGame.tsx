@@ -736,6 +736,13 @@ const IcoCompartir = () => (
     <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7" />
   </svg>
 );
+/** Sello de lacre con swirl de fideo — EMPLATAR = SELLAR la caja (encadena con el cierre origami). */
+const IcoSello = () => (
+  <svg className="emp-cta__sello" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M15 10a3.2 3.2 0 1 0 .4 3.2" />
+  </svg>
+);
 
 export default function EmplataGame(props: {
   mesa: number;
@@ -2702,14 +2709,15 @@ export default function EmplataGame(props: {
       for (let k = 0; k < 3; k++) {
         const tx = W / 2 + (k - 1) * (tw + 8);
         const activo = sel.current.tab === k;
-        ctx.fillStyle = activo ? "#F2A516" : "rgba(251,241,222,0.16)";
+        // inactiva: píldora OSCURA (no crema-sobre-crema translúcido que casi no se lee sobre la madera clara)
+        ctx.fillStyle = activo ? "#F2A516" : "rgba(24,15,7,0.42)";
         ctx.beginPath();
         ctx.roundRect(tx - tw / 2, trayY - 22, tw, 40, 999);
         ctx.fill();
         ctx.font = fontB(12, 800);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = activo ? "#1E1611" : "rgba(251,241,222,0.85)";
+        ctx.fillStyle = activo ? "#1E1611" : "rgba(255,247,230,0.94)";
         ctx.fillText(tabsTxt[k], tx, trayY - 2);
         // check de completado (ámbar, disciplina de color — nunca verde-UI)
         const done = k === 0 ? !!sel.current.baseId : k === 1 ? sel.current.proteinaIds.length > 0 : sel.current.toppingIds.length > 0;
@@ -2812,31 +2820,37 @@ export default function EmplataGame(props: {
           ctx.restore();
           ctx.globalAlpha = ea;
         }
-        // nombre (crema sobre la bandeja oscura, 2 líneas máx con elipsis real vía measureText)
-        ctx.font = fontB(12, 700);
+        // nombre (crema sobre la bandeja oscura, 2 líneas máx con elipsis real) + HALO de defensa
+        ctx.font = fontB(13, 700);
         ctx.textAlign = "center";
+        ctx.shadowColor = "rgba(18,9,3,0.7)"; // no se pierde si un sprite claro o el pool de luz asoma detrás
+        ctx.shadowBlur = 4;
         ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.5)" : "#FBF1DE";
         const [l1, l2] = wrap2(ctx, ing.nombre, cardW - 14);
         ctx.fillText(l1, 0, cardH / 2 - (l2 ? 31 : 23));
         if (l2) ctx.fillText(l2, 0, cardH / 2 - 19);
+        ctx.shadowBlur = 0;
         // precio / GRATIS chip (oro sobre bandeja oscura — legible; el espresso desaparecería)
         const idxT = sel.current.toppingIds.indexOf(ing.id);
         const esGratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
-        ctx.font = fontB(11, 800);
+        ctx.font = fontB(12, 800);
         if (esGratis && !ing.agotado) {
           ctx.fillStyle = "#C69A5B";
           ctx.beginPath();
-          ctx.roundRect(-24, cardH / 2 - 9, 48, 15, 8);
+          ctx.roundRect(-26, cardH / 2 - 9, 52, 16, 8);
           ctx.fill();
           ctx.fillStyle = "#2A1C0E";
           ctx.fillText("GRATIS", 0, cardH / 2 - 0.5);
         } else {
-          ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.45)" : "#F4D08A";
+          ctx.shadowColor = "rgba(18,9,3,0.7)";
+          ctx.shadowBlur = 4;
+          ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.55)" : "#F6D79A";
           ctx.fillText(
             ing.agotado ? "AGOTADO" : ing.precio > 0 ? formatCOP(ing.precio) : "—",
             0,
             cardH / 2 - 2,
           );
+          ctx.shadowBlur = 0;
         }
         // check de seleccionado (en el borde del plato)
         if (selr) {
@@ -3477,11 +3491,14 @@ export default function EmplataGame(props: {
           <div className="emp-total">
             <small>
               {tops.length > incluidos
-                ? `${incluidos} gratis · ${tops.length - incluidos} con precio`
-                : `toppings gratis: ${tops.length}/${incluidos}`}
+                ? `${incluidos} toppings gratis · ${tops.length - incluidos} con precio`
+                : `${tops.length}/${incluidos} toppings de la casa`}
               {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
             </small>
-            <b>{formatCOP(total)}</b>
+            <div className="emp-total__row">
+              <span className="emp-total__label">TOTAL</span>
+              <b>{formatCOP(total)}</b>
+            </div>
           </div>
           <button
             type="button"
@@ -3489,14 +3506,14 @@ export default function EmplataGame(props: {
             onClick={confirmar}
             disabled={!abierto || enviando || !baseId}
           >
-            {enviando ? "Cerrando…" : "EMPLATAR →"}
+            {enviando ? "SELLANDO…" : (<><IcoSello /> EMPLATAR</>)}
           </button>
         </footer>
       ) : (
         <footer className="emp-bar emp-bar--game emp-bar--espera">
           <div className="emp-espera">
             <div className="emp-espera__id">
-              Pedido <b>#{pedido.id}</b> · {formatCOP(pedido.total)}
+              <span className="emp-espera__k">COMANDA</span> <b>#{pedido.id}</b> · {formatCOP(pedido.total)}
             </div>
             <ol className="emp-pasos" aria-hidden>
               {(["recibido", "cocina", "listo"] as EstadoPedido[]).map((e, k) => (
