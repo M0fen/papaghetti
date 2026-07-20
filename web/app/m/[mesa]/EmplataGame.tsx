@@ -510,6 +510,14 @@ export default function EmplataGame(props: {
     sel.current = { baseId, proteinaId, toppingIds, tab };
   }, [baseId, proteinaId, toppingIds, tab]);
 
+  // W4: la escena NO se desmonta al pedir. faseRef gobierna el loop; estadoRef lo lee sin re-render.
+  const faseRef = useRef<"arma" | "espera">("arma");
+  const estadoRef = useRef<EstadoPedido>("recibido");
+  const estadoAnimRef = useRef<{ last: EstadoPedido; campana: boolean }>({ last: "recibido", campana: false });
+  useEffect(() => {
+    estadoRef.current = estado;
+  }, [estado]);
+
   // ------- precio (espejo de crearPedido) -------
   const all = [...bases, ...proteinas, ...toppings];
   const find = (id: string) => all.find((i) => i.id === id);
@@ -650,6 +658,9 @@ export default function EmplataGame(props: {
       });
       setPedido({ id: r.id, total: r.total });
       setEstado(r.estado as EstadoPedido);
+      estadoRef.current = r.estado as EstadoPedido;
+      estadoAnimRef.current = { last: r.estado as EstadoPedido, campana: false };
+      faseRef.current = "espera"; // el canvas NO se desmonta: pasa a teatro de espera
     } catch {
       world.current.folding = false;
       world.current.fold = 0;
@@ -672,7 +683,7 @@ export default function EmplataGame(props: {
      ======================================================================= */
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || pedido) return;
+    if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
     let W = 0;
@@ -944,6 +955,7 @@ export default function EmplataGame(props: {
 
     const onDown = (e: PointerEvent) => {
       s.unlock();
+      if (faseRef.current !== "arma") return; // en espera la escena no recibe toques
       const r = canvas.getBoundingClientRect();
       downX = e.clientX - r.left;
       downY = e.clientY - r.top;
@@ -968,6 +980,7 @@ export default function EmplataGame(props: {
       lastX = x;
     };
     const onUp = (e: PointerEvent) => {
+      if (faseRef.current !== "arma") return;
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left;
       const y = e.clientY - r.top;
@@ -1706,6 +1719,8 @@ export default function EmplataGame(props: {
       }
 
       // ===== BANDEJA (pestañas + cartas) — se desliza fuera al cerrar (foco en la caja) =====
+      const enArma = faseRef.current === "arma";
+      if (enArma) {
       ctx.save();
       if (foco > 0.001) ctx.translate(0, foco * (H - trayY + 40));
       // panel
@@ -1868,6 +1883,105 @@ export default function EmplataGame(props: {
         onda(tx0, tx0 + th);
       }
       ctx.restore(); // fin del slide de la bandeja
+      } // fin de enArma (bandeja)
+
+      // ===== TEATRO DE ESPERA (W4): el fideo mesero actúa el estado REAL del KDS =====
+      if (faseRef.current === "espera") {
+        const est = estadoRef.current;
+        const by = boxY + entY + focoY;
+        // transición de estado → FX (una sola vez por cambio)
+        if (estadoAnimRef.current.last !== est) {
+          estadoAnimRef.current.last = est;
+          if (est === "cocina") {
+            s.ruido(0.2, 0.05, 700); // sizzle
+          } else if (est === "listo") {
+            s.tone(1568, 0.4, "triangle", 0.12, undefined, 0);
+            s.tone(2093, 0.5, "sine", 0.08, undefined, 0.08);
+            if (navigator.vibrate) navigator.vibrate([12, 30, 8]);
+            for (let k = 0; k < 14; k++) {
+              const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
+              const sp = 3 + Math.random() * 4;
+              wd.chispas.push({ x: boxX, y: by - boxH * 0.1, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, rot: Math.random() * TAU, vr: (Math.random() - 0.5) * 0.4, life: 1 });
+            }
+          }
+        }
+        // pulso cálido cuando está EN COCINA (el horno respira)
+        if (est === "cocina") {
+          const pulso = 0.5 + 0.5 * Math.sin(wd.t * 0.09);
+          const glow = ctx.createRadialGradient(boxX, by, 10, boxX, by, boxW * 0.7);
+          glow.addColorStop(0, `rgba(242,150,22,${0.05 + pulso * 0.08})`);
+          glow.addColorStop(1, "rgba(242,150,22,0)");
+          ctx.fillStyle = glow;
+          ctx.fillRect(0, 0, W, H);
+          if (!reduce && Math.random() < 0.5 * df)
+            wd.puffs.push({ x: boxX + (Math.random() - 0.5) * boxW * 0.5, y: by - boxH * 0.28, life: 1, max: 70, r: 6 + Math.random() * 5, tipo: "vapor" });
+        }
+        // el FIDEO MESERO camarero: asoma junto a la caja y actúa el estado
+        const wob = Math.sin(wd.t * 0.06);
+        const anchXe = boxX - boxW * 0.32;
+        const anchYe = by - boxH * 0.02;
+        let tipXe = anchXe;
+        let tipYe = by - boxH * 0.4;
+        let ticket = false;
+        if (est === "recibido") {
+          tipXe = boxX - boxW * 0.08 + wob * 8; // lleva la comanda a la caja
+          tipYe = by - boxH * 0.52;
+          ticket = true;
+        } else if (est === "cocina") {
+          tipXe = anchXe + 6 + wob * 12; // atiza el horno (sube y baja)
+          tipYe = by - boxH * 0.5 + Math.sin(wd.t * 0.13) * 12;
+        } else if (est === "listo") {
+          tipXe = boxX + Math.sin(wd.t * 0.26) * 18; // toca la campanita
+          tipYe = by - boxH * 0.62;
+        } else {
+          tipXe = anchXe - 10; // reverencia y se va
+          tipYe = by - boxH * 0.24 + Math.sin(wd.t * 0.05) * 6;
+        }
+        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, 0.4);
+        // la comanda kraft que lleva el fideo (recibido)
+        if (ticket) {
+          ctx.save();
+          ctx.translate(tipXe + 6, tipYe + 10);
+          ctx.rotate(0.2 + wob * 0.05);
+          ctx.fillStyle = "#EBD3A6";
+          ctx.beginPath();
+          ctx.roundRect(-7, -9, 14, 18, 2);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(120,80,40,0.5)";
+          ctx.lineWidth = 0.8;
+          for (let li = -5; li <= 5; li += 3) {
+            ctx.beginPath();
+            ctx.moveTo(-5, li);
+            ctx.lineTo(5, li);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+        // la campanita (listo)
+        if (est === "listo") {
+          const ring = Math.abs(Math.sin(wd.t * 0.26));
+          ctx.save();
+          ctx.translate(tipXe, tipYe - 10);
+          ctx.fillStyle = "#E8B54E";
+          ctx.beginPath();
+          ctx.moveTo(-6, 4);
+          ctx.quadraticCurveTo(-6, -6, 0, -6);
+          ctx.quadraticCurveTo(6, -6, 6, 4);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#B67C22";
+          ctx.beginPath();
+          ctx.arc(0, 5, 1.6, 0, TAU);
+          ctx.fill();
+          // ondas de sonido de la campana
+          ctx.strokeStyle = `rgba(242,165,22,${0.6 * ring})`;
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(0, -1, 9 + ring * 3, -0.8, 0.8);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
 
       // ===== EL FIDEO MESERO (encima de la bandeja: agarra sobre las cartas) =====
       const mouthYBase = boxY - boxH * 0.34;
@@ -2041,69 +2155,203 @@ export default function EmplataGame(props: {
       canvas.removeEventListener("pointerup", onUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pedido, bases, proteinas, toppings, incluidos]);
+  }, [bases, proteinas, toppings, incluidos]);
 
-  /* ======================= DOM shell (accesible) ======================= */
-  if (pedido) {
-    return (
-      <div className="emp-root">
-        <header className="emp-top">
-          <div className="emp-top__brand">
-            <b>{negocio.toUpperCase()}</b>
-            <span>· MESA {mesa}</span>
-          </div>
-        </header>
-        <main className="emp-exito">
-          <div className="emp-caja emp-caja--cerrada" aria-hidden>
-            <div className="emp-caja__cuerpo">
-              <span className="emp-caja__marca">PAPAGHETTI</span>
-            </div>
-            <i className="emp-caja__flap emp-caja__flap--a" />
-            <i className="emp-caja__flap emp-caja__flap--b" />
-          </div>
-          <h1>¡A la cocina!</h1>
-          <p className="emp-exito__id">
-            Pedido <b>#{pedido.id}</b> · Mesa {mesa} · {formatCOP(pedido.total)}
-          </p>
-          <ol className="emp-estado" aria-label="Estado del pedido">
-            {(["recibido", "cocina", "listo"] as EstadoPedido[]).map((e, k) => {
-              const orden: EstadoPedido[] = ["recibido", "cocina", "listo", "entregado"];
-              const done = orden.indexOf(estado) >= k;
-              const activo = orden.indexOf(estado) === k;
-              return (
-                <li key={e} className={`${done ? "done" : ""} ${activo ? "activo" : ""}`}>
-                  <i>{k === 0 ? "🧾" : k === 1 ? "🔥" : "🔔"}</i>
-                  {estadoLabel[e]}
-                </li>
-              );
-            })}
-          </ol>
-          {estado === "listo" && <p className="emp-listo">¡Tu caja está lista! 🎉</p>}
-          <button
-            type="button"
-            className="emp-cta emp-cta--sec"
-            onClick={() => {
-              setPedido(null);
-              setToppingIds([]);
-              setProteinaId("");
-              const wd = world.current;
-              wd.pila = [];
-              wd.fideos = [];
-              wd.vuelos = [];
-              wd.chispas = [];
-              wd.fold = 0;
-              wd.folding = false;
-              wd.selloHecho = false;
-              wd.combo = 0;
-            }}
-          >
-            Pedir otra caja
-          </button>
-        </main>
-      </div>
-    );
-  }
+  // W4: al pedir otra caja, la escena canvas se reinicia sin desmontar (fase → arma)
+  const otraCaja = useCallback(() => {
+    const wd = world.current;
+    wd.pila = [];
+    wd.fideos = [];
+    wd.vuelos = [];
+    wd.chispas = [];
+    wd.ondas = [];
+    wd.pops = [];
+    wd.fold = 0;
+    wd.folding = false;
+    wd.selloHecho = false;
+    wd.selloScale = 0;
+    wd.hitStop = 0;
+    wd.combo = 0;
+    wd.lastAct = wd.t;
+    faseRef.current = "arma";
+    setPedido(null);
+    setToppingIds([]);
+    setProteinaId("");
+    setEstado("recibido");
+    estadoRef.current = "recibido";
+    estadoAnimRef.current = { last: "recibido", campana: false };
+  }, []);
 
+  const ordenIdx = (["recibido", "cocina", "listo", "entregado"] as EstadoPedido[]).indexOf(estado);
+
+  // W5: compone una FOTO vertical 1080×1920 del emplatado y la comparte (WhatsApp/Stories).
+  const [compartiendo, setCompartiendo] = useState(false);
+  const compartirCaja = useCallback(async () => {
+    if (!pedido) return;
+    setCompartiendo(true);
+    try {
+      const cv = document.createElement("canvas");
+      cv.width = 1080;
+      cv.height = 1920;
+      const g = cv.getContext("2d")!;
+      // fondo cálido + pool de luz ↖
+      g.fillStyle = "#F6E7CB";
+      g.fillRect(0, 0, 1080, 1920);
+      const luz = g.createRadialGradient(360, 240, 40, 480, 640, 1500);
+      luz.addColorStop(0, "rgba(255,247,224,0.9)");
+      luz.addColorStop(1, "rgba(120,80,40,0.14)");
+      g.fillStyle = luz;
+      g.fillRect(0, 0, 1080, 1920);
+      // grano
+      const gc = document.createElement("canvas");
+      gc.width = 80;
+      gc.height = 80;
+      const gg = gc.getContext("2d")!;
+      const im = gg.createImageData(80, 80);
+      for (let i = 0; i < im.data.length; i += 4) {
+        const v = 128 + (Math.random() * 2 - 1) * 128;
+        im.data[i] = im.data[i + 1] = im.data[i + 2] = v;
+        im.data[i + 3] = 9;
+      }
+      gg.putImageData(im, 0, 0);
+      const pat = g.createPattern(gc, "repeat");
+      if (pat) {
+        g.fillStyle = pat;
+        g.fillRect(0, 0, 1080, 1920);
+      }
+      // título
+      g.textAlign = "center";
+      g.fillStyle = "#1E1611";
+      g.font = `800 60px ${FONT_DISPLAY}`;
+      g.fillText("MI CAJA PAPAGHETTI", 540, 200);
+      g.font = `700 34px ${FONT_BODY}`;
+      g.fillStyle = "rgba(30,22,17,0.55)";
+      g.fillText(`MESA ${mesa}`, 540, 250);
+
+      // caja kraft con la comida (vista 3/4, grande)
+      const cx = 540;
+      const cyb = 760;
+      const bw = 720;
+      const bh = 520;
+      g.save();
+      g.translate(cx, cyb);
+      // sombra
+      g.fillStyle = "rgba(70,40,16,0.25)";
+      g.beginPath();
+      g.ellipse(10, bh * 0.5, bw * 0.5, bh * 0.11, 0, 0, TAU);
+      g.fill();
+      // pared trasera interior
+      const back = g.createLinearGradient(0, -bh * 0.42, 0, bh * 0.1);
+      back.addColorStop(0, "#8A6230");
+      back.addColorStop(1, "#6B4A20");
+      g.fillStyle = back;
+      g.beginPath();
+      g.roundRect(-bw * 0.42, -bh * 0.42, bw * 0.84, bh * 0.5, 16);
+      g.fill();
+      // suelo
+      const fl = g.createLinearGradient(-bw * 0.3, -bh * 0.1, bw * 0.3, bh * 0.05);
+      fl.addColorStop(0, "#A6793C");
+      fl.addColorStop(1, "#6A4620");
+      g.fillStyle = fl;
+      g.beginPath();
+      g.ellipse(0, 0, bw * 0.4, bh * 0.15, 0, 0, TAU);
+      g.fill();
+      // comida: base ancha + resto
+      const drawSpr = (id: string, x: number, y: number, sc: number) => {
+        const sp = world.current.sprites.get(id);
+        if (sp) g.drawImage(sp, x - sc / 2, y - sc / 2, sc, sc);
+      };
+      if (baseId) drawSpr(baseId, 0, -bh * 0.02, 360);
+      if (proteinaId) drawSpr(proteinaId, bw * 0.02, bh * 0.02, 300);
+      const tl = toppingIds.map(find).filter(Boolean) as Ingrediente[];
+      const FAN = [-0.5, 0.5, 0, -0.85, 0.85, -0.25, 0.25];
+      tl.forEach((t, k) => drawSpr(t.id, FAN[k % 7] * bw * 0.28, -bh * 0.14 - (k % 3) * bh * 0.06, 210));
+      // banda frontal kraft
+      const kg = g.createLinearGradient(-bw / 2, 0, bw / 2, bh * 0.3);
+      kg.addColorStop(0, "#D2A868");
+      kg.addColorStop(1, "#A87B42");
+      g.fillStyle = kg;
+      g.beginPath();
+      g.roundRect(-bw / 2, bh * 0.06, bw, bh * 0.34, 16);
+      g.fill();
+      g.fillStyle = "rgba(90,58,24,0.9)";
+      g.font = `800 30px ${FONT_DISPLAY}`;
+      g.fillText("P A P A G H E T T I", 0, bh * 0.25);
+      // sello PG
+      g.translate(bw * 0.3, -bh * 0.28);
+      g.fillStyle = "#C8321E";
+      g.beginPath();
+      for (let k = 0; k <= 44; k++) {
+        const a = (k / 44) * TAU;
+        const rr = 46 * (1 + 0.08 * Math.sin(a * 11));
+        const px = Math.cos(a) * rr;
+        const py = Math.sin(a) * rr;
+        if (k === 0) g.moveTo(px, py);
+        else g.lineTo(px, py);
+      }
+      g.closePath();
+      g.fill();
+      g.fillStyle = "#FBE7DD";
+      g.font = `800 34px ${FONT_DISPLAY}`;
+      g.fillText("PG", 0, 12);
+      g.restore();
+
+      // lista de ingredientes
+      g.textAlign = "center";
+      g.fillStyle = "#1E1611";
+      g.font = `800 40px ${FONT_DISPLAY}`;
+      const nombreBase = find(baseId)?.nombre ?? "";
+      g.fillText(nombreBase.toUpperCase(), 540, 1160);
+      g.font = `600 32px ${FONT_BODY}`;
+      g.fillStyle = "rgba(30,22,17,0.7)";
+      const extras = [find(proteinaId)?.nombre, ...tl.map((t) => t.nombre)].filter(Boolean) as string[];
+      let ly = 1220;
+      for (const ex of extras.slice(0, 6)) {
+        g.fillText(`+ ${ex}`, 540, ly);
+        ly += 46;
+      }
+      // total + id
+      g.fillStyle = "#1E1611";
+      g.font = `800 56px ${FONT_DISPLAY}`;
+      g.fillText(formatCOP(pedido.total), 540, 1560);
+      g.fillStyle = "rgba(30,22,17,0.45)";
+      g.font = `600 28px ${FONT_BODY}`;
+      g.fillText(`Pedido #${pedido.id}`, 540, 1610);
+      // footer marca
+      g.fillStyle = "var(--ambar)";
+      g.fillStyle = "#F2A516";
+      g.beginPath();
+      g.roundRect(540 - 260, 1720, 520, 76, 38);
+      g.fill();
+      g.fillStyle = "#1E1611";
+      g.font = `800 34px ${FONT_DISPLAY}`;
+      g.fillText("papaghetti.vercel.app", 540, 1770);
+
+      const blob: Blob | null = await new Promise((res) => cv.toBlob(res, "image/png"));
+      if (!blob) return;
+      const file = new File([blob], "mi-caja-papaghetti.png", { type: "image/png" });
+      const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean };
+      if (nav.canShare?.({ files: [file] }) && navigator.share) {
+        await navigator.share({ files: [file], title: "Mi caja Papaghetti", text: "Armé mi caja en Papaghetti 🍝" });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "mi-caja-papaghetti.png";
+        a.click();
+        URL.revokeObjectURL(url);
+        window.open("https://wa.me/?text=" + encodeURIComponent("Armé mi caja en Papaghetti 🍝 papaghetti.vercel.app"), "_blank");
+      }
+    } catch {
+      /* usuario canceló el share o no soportado */
+    } finally {
+      setCompartiendo(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedido, mesa, baseId, proteinaId, toppingIds]);
+
+  /* Un solo árbol DOM: el canvas NUNCA se desmonta (arma → teatro de espera). La barra
+     inferior cambia; un aria-live anuncia el estado para lectores de pantalla. */
   return (
     <div className="emp-game" onPointerDown={s.unlock}>
       <header className="emp-top emp-top--game">
@@ -2115,32 +2363,65 @@ export default function EmplataGame(props: {
           <button type="button" className="emp-mini" onClick={s.toggleMute} aria-label="Sonido">
             {s.mute ? "🔇" : "🔊"}
           </button>
-          <button type="button" className="emp-mini emp-modo" onClick={props.onModoRapido}>
-            ⚡ PEDIR YA
-          </button>
+          {!pedido && (
+            <button type="button" className="emp-mini emp-modo" onClick={props.onModoRapido}>
+              ⚡ PEDIR YA
+            </button>
+          )}
         </div>
       </header>
-      {!abierto && <div className="emp-cerrado emp-cerrado--game">😴 Estamos cerrados ahora.</div>}
+      {!abierto && !pedido && <div className="emp-cerrado emp-cerrado--game">😴 Estamos cerrados ahora.</div>}
       <canvas ref={canvasRef} className="emp-canvas" aria-label="Arma tu caja Papaghetti" />
-      <footer className="emp-bar emp-bar--game">
-        <div className="emp-total">
-          <small>
-            {tops.length > incluidos
-              ? `${incluidos} gratis · ${tops.length - incluidos} con precio`
-              : `toppings gratis: ${tops.length}/${incluidos}`}
-            {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
-          </small>
-          <b>{formatCOP(total)}</b>
-        </div>
-        <button
-          type="button"
-          className={`emp-cta ${abierto && baseId && !enviando ? "emp-cta--vivo" : ""}`}
-          onClick={confirmar}
-          disabled={!abierto || enviando || !baseId}
-        >
-          {enviando ? "Cerrando…" : "EMPLATAR →"}
-        </button>
-      </footer>
+
+      <p className="emp-sr" aria-live="polite">
+        {pedido ? `Pedido ${pedido.id}, estado: ${estadoLabel[estado]}` : ""}
+      </p>
+
+      {!pedido ? (
+        <footer className="emp-bar emp-bar--game">
+          <div className="emp-total">
+            <small>
+              {tops.length > incluidos
+                ? `${incluidos} gratis · ${tops.length - incluidos} con precio`
+                : `toppings gratis: ${tops.length}/${incluidos}`}
+              {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
+            </small>
+            <b>{formatCOP(total)}</b>
+          </div>
+          <button
+            type="button"
+            className={`emp-cta ${abierto && baseId && !enviando ? "emp-cta--vivo" : ""}`}
+            onClick={confirmar}
+            disabled={!abierto || enviando || !baseId}
+          >
+            {enviando ? "Cerrando…" : "EMPLATAR →"}
+          </button>
+        </footer>
+      ) : (
+        <footer className="emp-bar emp-bar--game emp-bar--espera">
+          <div className="emp-espera">
+            <div className="emp-espera__id">
+              Pedido <b>#{pedido.id}</b> · {formatCOP(pedido.total)}
+            </div>
+            <ol className="emp-pasos" aria-hidden>
+              {(["recibido", "cocina", "listo"] as EstadoPedido[]).map((e, k) => (
+                <li key={e} className={`${ordenIdx >= k ? "on" : ""} ${ordenIdx === k ? "now" : ""}`}>
+                  <i />
+                  {estadoLabel[e]}
+                </li>
+              ))}
+            </ol>
+          </div>
+          <div className="emp-espera__acciones">
+            <button type="button" className="emp-cta emp-cta--otra" onClick={compartirCaja} disabled={compartiendo}>
+              {compartiendo ? "…" : "📸 Compartir"}
+            </button>
+            <button type="button" className="emp-cta emp-cta--sec emp-cta--otra" onClick={otraCaja}>
+              Otra
+            </button>
+          </div>
+        </footer>
+      )}
     </div>
   );
 }
