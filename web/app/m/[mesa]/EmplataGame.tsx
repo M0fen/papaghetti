@@ -3003,29 +3003,26 @@ export default function EmplataGame(props: {
         ctx.restore();
       }
       ctx.globalAlpha = 1;
-      // pista de scroll — un fideíto ondulado
+      // indicador de scroll — BARRA limpia (riel + pulgar ámbar), no un fideo suelto en el aire
       if (maxScroll > 0) {
-        const trackX = W * 0.3;
-        const trackW = W * 0.4;
-        const yb = cardY + cardH / 2 + 14;
+        const trackW = W * 0.34;
+        const trackX = W / 2 - trackW / 2;
+        const yb = cardY + cardH / 2 + 16;
         ctx.lineCap = "round";
-        const onda = (xa: number, xb: number) => {
-          ctx.beginPath();
-          for (let xx = xa; xx <= xb; xx += 5) {
-            const yy = yb + Math.sin(xx * 0.14) * 2.2;
-            if (xx === xa) ctx.moveTo(xx, yy);
-            else ctx.lineTo(xx, yy);
-          }
-          ctx.stroke();
-        };
-        ctx.strokeStyle = "rgba(251,241,222,0.22)";
+        ctx.strokeStyle = "rgba(251,241,222,0.18)"; // riel
         ctx.lineWidth = 3;
-        onda(trackX, trackX + trackW);
-        const th = trackW * (W / (totalW2 + 1));
+        ctx.beginPath();
+        ctx.moveTo(trackX, yb);
+        ctx.lineTo(trackX + trackW, yb);
+        ctx.stroke();
+        const th = Math.max(trackW * 0.2, trackW * (W / (totalW2 + 1))); // pulgar
         const tx0 = trackX + (trackW - th) * (wd.trayScroll / maxScroll);
         ctx.strokeStyle = "#F2A516";
         ctx.lineWidth = 3.4;
-        onda(tx0, tx0 + th);
+        ctx.beginPath();
+        ctx.moveTo(tx0, yb);
+        ctx.lineTo(tx0 + th, yb);
+        ctx.stroke();
       }
       ctx.restore(); // fin del slide de la bandeja
       } // fin de enArma (bandeja)
