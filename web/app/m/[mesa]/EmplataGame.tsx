@@ -600,6 +600,20 @@ export default function EmplataGame(props: {
     vig: null as Off | null, // viñeta + velo cálido cacheados por resize
     dotSprite: null as Off | null, // partícula de vapor horneada (dot suave)
     entered: false, // one-shot del squash de entrada de la caja
+    // MASCOTA: el fideo SIEMPRE presente, con hogar fijo (detrás de la caja, a un lado) y
+    // muchos modos de movimiento aleatorios. hx/hy = cabeza gobernada por muelle.
+    masc: {
+      hx: 0,
+      hy: 0,
+      hvx: 0,
+      hvy: 0,
+      mode: 0,
+      modeT: 0,
+      dur: 90,
+      pupil: 0.4,
+      lado: 1 as 1 | -1, // de qué lado de la caja sale (alterna)
+      init: false,
+    },
     t: 0,
     dt: 1 / 60,
     df: 1,
@@ -770,7 +784,7 @@ export default function EmplataGame(props: {
       c.width = Math.max(2, Math.round(W));
       c.height = Math.max(2, Math.round(H));
       const g = c.getContext("2d")!;
-      const woodY = H * 0.46;
+      const woodY = H * 0.42; // la mesa sube para que la caja se APOYE en ella (no flote)
       // pared crema
       g.fillStyle = "#F6E7CB";
       g.fillRect(0, 0, W, H);
@@ -792,33 +806,66 @@ export default function EmplataGame(props: {
       luz.addColorStop(1, "rgba(120,80,40,0.12)");
       g.fillStyle = luz;
       g.fillRect(0, 0, W, woodY);
-      // mostrador de madera
+      // ===== LA MESA (superficie de madera que RECEDE, no una pared) =====
+      // plano de la mesa: más oscuro al fondo (bajo la sombra del muro) → cálido al frente
       const wood = g.createLinearGradient(0, woodY, 0, H);
-      wood.addColorStop(0, "#8A5A2E");
-      wood.addColorStop(0.12, "#6E4523");
+      wood.addColorStop(0, "#5E3C1E");
+      wood.addColorStop(0.08, "#7A5228");
+      wood.addColorStop(0.5, "#6E4A24");
       wood.addColorStop(1, "#4A2D16");
       g.fillStyle = wood;
       g.fillRect(0, woodY, W, H - woodY);
-      // canto pared/mostrador: sombra de contacto de la pared + filo iluminado
-      const cont = g.createLinearGradient(0, woodY, 0, woodY + 10);
-      cont.addColorStop(0, "rgba(30,16,6,0.4)");
-      cont.addColorStop(1, "rgba(30,16,6,0)");
-      g.fillStyle = cont;
-      g.fillRect(0, woodY, W, 10);
-      g.strokeStyle = "rgba(255,232,190,0.5)";
+      // sombra del MURO que cae sobre la mesa (ancla la pared arriba de la superficie)
+      const muro = g.createLinearGradient(0, woodY, 0, woodY + 26);
+      muro.addColorStop(0, "rgba(26,14,6,0.5)");
+      muro.addColorStop(1, "rgba(26,14,6,0)");
+      g.fillStyle = muro;
+      g.fillRect(0, woodY, W, 26);
+      // canto donde la pared toca la mesa (filo iluminado ↖)
+      g.strokeStyle = "rgba(255,232,190,0.45)";
       g.lineWidth = 1.5;
       g.beginPath();
       g.moveTo(0, woodY - 0.5);
       g.lineTo(W, woodY - 0.5);
       g.stroke();
-      // veta de madera ondulada (no líneas rectas)
-      g.strokeStyle = "rgba(0,0,0,0.13)";
+      // POOL de luz sobre la mesa donde se apoya la caja (la luz ↖ toca la superficie)
+      const mesaLuz = g.createRadialGradient(W * 0.42, woodY + (H - woodY) * 0.34, 10, W * 0.5, woodY + (H - woodY) * 0.4, W * 0.7);
+      mesaLuz.addColorStop(0, "rgba(255,226,170,0.22)");
+      mesaLuz.addColorStop(1, "rgba(255,226,170,0)");
+      g.fillStyle = mesaLuz;
+      g.fillRect(0, woodY, W, H - woodY);
+      // TABLONES en perspectiva: costuras verticales que convergen hacia un punto de fuga arriba
+      const vpx = W * 0.5;
+      const vpy = woodY - (H - woodY) * 1.6; // punto de fuga por encima de la mesa
+      g.strokeStyle = "rgba(30,16,6,0.22)";
+      g.lineWidth = 1.4;
+      for (let k = -3; k <= 3; k++) {
+        const xFront = W * 0.5 + k * W * 0.2;
+        const t = (H - woodY) / (H - vpy);
+        const xBack = vpx + (xFront - vpx) * (1 - t) * 0 + (xFront - vpx) * ((woodY - vpy) / (H - vpy));
+        g.beginPath();
+        g.moveTo(xBack, woodY);
+        g.lineTo(xFront, H);
+        g.stroke();
+        // filo iluminado a la izquierda de cada costura (relieve del tablón)
+        g.strokeStyle = "rgba(255,230,190,0.12)";
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(xBack - 1.5, woodY);
+        g.lineTo(xFront - 2, H);
+        g.stroke();
+        g.strokeStyle = "rgba(30,16,6,0.22)";
+        g.lineWidth = 1.4;
+      }
+      // veta horizontal ondulada, MÁS DENSA al fondo (foreshortening de la superficie)
+      g.strokeStyle = "rgba(30,16,6,0.14)";
       g.lineWidth = 1;
-      for (let li = 1; li < 5; li++) {
-        const base = woodY + (H - woodY) * (li / 5);
+      for (let li = 1; li <= 8; li++) {
+        const tt = Math.pow(li / 9, 1.7); // denso arriba (fondo), espaciado abajo (cerca)
+        const base = woodY + (H - woodY) * tt;
         g.beginPath();
         for (let xx = 0; xx <= W; xx += 12) {
-          const yy = base + Math.sin(xx * 0.03 + li * 1.7) * 3;
+          const yy = base + Math.sin(xx * 0.025 + li * 1.7) * (2 + tt * 3);
           if (xx === 0) g.moveTo(xx, yy);
           else g.lineTo(xx, yy);
         }
@@ -1330,15 +1377,104 @@ export default function EmplataGame(props: {
       const foco = smooth(Math.min(1, f * 1.3));
       const focoScale = 1 + 0.1 * foco;
       const focoY = -foco * H * 0.06;
+      // ===== SOMBRA de la caja SOBRE LA MESA (espacio de pantalla, difusa) — la aterriza =====
+      // sin esto la caja "flota"; la sombra vive en la superficie, desplazada ↘ por la luz ↖.
+      {
+        const baseYm = boxY + boxH * 0.32 + entY + focoY + boxH * 0.16 * focoScale;
+        const grd = ctx.createRadialGradient(boxX + 10, baseYm, 4, boxX + 10, baseYm, boxW * 0.62 * focoScale);
+        grd.addColorStop(0, "rgba(30,16,6,0.42)");
+        grd.addColorStop(0.6, "rgba(30,16,6,0.22)");
+        grd.addColorStop(1, "rgba(30,16,6,0)");
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.ellipse(boxX + 10, baseYm, boxW * 0.62 * focoScale, boxH * 0.16 * focoScale, 0, 0, TAU);
+        ctx.fill();
+      }
+
+      // ===== LA MASCOTA — el fideo SIEMPRE presente. Vive a un lado de la caja (hogar fijo) y
+      // se mueve CONSTANTEMENTE por 8 modos aleatorios. Se dibuja ANTES de la caja → SALE DE
+      // DETRÁS (la caja ocluye su base). Solo se oculta durante una acción o el plegado.
+      if (faseRef.current === "arma" && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding) {
+        const m = wd.masc;
+        const mby = boxY + boxH * 0.32 + entY + focoY; // base de la caja en pantalla
+        const ax = boxX + m.lado * boxW * 0.4; // hogar: justo detrás del costado de la caja
+        const ay = mby - boxH * 0.3; // ancla a media altura, tras la caja
+        const up = boxH * 0.62;
+        if (!m.init) {
+          m.init = true;
+          m.hx = ax;
+          m.hy = ay - up * 0.6;
+          m.modeT = wd.t;
+        }
+        if (wd.t - m.modeT > m.dur) {
+          let nm = Math.floor(Math.random() * 8);
+          if (nm === m.mode) nm = (nm + 1) % 8;
+          m.mode = nm;
+          m.modeT = wd.t;
+          m.dur = 55 + Math.random() * 130; // ~1-3s por modo
+          if (Math.random() < 0.32) m.lado = m.lado === 1 ? -1 : 1;
+        }
+        const age = wd.t - m.modeT;
+        const io = -m.lado; // hacia la caja
+        let tx = ax;
+        let ty = ay - up;
+        let pupil = 0.4;
+        if (reduce) {
+          ty = ay - up * 0.7;
+        } else {
+          switch (m.mode) {
+            case 0: // mirar alrededor
+              tx = ax + Math.sin(age * 0.05) * boxW * 0.14;
+              ty = ay - up * (0.92 + 0.08 * Math.sin(age * 0.08));
+              pupil = 0.4 + Math.sin(age * 0.05) * 0.6;
+              break;
+            case 1: // estirarse alto
+              ty = ay - up * (0.7 + 0.55 * smooth(Math.min(1, age / 45)));
+              tx = ax + Math.sin(age * 0.2) * 5;
+              pupil = 0.2;
+              break;
+            case 2: // asomarse a mirar la bandeja (abajo)
+              tx = ax + Math.sin(age * 0.06) * boxW * 0.1;
+              ty = ay - up * 0.6;
+              pupil = 1.4;
+              break;
+            case 3: // noodle-dance
+              tx = ax + Math.sin(age * 0.24) * boxW * 0.2;
+              ty = ay - up * (0.9 + 0.15 * Math.sin(age * 0.48));
+              pupil = 0.5;
+              break;
+            case 4: // saludar
+              tx = ax + Math.sin(age * 0.55) * boxW * 0.13;
+              ty = ay - up * 1.08;
+              pupil = 0.3;
+              break;
+            case 5: // curiosear la caja (se inclina hacia adentro, se esconde un poco)
+              tx = ax + io * boxW * 0.18 + Math.sin(age * 0.05) * boxW * 0.05;
+              ty = ay - up * 0.82;
+              pupil = 1.1;
+              break;
+            case 6: // mirar a cámara (quieto, parpadea)
+              tx = ax + Math.sin(age * 0.03) * 4;
+              ty = ay - up * 1.02;
+              pupil = 0.45;
+              break;
+            default: // 7: esconderse tras la caja y reasomar
+              ty = ay - up * (age < m.dur * 0.45 ? 0.1 : 0.95);
+              tx = ax;
+              pupil = 0.4;
+              break;
+          }
+        }
+        [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, 170, 19, dt);
+        [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, 170, 19, dt);
+        m.pupil += (pupil - m.pupil) * (1 - Math.pow(0.86, df));
+        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil);
+      }
+
       ctx.save();
       ctx.translate(boxX, boxY + boxH * 0.32 + entY + focoY);
       ctx.scale((1 + wd.boxSquash * 0.05) * focoScale, (squash - wd.boxSquash * 0.05) * focoScale);
       ctx.translate(0, -boxH * 0.32);
-      // sombra de contacto (cálida, ceñida)
-      ctx.fillStyle = "rgba(70,40,16,0.3)";
-      ctx.beginPath();
-      ctx.ellipse(4, boxH * 0.4, boxW * 0.5, boxH * 0.1, 0, 0, TAU);
-      ctx.fill();
 
       // ---- vista 3/4: pared TRASERA interior → COMIDA (sobresale) → banda FRONTAL ----
       // DESPLIEGUE de apertura: la caja llega plegada y las solapas se abren en origami
@@ -2189,42 +2325,6 @@ export default function EmplataGame(props: {
         drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true);
       }
 
-      // ===== fideo curioso: si nadie toca nada, se asoma con VARIANTES (~3s, no 7s) =====
-      const idle = wd.t - wd.lastAct;
-      if (idle > 180 && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding && !reduce) {
-        const period = 640;
-        const n = Math.floor((idle - 180) / period);
-        const cycle = (idle - 180) % period;
-        if (cycle < 300) {
-          const kIn = easeOutCubic(Math.min(1, cycle / 32));
-          const kOut = cycle > 240 ? Math.max(0, 1 - (cycle - 240) / 60) : 1;
-          const kk = kIn * kOut;
-          if (kk > 0.01) {
-            const variante = n % 3;
-            let tipX2: number;
-            let tipY2: number;
-            let anchXi = boxX;
-            let pupil = 1.3;
-            if (variante === 0) {
-              // asomarse y mirar la bandeja (mira hacia abajo)
-              tipX2 = boxX + Math.sin(cycle * 0.04) * 12 * kk;
-              tipY2 = mouthYBase - 54 * kk;
-            } else if (variante === 1) {
-              // asomarse por una esquina y mirar a cámara
-              anchXi = boxX - boxW * 0.28;
-              tipX2 = anchXi - 6 + Math.sin(cycle * 0.05) * 5 * kk;
-              tipY2 = mouthYBase - 46 * kk;
-              pupil = 0.2;
-            } else {
-              // mini noodle-dance (guiño a EL ENREDO): se contonea de lado a lado
-              tipX2 = boxX + Math.sin(cycle * 0.13) * 26 * kk;
-              tipY2 = mouthYBase - (58 + Math.sin(cycle * 0.26) * 8) * kk;
-              pupil = 0.6;
-            }
-            drawFideo(anchXi, boxY - boxH * 0.1, tipX2, tipY2, 3.7 + variante, null, true, pupil);
-          }
-        }
-      }
 
       // ===== price pops (nacen ALTOS, entran con rebote) =====
       for (let i = wd.pops.length - 1; i >= 0; i--) {
