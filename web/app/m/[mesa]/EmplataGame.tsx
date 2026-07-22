@@ -2033,6 +2033,7 @@ export default function EmplataGame(props: {
 
     // scratch buffers para la hebra (cero alocación por frame)
     const FN = 22;
+    let headGrad: CanvasGradient | null = null; // local del efecto: un ctx nuevo exige uno nuevo
     const fx0 = new Float32Array(FN + 1);
     const fy0 = new Float32Array(FN + 1);
 
@@ -2232,11 +2233,16 @@ export default function EmplataGame(props: {
       const st = clamp(spd * 0.00035, 0, 0.34);
       const sy = 1 + st;
       const sx = 1 / sy;
-      const headG = ctx.createRadialGradient(-2, -3, 1, 0, 0, 9);
-      headG.addColorStop(0, "#FBD27A");
-      headG.addColorStop(0.6, "#EEAE3C");
-      headG.addColorStop(1, "#B67C22");
-      ctx.fillStyle = headG;
+      /* Cacheado: se creaba en cada llamada de cada frame — con 3 hebras, 180 CanvasGradient
+         por segundo solo de la cabeza. Sus coordenadas son locales fijas y se pinta dentro de
+         translate+scale, así que un solo objeto sirve siempre. */
+      if (!headGrad) {
+        headGrad = ctx.createRadialGradient(-2, -3, 1, 0, 0, 9);
+        headGrad.addColorStop(0, "#FBD27A");
+        headGrad.addColorStop(0.6, "#EEAE3C");
+        headGrad.addColorStop(1, "#B67C22");
+      }
+      ctx.fillStyle = headGrad;
       ctx.beginPath();
       ctx.ellipse(0, 0, 5.4 * sx, 6.6 * sy, 0, 0, TAU);
       ctx.fill();
@@ -3383,7 +3389,12 @@ export default function EmplataGame(props: {
       }
       ctx.globalAlpha = 1;
       // indicador de scroll — BARRA limpia (riel + pulgar ámbar), no un fideo suelto en el aire
-      if (maxScroll > 0) {
+      /* El riel se dibuja SIEMPRE. Antes solo aparecía si había recorrido, así que en la
+         pestaña con la que arranca el juego (LA BASE, 3 cartas → maxScroll = 0) el gesto de
+         arrastrar quedaba MUDO: nada decía si la fila responde o si ya lo ves todo. Lleno y
+         atenuado = "ya lo ves todo". Los ternarios son obligatorios: con maxScroll = 0,
+         0/0 = NaN y el pulgar desaparecería. */
+      {
         const trackW = W * 0.34;
         const trackX = W / 2 - trackW / 2;
         const yb = cardY + cardH / 2 + 16;
@@ -3394,14 +3405,17 @@ export default function EmplataGame(props: {
         ctx.moveTo(trackX, yb);
         ctx.lineTo(trackX + trackW, yb);
         ctx.stroke();
-        const th = Math.max(trackW * 0.2, trackW * (W / (totalW2 + 1))); // pulgar
-        const tx0 = trackX + (trackW - th) * (wd.trayScroll / maxScroll);
+        const th = maxScroll > 0 ? Math.max(trackW * 0.2, trackW * (W / (totalW2 + 1))) : trackW;
+        const prog = maxScroll > 0 ? clamp(wd.trayScroll / maxScroll, 0, 1) : 0;
+        const tx0 = trackX + (trackW - th) * prog;
+        ctx.globalAlpha = maxScroll > 0 ? 1 : 0.45;
         ctx.strokeStyle = "#F2A516";
         ctx.lineWidth = 3.4;
         ctx.beginPath();
         ctx.moveTo(tx0, yb);
         ctx.lineTo(tx0 + th, yb);
         ctx.stroke();
+        ctx.globalAlpha = 1;
       }
       ctx.restore(); // fin del slide de la bandeja
       } // fin de enArma (bandeja)
