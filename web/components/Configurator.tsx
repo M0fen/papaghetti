@@ -7,9 +7,12 @@ import {
   tipoLabel,
   tipoIcon,
   formatCOP,
+  waLink as waHref,
+  whatsappValido,
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
+import { calcularTotales, faltaParaMinimo } from "@/lib/precios";
 import { enviarPedido } from "@/app/pedido-actions";
 import Reveal from "./Reveal";
 import Bowl from "./Bowl";
@@ -25,6 +28,8 @@ export default function Configurator({
   whatsapp,
   numMesas,
   impuestoPct,
+  costoDomicilio = 0,
+  pedidoMinimo = 0,
   embebido,
 }: {
   bases: Ingrediente[];
@@ -33,6 +38,8 @@ export default function Configurator({
   whatsapp: string;
   numMesas: number;
   impuestoPct: number;
+  costoDomicilio?: number;
+  pedidoMinimo?: number;
   /** true = lo monta EnredaTuPlato dentro de su sección: no repite <section> ni encabezado. */
   embebido?: boolean;
 }) {
@@ -82,14 +89,23 @@ export default function Configurator({
       return { label: t.nombre, valor: gratis ? 0 : t.precio, gratis };
     }),
   ];
-  const subtotal = lineas.reduce((s, l) => s + l.valor, 0);
-  const impuesto = Math.round((subtotal * impuestoPct) / 100);
-  const total = subtotal + impuesto;
+  // Un solo cálculo para todo el sitio (espejo de crearPedido) — lib/precios.ts
+  const { subtotal, impuesto, domicilio, total } = calcularTotales({
+    base,
+    proteinas: [proteina],
+    toppings,
+    impuestoPct,
+    tipo,
+    costoDomicilio,
+  });
+  const falta = faltaParaMinimo(subtotal, tipo, pedidoMinimo);
 
   const [pending, startPedido] = useTransition();
   const [ok, setOk] = useState<{ id: string; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const pedir = () =>
     startPedido(async () => {
+      setError(null);
       const r = await enviarPedido({
         baseId,
         proteinaId,
@@ -100,20 +116,21 @@ export default function Configurator({
         cliente: tipo !== "mesa" ? cliente : undefined,
         telefono: tipo === "domicilio" ? telefono : undefined,
       });
+      if (!r.ok) return setError(r.error);
       setOk({ id: r.id, total: r.total });
     });
 
+  const hayWa = whatsappValido(whatsapp);
   const waLink = () => {
-    const servicio =
-      tipo === "mesa" ? `Mesa ${mesa}` : tipoLabel[tipo];
-    const txt = encodeURIComponent(
+    const servicio = tipo === "mesa" ? `Mesa ${mesa}` : tipoLabel[tipo];
+    return waHref(
+      whatsapp,
       `¡Hola Papaghetti! 🍝 Quiero armar mi enredo (${servicio}):\n` +
         `• Base: ${base.nombre}\n` +
         `• Proteína: ${proteina.nombre}\n` +
         `• Toppings: ${toppings.map((t) => t.nombre).join(", ") || "sin toppings"}\n` +
         `Total aprox: ${formatCOP(total)}`
     );
-    return `https://wa.me/${whatsapp}?text=${txt}`;
   };
 
   const cuerpo = (
@@ -183,6 +200,12 @@ export default function Configurator({
                     <span>{formatCOP(impuesto)}</span>
                   </div>
                 </>
+              )}
+              {domicilio > 0 && (
+                <div className="ticket__row">
+                  <span>Domicilio</span>
+                  <span>{formatCOP(domicilio)}</span>
+                </div>
               )}
               <div className="ticket__total">
                 <span>Tu enredo</span>
@@ -272,30 +295,39 @@ export default function Configurator({
               </div>
             ) : (
               <>
+                {falta > 0 && (
+                  <p className="ticket__aviso">
+                    Pedido mínimo a domicilio {formatCOP(pedidoMinimo)} · te faltan{" "}
+                    <b>{formatCOP(falta)}</b>
+                  </p>
+                )}
+                {error && <p className="ticket__error">{error}</p>}
                 <button
                   className="btn btn--primary"
                   style={{ width: "100%", justifyContent: "center", marginTop: 16 }}
                   onClick={pedir}
-                  disabled={pending}
+                  disabled={pending || falta > 0}
                   type="button"
                 >
                   <span>{pending ? "Enviando…" : "Pedir aquí"}</span>
                 </button>
-                <a
-                  href={waLink()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: "block",
-                    textAlign: "center",
-                    marginTop: 12,
-                    color: "var(--pg-oro)",
-                    fontWeight: 600,
-                    fontSize: "0.9rem",
-                  }}
-                >
-                  o pedir por WhatsApp →
-                </a>
+                {hayWa && (
+                  <a
+                    href={waLink()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "block",
+                      textAlign: "center",
+                      marginTop: 12,
+                      color: "var(--pg-oro)",
+                      fontWeight: 600,
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    o pedir por WhatsApp →
+                  </a>
+                )}
                 <p style={{ opacity: 0.55, fontSize: "0.75rem", textAlign: "center", marginTop: 10 }}>
                   Precios de referencia · el local confirma disponibilidad
                 </p>

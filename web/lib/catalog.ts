@@ -6,6 +6,7 @@ import {
   CATALOG_TABLE,
   CATALOG_ID,
 } from "./supabase";
+import { desglosarPrecioFinal, faltaParaMinimo } from "./precios";
 import {
   SEED_CATALOG,
   SEED_AJUSTES,
@@ -370,6 +371,12 @@ export interface NuevoPedido {
   mesa?: number;
   cliente?: string;
   telefono?: string;
+  /**
+   * Pedido de un ENREDO INSIGNIA: sus componentes y su precio de carta (cerrado, todo
+   * incluido) mandan sobre lo que venga en base/proteina/toppings. Así el plato curado
+   * entra por el mismo flujo que el armado a mano, sin una segunda contabilidad.
+   */
+  enredoId?: string;
 }
 
 /** Índice de insumos por id (referencias vivas dentro del catálogo). */
@@ -415,19 +422,41 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     return undefined;
   };
 
-  const base = consumir(input.baseId);
-  const proteina = consumir(input.proteinaId);
-  const proteina2 = input.proteinaId2 ? consumir(input.proteinaId2) : undefined; // 2ª proteína (opcional)
-  const tops = input.toppingIds
+  // Un enredo insignia manda sobre lo que venga: sus componentes son los suyos.
+  const insignia = input.enredoId
+    ? cat.enredos.find((e) => e.id === input.enredoId)
+    : undefined;
+  const receta = insignia
+    ? { baseId: insignia.baseId, proteinaId: insignia.proteinaId, proteinaId2: undefined, toppingIds: insignia.toppingIds }
+    : { baseId: input.baseId, proteinaId: input.proteinaId, proteinaId2: input.proteinaId2, toppingIds: input.toppingIds };
+
+  const base = consumir(receta.baseId);
+  const proteina = consumir(receta.proteinaId);
+  const proteina2 = receta.proteinaId2 ? consumir(receta.proteinaId2) : undefined; // 2ª proteína (opcional)
+  const tops = receta.toppingIds
     .map(consumir)
     .filter(Boolean) as Ingrediente[];
 
-  const subtotal =
+  const impuestoPct = cat.ajustes.impuestoPct ?? 0;
+  // El insignia tiene precio de carta CERRADO (todo incluido) → se desglosa hacia atrás
+  // para que subtotal/impuesto sigan siendo comparables con los pedidos armados a mano.
+  const armado =
     (base?.precio ?? 0) +
     (proteina?.precio ?? 0) +
     (proteina2?.precio ?? 0) + // ambas proteínas a precio completo (sin lógica de incluidas)
     tops.reduce((s, t, i) => s + (i < TOPPINGS_INCLUIDOS ? 0 : t.precio), 0);
-  const impuesto = Math.round((subtotal * (cat.ajustes.impuestoPct ?? 0)) / 100);
+  const { subtotal, impuesto } = insignia
+    ? desglosarPrecioFinal(insignia.precio, impuestoPct)
+    : { subtotal: armado, impuesto: Math.round((armado * impuestoPct) / 100) };
+
+  // Domicilio: solo cuando el servicio lo es, y con el mínimo que fijó el dueño.
+  const tipo = input.tipo ?? "domicilio";
+  const domicilio = tipo === "domicilio" ? cat.ajustes.costoDomicilio ?? 0 : 0;
+  const falta = faltaParaMinimo(subtotal, tipo, cat.ajustes.pedidoMinimo);
+  if (falta > 0)
+    throw new Error(
+      `El pedido mínimo a domicilio es ${formatCOP(cat.ajustes.pedidoMinimo)}. Te faltan ${formatCOP(falta)}.`
+    );
   // Costo de insumos (COGS) congelado según receta y costos actuales.
   const costo = Math.round(
     costoReceta(base?.receta, byId) +
@@ -440,8 +469,8 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     id: crypto.randomUUID().slice(0, 8).toUpperCase(),
     creadoEn: new Date().toISOString(),
     canal: input.canal ?? "web",
-    tipo: input.tipo ?? "domicilio",
-    mesa: input.tipo === "mesa" ? input.mesa : undefined,
+    tipo,
+    mesa: tipo === "mesa" ? input.mesa : undefined,
     cliente: input.cliente?.trim() || undefined,
     telefono: input.telefono?.trim() || undefined,
     estado: "recibido",
@@ -451,10 +480,12 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     toppings: tops.map((t) => t.nombre),
     subtotal,
     impuesto,
+    domicilio,
     propina: 0,
     descuento: 0,
-    total: subtotal + impuesto,
+    total: subtotal + impuesto + domicilio,
     costo,
+    enredoId: insignia?.id,
   };
 
   cat.pedidos = [pedido, ...cat.pedidos].slice(0, 200);

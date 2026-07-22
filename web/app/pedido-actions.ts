@@ -24,12 +24,35 @@ function refrescarPanel() {
   revalidatePath("/admin/reportes");
 }
 
-/** Público: el cliente arma su enredo y lo envía (Fase 3). */
+/**
+ * Público: el cliente arma su enredo y lo envía (Fase 3).
+ *
+ * Nunca lanza hacia el cliente: `crearPedido` puede rechazar (p. ej. pedido mínimo a
+ * domicilio) y eso debe llegar como un mensaje que la UI pueda mostrar, no como un
+ * error de servidor sin cara. Los campos van siempre presentes para no obligar a
+ * los tres consumidores a estrechar tipos.
+ */
 export async function enviarPedido(input: NuevoPedido) {
-  const pedido = await crearPedido(input);
-  revalidatePath("/"); // el stock/agotado pudo cambiar
-  refrescarPanel();
-  return { id: pedido.id, total: pedido.total, estado: pedido.estado };
+  try {
+    const pedido = await crearPedido(input);
+    revalidatePath("/"); // el stock/agotado pudo cambiar
+    refrescarPanel();
+    return {
+      ok: true,
+      id: pedido.id,
+      total: pedido.total,
+      estado: pedido.estado,
+      error: null as string | null,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      id: "",
+      total: 0,
+      estado: "recibido" as const,
+      error: e instanceof Error ? e.message : "No pudimos crear el pedido.",
+    };
+  }
 }
 
 /** Público (EMPLATA): estado en vivo de UN pedido para la pantalla del cliente (polling). */

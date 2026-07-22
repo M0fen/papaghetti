@@ -46,14 +46,18 @@ export default function Location({ ajustes }: { ajustes: Ajustes }) {
                 <a href="#arma" className="btn btn--primary">
                   <span>Armar y pedir</span>
                 </a>
-                <a
-                  href="https://www.rappi.com.co"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn--ghost"
-                >
-                  <span>Rappi</span>
-                </a>
+                {/* Solo si el dueño puso su enlace real en /admin/ajustes: mandar a la
+                    home genérica de Rappi era un callejón sin salida. */}
+                {ajustes.rappi ? (
+                  <a
+                    href={ajustes.rappi}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn--ghost"
+                  >
+                    <span>Rappi</span>
+                  </a>
+                ) : null}
               </div>
             </div>
           </Reveal>

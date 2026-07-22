@@ -154,6 +154,7 @@ export async function saveAjustes(formData: FormData) {
     impuestoPct: Math.max(0, Math.min(30, Number(formData.get("impuestoPct") ?? 0))),
     propinaSugeridaPct: Math.max(0, Math.min(30, Number(formData.get("propinaSugeridaPct") ?? 0))),
     instagram: String(formData.get("instagram") ?? "").trim().replace(/^@/, ""),
+    rappi: String(formData.get("rappi") ?? "").trim(),
     costoDomicilio: Math.max(0, Number(formData.get("costoDomicilio") ?? 0)),
     pedidoMinimo: Math.max(0, Number(formData.get("pedidoMinimo") ?? 0)),
   });

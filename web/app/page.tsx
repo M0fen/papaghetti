@@ -4,6 +4,7 @@ import ForkCursor from "@/components/ForkCursor";
 import ScrollHebra from "@/components/ScrollHebra";
 import Hero from "@/components/Hero";
 import EnredaTuPlato from "@/components/EnredaTuPlato";
+import JuegoProvider from "@/components/JuegoProvider";
 import FeaturedMenu from "@/components/FeaturedMenu";
 import Story from "@/components/Story";
 import Location from "@/components/Location";
@@ -41,24 +42,33 @@ export default async function Home() {
       <Nav offsetTop={hayBanner ? 38 : 0} />
       <ForkCursor />
       <ScrollHebra />
-      <main>
-        <Hero />
-        <EnredaTuPlato
-          bases={catalog.bases}
-          proteinas={catalog.proteinas}
-          toppings={catalog.toppings}
-          whatsapp={catalog.ajustes.whatsapp}
-          numMesas={catalog.ajustes.numMesas}
-          impuestoPct={catalog.ajustes.impuestoPct}
-          negocio={catalog.ajustes.negocio || "Papaghetti"}
-          abierto={catalog.ajustes.abierto ?? true}
-        />
-        <Divider color="pomodoro" />
-        <FeaturedMenu catalog={catalog} />
-        <Story />
-        <Location ajustes={catalog.ajustes} />
-        <Footer />
-      </main>
+      {/* El juego lo posee el proveedor: lo abren tanto la bifurcación como la ficha
+          de un enredo insignia (ahí, ya emplatado). Una sola experiencia. */}
+      <JuegoProvider
+        bases={catalog.bases}
+        proteinas={catalog.proteinas}
+        toppings={catalog.toppings}
+        ajustes={catalog.ajustes}
+      >
+        <main>
+          <Hero />
+          <EnredaTuPlato
+            bases={catalog.bases}
+            proteinas={catalog.proteinas}
+            toppings={catalog.toppings}
+            whatsapp={catalog.ajustes.whatsapp}
+            numMesas={catalog.ajustes.numMesas}
+            impuestoPct={catalog.ajustes.impuestoPct}
+            costoDomicilio={catalog.ajustes.costoDomicilio}
+            pedidoMinimo={catalog.ajustes.pedidoMinimo}
+          />
+          <Divider color="pomodoro" />
+          <FeaturedMenu catalog={catalog} />
+          <Story />
+          <Location ajustes={catalog.ajustes} />
+          <Footer />
+        </main>
+      </JuegoProvider>
     </>
   );
 }

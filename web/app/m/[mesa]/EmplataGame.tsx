@@ -27,6 +27,7 @@ import {
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
+import { calcularTotales, faltaParaMinimo } from "@/lib/precios";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { useSonido } from "./sonido";
 
@@ -830,6 +831,10 @@ export default function EmplataGame(props: {
   canal?: "qr" | "web";
   numMesas?: number; // para el selector de mesa en modo web
   onSalir?: () => void; // cerrar el overlay y volver al sitio (solo modo web)
+  costoDomicilio?: number; // se cobra aparte cuando el servicio es a domicilio
+  pedidoMinimo?: number; // mínimo para domicilio; bloquea el sellado
+  /** Enredo insignia con el que arrancar la caja ya emplatada (desde la carta). */
+  precargar?: { baseId: string; proteinaId: string; toppingIds: string[] } | null;
 }) {
   const { mesa, negocio, abierto, impuestoPct, incluidos, bases, proteinas, toppings } = props;
   const canal = props.canal ?? "qr";
@@ -847,6 +852,7 @@ export default function EmplataGame(props: {
   const [estado, setEstado] = useState<EstadoPedido>("recibido");
   // ------- modo WEB: servicio + contacto (se piden al EMPLATAR, no antes: primero se juega) -------
   const [pidiendoDatos, setPidiendoDatos] = useState(false);
+  const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [tipoSel, setTipoSel] = useState<TipoServicio>("domicilio");
   const [mesaSel, setMesaSel] = useState(1);
   const [cliente, setCliente] = useState("");
@@ -865,16 +871,22 @@ export default function EmplataGame(props: {
     estadoRef.current = estado;
   }, [estado]);
 
-  // ------- precio (espejo de crearPedido) -------
+  // ------- precio (espejo de crearPedido, vía lib/precios) -------
   const all = [...bases, ...proteinas, ...toppings];
   const find = (id: string) => all.find((i) => i.id === id);
   const tops = toppingIds.map(find).filter(Boolean) as Ingrediente[];
-  const subtotal =
-    (find(baseId)?.precio ?? 0) +
-    proteinaIds.reduce((sum, id) => sum + (find(id)?.precio ?? 0), 0) + // ambas a precio completo
-    tops.reduce((sum, t, i) => sum + (i < incluidos ? 0 : t.precio), 0);
-  const impuesto = Math.round((subtotal * impuestoPct) / 100);
-  const total = subtotal + impuesto;
+  // En QR el servicio es siempre "mesa" (sin domicilio); en web depende de la hoja final.
+  const tipoActual: TipoServicio = esWeb ? tipoSel : "mesa";
+  const { subtotal, impuesto, domicilio, total } = calcularTotales({
+    base: find(baseId),
+    proteinas: proteinaIds.map(find),
+    toppings: tops,
+    impuestoPct,
+    tipo: tipoActual,
+    costoDomicilio: props.costoDomicilio,
+    incluidos,
+  });
+  const faltaMin = faltaParaMinimo(subtotal, tipoActual, props.pedidoMinimo);
 
   // ------- mundo del juego (refs, cero re-render) -------
   const world = useRef({
@@ -1094,6 +1106,7 @@ export default function EmplataGame(props: {
   /** Envía de verdad: pliega la caja y manda el pedido por el flujo existente (canal según modo). */
   const enviarAhora = useCallback(async () => {
     if (enviando || world.current.folding) return;
+    setErrorEnvio(null);
     setPidiendoDatos(false);
     setEnviando(true);
     world.current.folding = true;
@@ -1112,6 +1125,17 @@ export default function EmplataGame(props: {
         cliente: esWeb && tipoSel !== "mesa" ? cliente.trim() || undefined : undefined,
         telefono: esWeb && tipoSel === "domicilio" ? telefono.trim() || undefined : undefined,
       });
+      // El cerebro puede rechazar (p. ej. pedido mínimo): la caja se vuelve a abrir
+      // y el aviso se muestra en la hoja, no se pierde en silencio.
+      if (!r.ok) {
+        world.current.folding = false;
+        world.current.fold = 0;
+        world.current.selloHecho = false;
+        setErrorEnvio(r.error);
+        setPidiendoDatos(esWeb);
+        setEnviando(false);
+        return;
+      }
       setPedido({ id: r.id, total: r.total });
       setEstado(r.estado as EstadoPedido);
       estadoRef.current = r.estado as EstadoPedido;
@@ -1121,9 +1145,47 @@ export default function EmplataGame(props: {
       world.current.folding = false;
       world.current.fold = 0;
       world.current.selloHecho = false;
+      setErrorEnvio("No pudimos enviar el pedido. Intenta otra vez.");
+      setPidiendoDatos(esWeb);
     }
     setEnviando(false);
   }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, mesaSel, cliente, telefono, mesa, s]);
+
+  /**
+   * PRIMER SERVICIO. Dos casos, un mismo gesto: el fideo trae la comida a la caja.
+   *  · con `precargar` (llegaste desde un enredo insignia): sirve el plato completo en cascada
+   *  · sin precarga: sirve la base por defecto — antes la caja se veía VACÍA mientras la barra
+   *    ya cobraba $20.412 y la carta salía marcada. Ahora lo que cobras está adentro.
+   */
+  const servido = useRef(false);
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (servido.current || !cv) return;
+    servido.current = true;
+    const p = props.precargar;
+    const ids = p
+      ? [p.baseId, p.proteinaId, ...(p.toppingIds ?? [])]
+      : baseId
+        ? [baseId]
+        : [];
+    const ings = ids.map(find).filter(Boolean) as Ingrediente[];
+    if (!ings.length) return;
+    if (p) {
+      setBaseId(p.baseId);
+      setProteinaIds(p.proteinaId ? [p.proteinaId] : []);
+      setToppingIds(p.toppingIds ?? []);
+    }
+    const W = cv.clientWidth || window.innerWidth;
+    const H = cv.clientHeight || window.innerHeight;
+    const timers = ings.map((ing, i) =>
+      setTimeout(
+        () => despachar(ing, W * (0.26 + 0.16 * (i % 3)), H * 0.66),
+        520 + i * 320, // deja respirar la entrada de la caja antes del primer plato
+      ),
+    );
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** EMPLATAR: en QR manda directo; en el menú WEB pide antes servicio + contacto (se juega primero). */
   const confirmar = useCallback(() => {
@@ -3855,11 +3917,29 @@ export default function EmplataGame(props: {
                 )}
               </>
             )}
+            {domicilio > 0 && (
+              <div className="emp-datos__linea">
+                <span>Domicilio</span>
+                <span>{formatCOP(domicilio)}</span>
+              </div>
+            )}
             <div className="emp-datos__total">
               <span>Tu enredo</span>
               <b>{formatCOP(total)}</b>
             </div>
-            <button type="button" className="emp-cta emp-datos__ok" onClick={() => void enviarAhora()} disabled={enviando}>
+            {faltaMin > 0 && (
+              <p className="emp-datos__alerta">
+                Mínimo a domicilio {formatCOP(props.pedidoMinimo ?? 0)} · te faltan{" "}
+                <b>{formatCOP(faltaMin)}</b>
+              </p>
+            )}
+            {errorEnvio && <p className="emp-datos__alerta">{errorEnvio}</p>}
+            <button
+              type="button"
+              className="emp-cta emp-datos__ok"
+              onClick={() => void enviarAhora()}
+              disabled={enviando || faltaMin > 0}
+            >
               {enviando ? "SELLANDO…" : (<><IcoSello /> SELLAR MI CAJA</>)}
             </button>
             <button type="button" className="emp-datos__volver" onClick={() => setPidiendoDatos(false)}>

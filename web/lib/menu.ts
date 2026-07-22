@@ -424,9 +424,13 @@ export interface Pedido {
   toppings: string[];
   subtotal: number;
   impuesto: number;
+  /** Costo del envío, solo en pedidos a domicilio (0 en mesa/llevar). */
+  domicilio?: number;
   propina: number;
   descuento: number;
-  total: number; // subtotal + impuesto + propina − descuento
+  total: number; // subtotal + impuesto + domicilio + propina − descuento
+  /** Si el pedido nació de un enredo insignia, su id (precio de carta cerrado). */
+  enredoId?: string;
   /** Costo de insumos (COGS) según receta, congelado al crear el pedido. */
   costo?: number;
 }
@@ -572,6 +576,8 @@ export interface Ajustes {
   /** El operador puede cerrar el negocio (el sitio muestra "cerrado"). */
   abierto: boolean;
   instagram: string; // handle sin @
+  /** Enlace directo del local en Rappi. Vacío = el sitio NO muestra el botón. */
+  rappi?: string;
   costoDomicilio: number; // COP
   pedidoMinimo: number; // COP
   /** Promos que el operador enciende/apaga; se reflejan en el sitio. */
@@ -605,10 +611,25 @@ export const SEED_AJUSTES: Ajustes = {
   propinaSugeridaPct: 10,
   abierto: true,
   instagram: "papaghetti.pereira",
+  rappi: "",
   costoDomicilio: 5000,
   pedidoMinimo: 20000,
   promos: SEED_PROMOS,
 };
+
+/**
+ * El número de la semilla es un PLACEHOLDER. Mientras el dueño no ponga el real en
+ * /admin/ajustes, NO mandamos clientes a un chat que no existe: los CTA de WhatsApp
+ * se esconden solos en vez de perder el pedido en silencio.
+ */
+export const WHATSAPP_PLACEHOLDER = "573001112233";
+export const soloDigitos = (s: string) => (s || "").replace(/\D/g, "");
+export const whatsappValido = (w?: string): boolean => {
+  const d = soloDigitos(w ?? "");
+  return d.length >= 10 && d !== WHATSAPP_PLACEHOLDER;
+};
+export const waLink = (whatsapp: string, texto: string): string =>
+  `https://wa.me/${soloDigitos(whatsapp)}?text=${encodeURIComponent(texto)}`;
 
 /** ------- Despensa: insumos reales de la semilla ------- */
 export const SEED_INSUMOS: Insumo[] = [

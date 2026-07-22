@@ -1,16 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { findIn, formatCOP, type Catalog, type EnredoInsignia } from "@/lib/menu";
+import {
+  findIn,
+  formatCOP,
+  waLink,
+  whatsappValido,
+  type Catalog,
+  type EnredoInsignia,
+} from "@/lib/menu";
+import { calcularTotales } from "@/lib/precios";
 import Reveal from "./Reveal";
 import Bowl from "./Bowl";
-
-// Placeholder — reemplazar por el WhatsApp real del local (57...)
-const WHATSAPP = "573001112233";
+import IngImg from "./IngImg";
+import PedirInsignia from "./PedirInsignia";
+import { useJuegoOpcional } from "./JuegoProvider";
 
 export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
   const byId = (id: string) => findIn(catalog, id)!;
   const [sel, setSel] = useState<EnredoInsignia | null>(null);
+  const juego = useJuegoOpcional();
+  // "Enredarlo a mi gusto" abre el MISMO juego con este plato ya servido en la caja.
+  const onEnredar = juego
+    ? (e: EnredoInsignia) =>
+        juego.abrir({ baseId: e.baseId, proteinaId: e.proteinaId, toppingIds: e.toppingIds })
+    : undefined;
 
   return (
     <section className="section section--dark" id="menu">
@@ -31,6 +45,14 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
             const base = byId(e.baseId);
             const proteina = byId(e.proteinaId);
             const toppings = e.toppingIds.map(byId);
+            // ¿Sale mejor que armarlo tú mismo? Solo lo decimos cuando es verdad.
+            const suelto = calcularTotales({
+              base,
+              proteinas: [proteina],
+              toppings,
+              impuestoPct: catalog.ajustes.impuestoPct ?? 0,
+            }).total;
+            const ahorro = suelto - e.precio;
             return (
               <Reveal key={e.id} delay={i * 120}>
                 <article
@@ -47,6 +69,9 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
                 >
                   <div className="plato__art">
                     {e.destacado && <span className="plato__tag">El favorito</span>}
+                    {ahorro > 0 && (
+                      <span className="plato__ahorro">Ahorras {formatCOP(ahorro)}</span>
+                    )}
                     {e.foto ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img className="plato__foto" src={e.foto} alt={e.nombre} />
@@ -58,7 +83,10 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
                     <h3>{e.nombre}</h3>
                     <p className="plato__gancho">{e.gancho}</p>
                     <div className="plato__row">
-                      <span className="plato__precio">{formatCOP(e.precio)}</span>
+                      <span className="plato__precio">
+                        {formatCOP(e.precio)}
+                        <small className="plato__incluido">todo incluido</small>
+                      </span>
                       <span className="plato__ver">Ver detalle →</span>
                     </div>
                   </div>
@@ -70,7 +98,12 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
       </div>
 
       {sel && (
-        <EnredoModal enredo={sel} catalog={catalog} onClose={() => setSel(null)} />
+        <EnredoModal
+          enredo={sel}
+          catalog={catalog}
+          onClose={() => setSel(null)}
+          onEnredar={onEnredar}
+        />
       )}
     </section>
   );
@@ -80,15 +113,18 @@ function EnredoModal({
   enredo,
   catalog,
   onClose,
+  onEnredar,
 }: {
   enredo: EnredoInsignia;
   catalog: Catalog;
   onClose: () => void;
+  onEnredar?: (e: EnredoInsignia) => void;
 }) {
   const byId = (id: string) => findIn(catalog, id)!;
   const base = byId(enredo.baseId);
   const proteina = byId(enredo.proteinaId);
   const toppings = enredo.toppingIds.map(byId);
+  const { ajustes } = catalog;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -102,13 +138,13 @@ function EnredoModal({
     };
   }, [onClose]);
 
-  const waLink = () => {
-    const txt = encodeURIComponent(
+  const hayWa = whatsappValido(ajustes.whatsapp);
+  const wa = () =>
+    waLink(
+      ajustes.whatsapp,
       `¡Hola Papaghetti! 🍝 Quiero "${enredo.nombre}": ${base.nombre} + ${proteina.nombre}` +
         ` + ${toppings.map((t) => t.nombre).join(", ")}. Total ${formatCOP(enredo.precio)}.`
     );
-    return `https://wa.me/${WHATSAPP}?text=${txt}`;
-  };
 
   return (
     <div className="modal" onClick={onClose}>
@@ -136,35 +172,53 @@ function EnredoModal({
           <p className="plato__gancho">{enredo.gancho}</p>
           <ul className="modal__list">
             <li>
-              <span>{base.emoji} {base.nombre}</span>
+              <span>
+                <IngImg ing={base} className="modal__ing" /> {base.nombre}
+              </span>
               <em>base</em>
             </li>
             <li>
-              <span>{proteina.emoji} {proteina.nombre}</span>
+              <span>
+                <IngImg ing={proteina} className="modal__ing" /> {proteina.nombre}
+              </span>
               <em>proteína</em>
             </li>
             {toppings.map((t) => (
               <li key={t.id}>
-                <span>{t.emoji} {t.nombre}</span>
+                <span>
+                  <IngImg ing={t} className="modal__ing" /> {t.nombre}
+                </span>
                 <em>topping</em>
               </li>
             ))}
           </ul>
-          <div className="modal__foot">
-            <span className="plato__precio">{formatCOP(enredo.precio)}</span>
-            <div className="modal__actions">
-              <a href="#arma" className="btn btn--ghost" onClick={onClose}>
-                <span>Armar el mío</span>
-              </a>
-              <a
-                href={waLink()}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn--primary"
+
+          <PedirInsignia
+            enredo={enredo}
+            numMesas={ajustes.numMesas}
+            impuestoPct={ajustes.impuestoPct ?? 0}
+            costoDomicilio={ajustes.costoDomicilio}
+            pedidoMinimo={ajustes.pedidoMinimo}
+          />
+
+          <div className="modal__otros">
+            {onEnredar && (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => {
+                  onClose();
+                  onEnredar(enredo);
+                }}
               >
-                <span>Pedir por WhatsApp</span>
+                <span>Enredarlo a mi gusto</span>
+              </button>
+            )}
+            {hayWa && (
+              <a href={wa()} target="_blank" rel="noopener noreferrer" className="modal__wa">
+                o pedirlo por WhatsApp →
               </a>
-            </div>
+            )}
           </div>
         </div>
       </div>

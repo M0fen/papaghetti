@@ -1,4 +1,5 @@
 import { getCatalog } from "@/lib/catalog";
+import { whatsappValido } from "@/lib/menu";
 import { saveAjustes, toggleAbiertoAction } from "../actions";
 import PromosEditor from "@/components/admin/PromosEditor";
 
@@ -76,6 +77,17 @@ export default async function AjustesPage() {
             <label className="field">
               <span>WhatsApp (formato 57…)</span>
               <input className="admin-input" name="whatsapp" defaultValue={ajustes.whatsapp} inputMode="numeric" placeholder="573001112233" />
+              {!whatsappValido(ajustes.whatsapp) && (
+                <small className="field__alerta">
+                  Este número es el de ejemplo. Mientras siga así, el sitio esconde los botones de
+                  WhatsApp para no mandar clientes a un chat que no existe.
+                </small>
+              )}
+            </label>
+            <label className="field">
+              <span>Enlace de Rappi (opcional)</span>
+              <input className="admin-input" name="rappi" defaultValue={ajustes.rappi ?? ""} placeholder="https://www.rappi.com.co/restaurantes/…" />
+              <small className="field__nota">Vacío = el sitio no muestra el botón de Rappi.</small>
             </label>
             <label className="field">
               <span>Instagram (sin @)</span>

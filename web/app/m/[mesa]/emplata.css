@@ -908,6 +908,27 @@
   font-family: inherit;
   color: var(--espresso);
 }
+/* línea suelta del desglose (hoy: el domicilio) */
+.emp-datos__linea {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: rgba(30, 22, 17, 0.66);
+  font-variant-numeric: tabular-nums;
+}
+/* mínimo no alcanzado o rechazo del cerebro: se dice aquí, no se pierde */
+.emp-datos__alerta {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: rgba(200, 50, 30, 0.1);
+  border: 1px solid rgba(200, 50, 30, 0.32);
+  color: var(--tomate, #c8321e);
+  font-size: 12.5px;
+  line-height: 1.4;
+  font-weight: 600;
+}
 .emp-datos__total {
   display: flex;
   align-items: baseline;
