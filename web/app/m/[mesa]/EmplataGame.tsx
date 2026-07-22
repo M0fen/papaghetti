@@ -794,7 +794,15 @@ export default function EmplataGame(props: {
   const s = useSonido();
 
   // ------- selección (React para la barra DOM; refs espejo para el loop) -------
-  const [baseId, setBaseId] = useState<string>(() => bases.find((i) => !i.agotado)?.id ?? "");
+  /**
+   * ARRANQUE HONESTO: sin base elegida. Antes se pre-elegía la primera base disponible
+   * ANTES de que el cliente tocara nada, y de ahí salían los tres síntomas que el
+   * "primer servicio" automático venía a tapar: la barra ya cobraba $20.412, la carta
+   * salía con glow y palomita, y la pestaña con su punto de completado. Se corta la raíz.
+   * Todo el camino ya está blindado para "" (precios.ts usa `base?.precio ?? 0`, el CTA
+   * sale disabled, el aviso pide `baseId &&`, el ticket cae a "").
+   */
+  const [baseId, setBaseId] = useState<string>("");
   const [proteinaIds, setProteinaIds] = useState<string[]>([]); // hasta 2 proteínas
   const [toppingIds, setToppingIds] = useState<string[]>([]);
   const [tab, setTab] = useState<0 | 1 | 2>(0);
@@ -858,6 +866,12 @@ export default function EmplataGame(props: {
   // La barra de abajo muestra LA COMIDA. El envío aparece en la hoja final, cuando el
   // cliente ya eligió domicilio: cobrarlo antes de que lo pida se lee como sorpresa.
   const totalComida = subtotal + impuesto;
+  // Precio de entrada de la carta. Guarda obligatoria: Math.min() sin argumentos es
+  // Infinity y formatCOP imprimiría "$∞" (estado alcanzable si todo está agotado).
+  const basesDispo = bases.filter((b) => !b.agotado);
+  const desdeBase = basesDispo.length
+    ? formatCOP(Math.min(...basesDispo.map((b) => b.precio)))
+    : null;
 
   // ------- mundo del juego (refs, cero re-render) -------
   const world = useRef({
@@ -3038,6 +3052,18 @@ export default function EmplataGame(props: {
       panel.addColorStop(1, "rgba(20,12,6,0.5)");
       ctx.fillStyle = panel;
       ctx.fillRect(0, trayY - 30, W, H - trayY + 30);
+      /* INVITACIÓN (no autoplay): si a los ~2.5 s el cliente no ha tocado nada y todavía
+         no hay base, las cartas de base laten y aparece el rótulo. Antes, a los 520 ms,
+         el fideo salía disparado y servía él solo. `wd.t += df` con `df = dt*60` → 150
+         frames ≈ 2.5 s. */
+      const invita = !sel.current.baseId && sel.current.tab === 0 && wd.t - wd.lastAct > 150;
+      if (invita) {
+        ctx.font = fontB(12 * U, 800);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = `rgba(242,165,22,${0.55 + 0.35 * Math.sin(wd.t * 0.06)})`;
+        ctx.fillText("ELIGE TU BASE", W / 2, trayY - 44 * U);
+      }
       // pestañas
       const tabsTxt = ["LA BASE", "PROTEÍNA", "TOPPINGS"] as const;
       const TG = tabsGeo();
@@ -3104,11 +3130,13 @@ export default function EmplataGame(props: {
         const prx = plCat === "base" ? 43 : plCat === "proteina" ? 38 : 33;
         const pry = prx * 0.42;
         const ply = -cardHd / 2 + 42; // el plato arriba; nombre/precio abajo
-        // glow ámbar de selección tras el plato
-        if (selr) {
+        // glow ámbar: de selección, o de INVITACIÓN mientras no hay base elegida
+        const llama = invita && ing.categoria === "base" && !ing.agotado;
+        if (selr || llama) {
           const gsz = prx + 8 + Math.sin(wd.t * 0.09 + k) * 1.5;
+          const ga = selr ? 0.45 : 0.22 + 0.14 * Math.sin(wd.t * 0.12 + k);
           const gg = ctx.createRadialGradient(0, ply, 2, 0, ply, gsz * 1.7);
-          gg.addColorStop(0, "rgba(242,165,22,0.45)");
+          gg.addColorStop(0, `rgba(242,165,22,${ga})`);
           gg.addColorStop(1, "rgba(242,165,22,0)");
           ctx.fillStyle = gg;
           ctx.beginPath();
@@ -3665,6 +3693,7 @@ export default function EmplataGame(props: {
     wd.lastAct = wd.t;
     faseRef.current = "arma";
     setPedido(null);
+    setBaseId(""); // sin esto, "otra caja" deja caja vacía COBRANDO $20.412
     setToppingIds([]);
     setProteinaIds([]);
     setEstado("recibido");
@@ -3880,19 +3909,31 @@ export default function EmplataGame(props: {
       {!pedido ? (
         <footer className="emp-bar emp-bar--game">
           <div className="emp-total">
-            {baseId && proteinaIds.length === 0 && (
-              <span className="emp-total__aviso">Caja sin proteína · puedes emplatar igual</span>
-            )}
+            {/* El hueco del aviso existe SIEMPRE (con nbsp si no hay nada que decir):
+                así la barra mide igual en todos los estados y el canvas no se re-hornea. */}
+            <span
+              className={`emp-total__aviso${!baseId || proteinaIds.length === 0 ? "" : " emp-total__aviso--hueco"}`}
+            >
+              {!baseId
+                ? "Elige tu base para emplatar"
+                : proteinaIds.length === 0
+                  ? "Va sin proteína · se puede emplatar"
+                  : "\u00a0"}
+            </span>
             <small>
-              {tops.length > incluidos
-                ? `${incluidos} toppings gratis · ${tops.length - incluidos} con precio`
-                : `${tops.length}/${incluidos} toppings de la casa`}
+              {!baseId
+                ? desdeBase
+                  ? `Arma tu caja · desde ${desdeBase}`
+                  : "Sin bases disponibles hoy"
+                : tops.length > incluidos
+                  ? `${incluidos} toppings gratis · ${tops.length - incluidos} con precio`
+                  : `${tops.length}/${incluidos} toppings de la casa`}
               {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
             </small>
             <div className="emp-total__row">
               <span className="emp-total__label">TOTAL</span>
               {/* la comida, sin envío: el domicilio todavía no lo ha elegido nadie */}
-              <b>{formatCOP(totalComida)}</b>
+              <b>{totalComida > 0 ? formatCOP(totalComida) : "—"}</b>
             </div>
           </div>
           <button

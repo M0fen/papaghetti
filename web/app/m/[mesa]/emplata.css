@@ -447,10 +447,13 @@
   border-right: 1.5px dotted rgba(30, 22, 17, 0.16); /* campo de ticket */
 }
 .emp-total small {
-  font-size: 12px; /* dato fiscal legible (antes 10.5px al 55% = falla AA); envuelve, no se corta el impuesto */
+  font-size: 12px; /* dato fiscal legible (antes 10.5px al 55% = falla AA) */
   line-height: 1.25;
   color: rgba(30, 22, 17, 0.72);
   font-weight: 600;
+  white-space: nowrap; /* misma razón que el aviso: alto constante */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .emp-total__row {
   display: flex;
@@ -470,6 +473,16 @@
   letter-spacing: 0.01em;
   color: var(--tomate); /* aviso amable: caja sin proteína, no bloquea */
   line-height: 1.2;
+  /* SIEMPRE una línea. Si el aviso envuelve, la barra crece, el canvas se redimensiona,
+     salta el ResizeObserver y se RE-HORNEA la escena entera (fondo, viñeta, kraft, banda).
+     Medido: el estado "con base sin proteína" hacía 87 → 115 px. Una línea fija lo mata. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* el hueco del aviso se reserva aunque no haya nada que decir → altura constante */
+.emp-total__aviso--hueco {
+  visibility: hidden;
 }
 .emp-total b {
   font-family: var(--font-display, Georgia, serif);
