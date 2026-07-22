@@ -1,5 +1,6 @@
 import type { Ingrediente } from "@/lib/menu";
 import type { CSSVars } from "@/lib/cssVars";
+import IngImg from "./IngImg";
 
 /**
  * Bowl que se va "armando": un nido de noodles con el color de la base y,
@@ -47,7 +48,7 @@ export default function Bowl({
                 style={{ left: `${left}%`, top: `${top}%`, "--i": i } as CSSVars}
                 title={ing.nombre}
               >
-                {ing.emoji}
+                <IngImg ing={ing} className="bowl3__img" claseEmoji="bowl3__emoji" />
               </span>
             );
           })}
@@ -55,7 +56,9 @@ export default function Bowl({
 
         <div className="bowl3__shine" />
       </div>
-      <p className="bowl3__base">{base.emoji} {base.nombre}</p>
+      <p className="bowl3__base">
+        <IngImg ing={base} className="bowl3__baseimg" claseEmoji="bowl3__emoji" /> {base.nombre}
+      </p>
     </div>
   );
 }

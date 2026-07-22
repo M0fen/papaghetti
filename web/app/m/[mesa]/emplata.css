@@ -45,6 +45,12 @@
   display: flex;
   gap: 6px;
   align-items: baseline;
+  min-width: 0; /* la marca cede antes que las acciones (que son toques) */
+}
+.emp-top__brand > b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .emp-top__brand span {
   font-family: var(--font-body, system-ui);
@@ -55,6 +61,7 @@
 .emp-top__actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 .emp-mini {
   display: inline-flex;
@@ -814,4 +821,117 @@
   .emp-cta {
     transition: none;
   }
+}
+
+/* ---------- MODO WEB (el juego dentro del menú principal del sitio) ---------- */
+.emp-volver {
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 2px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(30, 22, 17, 0.16);
+  background: #fff;
+  color: var(--espresso);
+}
+/* hoja final: servicio + contacto (se pide DESPUÉS de jugar) */
+.emp-datos {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: end center;
+  background: rgba(24, 16, 8, 0.45);
+  backdrop-filter: blur(3px);
+  padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
+}
+.emp-datos__panel {
+  width: 100%;
+  max-width: 460px;
+  background: var(--crema);
+  border-radius: 20px;
+  padding: 16px 16px 14px;
+  box-shadow: 0 -10px 40px rgba(30, 22, 17, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.emp-datos__k {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: rgba(30, 22, 17, 0.5);
+}
+.emp-datos__h {
+  margin: 0;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 20px;
+  color: var(--espresso);
+}
+.emp-datos__tipos {
+  display: flex;
+  gap: 8px;
+}
+.emp-datos__tipo {
+  flex: 1;
+  min-height: 44px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(30, 22, 17, 0.16);
+  background: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--espresso);
+}
+.emp-datos__tipo.is-on {
+  background: var(--ambar);
+  border-color: var(--ambar);
+}
+.emp-datos__campo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(30, 22, 17, 0.6);
+}
+.emp-datos__campo input,
+.emp-datos__campo select {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(30, 22, 17, 0.16);
+  background: #fff;
+  padding: 0 12px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--espresso);
+}
+.emp-datos__total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1.5px dotted rgba(30, 22, 17, 0.16);
+  font-size: 12.5px;
+  color: rgba(30, 22, 17, 0.7);
+}
+.emp-datos__total b {
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 21px;
+  color: var(--espresso);
+  font-variant-numeric: tabular-nums;
+}
+.emp-datos__ok {
+  margin-left: 0;
+  width: 100%;
+}
+.emp-datos__volver {
+  background: none;
+  border: none;
+  color: rgba(30, 22, 17, 0.6);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px;
 }

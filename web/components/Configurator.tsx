@@ -13,6 +13,7 @@ import {
 import { enviarPedido } from "@/app/pedido-actions";
 import Reveal from "./Reveal";
 import Bowl from "./Bowl";
+import IngImg from "./IngImg";
 
 const primeraDisponible = (list: Ingrediente[], n = 1) =>
   list.filter((i) => i.activo && !i.agotado).slice(0, n);
@@ -24,6 +25,7 @@ export default function Configurator({
   whatsapp,
   numMesas,
   impuestoPct,
+  embebido,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
@@ -31,6 +33,8 @@ export default function Configurator({
   whatsapp: string;
   numMesas: number;
   impuestoPct: number;
+  /** true = lo monta EnredaTuPlato dentro de su sección: no repite <section> ni encabezado. */
+  embebido?: boolean;
 }) {
   const all = [...bases, ...proteinas, ...toppingsCat];
   const find = (id: string) => all.find((i) => i.id === id);
@@ -112,21 +116,8 @@ export default function Configurator({
     return `https://wa.me/${whatsapp}?text=${txt}`;
   };
 
-  return (
-    <section className="section" id="arma">
-      <div className="container">
-        <Reveal>
-          <p className="eyebrow">Arma tu enredo</p>
-          <h2 style={{ fontSize: "clamp(2rem, 6vw, 3.2rem)", margin: "10px 0 6px" }}>
-            Tú mandas en el enredo
-          </h2>
-          <p className="lead">
-            Elige base, proteína y toppings. Los primeros {TOPPINGS_INCLUIDOS}{" "}
-            toppings van por cuenta de la casa.
-          </p>
-        </Reveal>
-
-        <div className="config">
+  const cuerpo = (
+    <div className="config">
           {/* ------- Selección ------- */}
           <div className="config__steps">
             <Group titulo="1 · La base" nota="elige 1">
@@ -310,8 +301,27 @@ export default function Configurator({
                 </p>
               </>
             )}
-          </div>
-        </div>
+      </div>
+    </div>
+  );
+
+  // Embebido dentro de EnredaTuPlato: la sección y el encabezado ya los pone el host.
+  if (embebido) return cuerpo;
+
+  return (
+    <section className="section" id="arma">
+      <div className="container">
+        <Reveal>
+          <p className="eyebrow">Arma tu enredo</p>
+          <h2 style={{ fontSize: "clamp(2rem, 6vw, 3.2rem)", margin: "10px 0 6px" }}>
+            Tú mandas en el enredo
+          </h2>
+          <p className="lead">
+            Elige base, proteína y toppings. Los primeros {TOPPINGS_INCLUIDOS}{" "}
+            toppings van por cuenta de la casa.
+          </p>
+        </Reveal>
+        {cuerpo}
       </div>
     </section>
   );
@@ -357,14 +367,7 @@ function Chip({
       disabled={agotado}
       type="button"
     >
-      {ing.foto ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img className="chip__foto" src={ing.foto} alt="" aria-hidden />
-      ) : (
-        <span className="emoji" aria-hidden>
-          {ing.emoji}
-        </span>
-      )}
+      <IngImg ing={ing} className="chip__ing" />
       {ing.nombre}
       {showPrice && <span className="extra">{formatCOP(ing.precio)}</span>}
       {showExtra && (

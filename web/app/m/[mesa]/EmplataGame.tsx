@@ -18,7 +18,15 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatCOP, estadoLabel, type EstadoPedido, type Ingrediente } from "@/lib/menu";
+import {
+  formatCOP,
+  estadoLabel,
+  TIPOS,
+  tipoLabel,
+  type EstadoPedido,
+  type Ingrediente,
+  type TipoServicio,
+} from "@/lib/menu";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { useSonido } from "./sonido";
 
@@ -794,6 +802,12 @@ const IcoCompartir = () => (
     <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7" />
   </svg>
 );
+/** Volver al menú del sitio (solo en modo web, cuando el juego vive como overlay). */
+const IcoVolver = () => (
+  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M15 18l-6-6 6-6" />
+  </svg>
+);
 /** Sello de lacre con swirl de fideo — EMPLATAR = SELLAR la caja (encadena con el cierre origami). */
 const IcoSello = () => (
   <svg className="emp-cta__sello" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -812,8 +826,14 @@ export default function EmplataGame(props: {
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
   onModoRapido: () => void;
+  /** "qr" = mesa por QR (flujo original). "web" = el menú principal del sitio: pide servicio+contacto. */
+  canal?: "qr" | "web";
+  numMesas?: number; // para el selector de mesa en modo web
+  onSalir?: () => void; // cerrar el overlay y volver al sitio (solo modo web)
 }) {
   const { mesa, negocio, abierto, impuestoPct, incluidos, bases, proteinas, toppings } = props;
+  const canal = props.canal ?? "qr";
+  const esWeb = canal === "web";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const s = useSonido();
 
@@ -825,6 +845,12 @@ export default function EmplataGame(props: {
   const [enviando, setEnviando] = useState(false);
   const [pedido, setPedido] = useState<{ id: string; total: number } | null>(null);
   const [estado, setEstado] = useState<EstadoPedido>("recibido");
+  // ------- modo WEB: servicio + contacto (se piden al EMPLATAR, no antes: primero se juega) -------
+  const [pidiendoDatos, setPidiendoDatos] = useState(false);
+  const [tipoSel, setTipoSel] = useState<TipoServicio>("domicilio");
+  const [mesaSel, setMesaSel] = useState(1);
+  const [cliente, setCliente] = useState("");
+  const [telefono, setTelefono] = useState("");
 
   const sel = useRef({ baseId: "", proteinaIds: [] as string[], toppingIds: [] as string[], tab: 0 as 0 | 1 | 2 });
   useEffect(() => {
@@ -1065,8 +1091,10 @@ export default function EmplataGame(props: {
     [despachar, sacarDeCaja, s],
   );
 
-  const confirmar = useCallback(async () => {
-    if (!abierto || enviando || !baseId || world.current.folding) return;
+  /** Envía de verdad: pliega la caja y manda el pedido por el flujo existente (canal según modo). */
+  const enviarAhora = useCallback(async () => {
+    if (enviando || world.current.folding) return;
+    setPidiendoDatos(false);
     setEnviando(true);
     world.current.folding = true;
     s.confirmar();
@@ -1078,9 +1106,11 @@ export default function EmplataGame(props: {
         proteinaId: proteinaIds[0] ?? "", // sin fallback silencioso: 0 proteínas = caja base honesta
         proteinaId2: proteinaIds[1] ?? undefined,
         toppingIds,
-        canal: "qr",
-        tipo: "mesa",
-        mesa,
+        canal,
+        tipo: esWeb ? tipoSel : "mesa",
+        mesa: esWeb ? (tipoSel === "mesa" ? mesaSel : undefined) : mesa,
+        cliente: esWeb && tipoSel !== "mesa" ? cliente.trim() || undefined : undefined,
+        telefono: esWeb && tipoSel === "domicilio" ? telefono.trim() || undefined : undefined,
       });
       setPedido({ id: r.id, total: r.total });
       setEstado(r.estado as EstadoPedido);
@@ -1093,7 +1123,17 @@ export default function EmplataGame(props: {
       world.current.selloHecho = false;
     }
     setEnviando(false);
-  }, [abierto, enviando, baseId, proteinaIds, toppingIds, mesa, s]);
+  }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, mesaSel, cliente, telefono, mesa, s]);
+
+  /** EMPLATAR: en QR manda directo; en el menú WEB pide antes servicio + contacto (se juega primero). */
+  const confirmar = useCallback(() => {
+    if (!abierto || enviando || !baseId || world.current.folding) return;
+    if (esWeb) {
+      setPidiendoDatos(true);
+      return;
+    }
+    void enviarAhora();
+  }, [abierto, enviando, baseId, esWeb, enviarAhora]);
 
   useEffect(() => {
     if (!pedido) return;
@@ -3667,8 +3707,14 @@ export default function EmplataGame(props: {
     <div className="emp-game" onPointerDown={s.unlock}>
       <header className="emp-top emp-top--game">
         <div className="emp-top__brand">
+          {esWeb && props.onSalir && (
+            <button type="button" className="emp-volver" onClick={props.onSalir} aria-label="Volver al menú">
+              <IcoVolver />
+            </button>
+          )}
           <b>{negocio.toUpperCase()}</b>
-          <span>· MESA {mesa}</span>
+          {/* en web el ← ya ocupa espacio: la marca sola respira mejor que "· ENREDA TU PLATO" */}
+          {!esWeb && <span>· MESA {mesa}</span>}
         </div>
         <div className="emp-top__actions">
           <button type="button" className="emp-mini" onClick={s.toggleMute} aria-label={s.mute ? "Activar sonido" : "Silenciar"}>
@@ -3756,6 +3802,71 @@ export default function EmplataGame(props: {
             </div>
           </div>
         </footer>
+      )}
+
+      {/* MODO WEB — último paso: servicio + contacto. Se pide DESPUÉS de jugar (primero la diversión),
+          y se manda por el mismo flujo existente (enviarPedido, canal "web"). */}
+      {pidiendoDatos && (
+        <div className="emp-datos" role="dialog" aria-modal="true" aria-label="Servicio y contacto">
+          <div className="emp-datos__panel">
+            <p className="emp-datos__k">ÚLTIMO PASO</p>
+            <h3 className="emp-datos__h">¿Cómo quieres tu enredo?</h3>
+            <div className="emp-datos__tipos" role="group" aria-label="Tipo de servicio">
+              {TIPOS.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={`emp-datos__tipo ${tipoSel === t ? "is-on" : ""}`}
+                  aria-pressed={tipoSel === t}
+                  onClick={() => setTipoSel(t)}
+                >
+                  {tipoLabel[t]}
+                </button>
+              ))}
+            </div>
+            {tipoSel === "mesa" ? (
+              <label className="emp-datos__campo">
+                <span>Mesa</span>
+                <select value={mesaSel} onChange={(e) => setMesaSel(Number(e.target.value))} aria-label="Número de mesa">
+                  {Array.from({ length: Math.max(1, props.numMesas ?? 12) }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <>
+                <label className="emp-datos__campo">
+                  <span>Tu nombre</span>
+                  <input type="text" value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="¿A nombre de quién?" />
+                </label>
+                {tipoSel === "domicilio" && (
+                  <label className="emp-datos__campo">
+                    <span>WhatsApp / teléfono</span>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      value={telefono}
+                      onChange={(e) => setTelefono(e.target.value)}
+                      placeholder="Para confirmar el domicilio"
+                    />
+                  </label>
+                )}
+              </>
+            )}
+            <div className="emp-datos__total">
+              <span>Tu enredo</span>
+              <b>{formatCOP(total)}</b>
+            </div>
+            <button type="button" className="emp-cta emp-datos__ok" onClick={() => void enviarAhora()} disabled={enviando}>
+              {enviando ? "SELLANDO…" : (<><IcoSello /> SELLAR MI CAJA</>)}
+            </button>
+            <button type="button" className="emp-datos__volver" onClick={() => setPidiendoDatos(false)}>
+              Volver a enredar
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

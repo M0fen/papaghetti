@@ -3,7 +3,7 @@ import PromoBanner from "@/components/PromoBanner";
 import ForkCursor from "@/components/ForkCursor";
 import ScrollHebra from "@/components/ScrollHebra";
 import Hero from "@/components/Hero";
-import Configurator from "@/components/Configurator";
+import EnredaTuPlato from "@/components/EnredaTuPlato";
 import FeaturedMenu from "@/components/FeaturedMenu";
 import Story from "@/components/Story";
 import Location from "@/components/Location";
@@ -43,13 +43,15 @@ export default async function Home() {
       <ScrollHebra />
       <main>
         <Hero />
-        <Configurator
+        <EnredaTuPlato
           bases={catalog.bases}
           proteinas={catalog.proteinas}
           toppings={catalog.toppings}
           whatsapp={catalog.ajustes.whatsapp}
           numMesas={catalog.ajustes.numMesas}
           impuestoPct={catalog.ajustes.impuestoPct}
+          negocio={catalog.ajustes.negocio || "Papaghetti"}
+          abierto={catalog.ajustes.abierto ?? true}
         />
         <Divider color="pomodoro" />
         <FeaturedMenu catalog={catalog} />
