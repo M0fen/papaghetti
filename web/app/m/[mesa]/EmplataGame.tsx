@@ -67,6 +67,39 @@ function springStep(pos: number, vel: number, target: number, k: number, c: numb
   return [pos + v * h, v];
 }
 
+/* Ruido coherente barato: value noise + 2 octavas. Sirve para que la vida del fideo
+   (respiro, parpadeo, mirada) deje de ser un metrónomo sin traer una librería.
+   Ojo: `n << 13` fuerza int32 → mantener el argumento por debajo de 2^18. */
+const hash1 = (n: number) => {
+  let h = (n << 13) ^ n;
+  h = (h * (h * h * 15731 + 789221) + 1376312589) & 0x7fffffff;
+  return 1 - h / 1073741824;
+};
+const vnoise = (x: number) => {
+  const i = Math.floor(x);
+  const f = x - i;
+  const u = f * f * (3 - 2 * f);
+  return hash1(i) * (1 - u) + hash1(i + 1) * u;
+};
+const fbm = (x: number) => vnoise(x) * 0.65 + vnoise(x * 2.17) * 0.35;
+
+/* Amortiguador de vida media EXACTA (estable a cualquier dt, sin explotar a framerate bajo).
+   Se usa para los puntos de control del fideo: encadenados con vidas medias crecientes
+   producen el LÁTIGO — el cuerpo se queda atrás y alcanza a la cabeza con retraso. */
+const LN2 = 0.6931471805599453;
+const negexp = (x: number) => 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+function damper(pos: number, vel: number, target: number, hl: number, dt: number): [number, number] {
+  const y = (4 * LN2) / (hl + 1e-5) / 2;
+  const j0 = pos - target;
+  const j1 = vel + j0 * y;
+  const e = negexp(y * dt);
+  return [e * (j0 + j1 * dt) + target, e * (vel - j1 * y * dt)];
+}
+
+/** Estado con memoria de los puntos de control de una hebra. */
+type CtrlFideo = { x1: number; v1x: number; y1: number; v1y: number; x2: number; v2x: number; y2: number; v2y: number; on: boolean };
+const nuevoCtrl = (): CtrlFideo => ({ x1: 0, v1x: 0, y1: 0, v1y: 0, x2: 0, v2x: 0, y2: 0, v2y: 0, on: false });
+
 /* =========================================================================
    EL NIDO SERVIBLE — la comida NO se apila al azar: cada ingrediente cae en un SLOT
    determinista (rol + índice) que forma un MONTÍCULO con héroe(s) de proteína y toppings
@@ -701,6 +734,7 @@ type Fideo = {
   hy?: number;
   hvx?: number;
   hvy?: number;
+  ctrl?: CtrlFideo; // memoria del cuerpo (muelles en cascada)
 };
 /** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
  *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
@@ -934,8 +968,10 @@ export default function EmplataGame(props: {
       pupil: 0.4,
       home: 0, // índice en HOMES (se reubica tras cada agarre y de vez en cuando)
       init: false,
+      ctrl: nuevoCtrl(),
     },
     t: 0,
+    ts: 0, // reloj en SEGUNDOS (wd.t está en frames-a-60): la vida no puede depender del framerate
     dt: 1 / 60,
     df: 1,
   });
@@ -2018,21 +2054,57 @@ export default function EmplataGame(props: {
       hvx = 0,
       hvy = 0,
       scale = 1,
+      ctrl: CtrlFideo | null = null,
     ) => {
       const wd = world.current;
       const S = scale; // el fideo escala con su objeto (p.ej. la caja crecida en la espera)
-      const wob = Math.sin(wd.t * 0.22 + seed) * 7 * S;
-      const wob2 = Math.cos(wd.t * 0.18 + seed * 1.7) * 6 * S;
+      /* El ondulado era un METRÓNOMO: 2.10 Hz y 1.72 Hz, razón 11/9 → el patrón se repetía
+         EXACTO cada 5.24 s, y un cliente que mira la pantalla mientras decide lo nota. Misma
+         sensación, razón irracional (φ/2): ya no vuelve nunca al mismo sitio. Y en segundos,
+         no en frames, para que no cambie de velocidad con el framerate. */
+      const F1 = 2.1;
+      const F2 = 2.1 * 0.809016994374947;
+      const wob = Math.sin(TAU * F1 * wd.ts + seed) * 7 * S;
+      const wob2 = Math.cos(TAU * F2 * wd.ts + seed * 1.7) * 6 * S;
       const dx = tipX - ax;
       const dy = tipY - ay;
       // WHIP: el cuerpo TRAILA la velocidad de la cabeza (follow-through) → ondula como ser vivo,
       // no es un cable rígido. El nodo cercano a la cabeza (c2) se retrasa opuesto al movimiento.
       const whipX = clamp(hvx * 0.05, -15, 15) * S;
       const whipY = clamp(hvy * 0.05, -15, 15) * S;
-      const c1x = ax + dx * 0.16 + wob - whipX * 0.35;
-      const c1y = ay - 48 * S + wob2 * 0.6 + dy * 0.1 - whipY * 0.35;
-      const c2x = ax + dx * 0.74 - wob * 0.6 - whipX;
-      const c2y = Math.min(ay, tipY) - 42 * S + wob2 - whipY;
+      const t1x = ax + dx * 0.16 + wob - whipX * 0.35;
+      const t1y = ay - 48 * S + wob2 * 0.6 + dy * 0.1 - whipY * 0.35;
+      const t2x = ax + dx * 0.74 - wob * 0.6 - whipX;
+      const t2y = Math.min(ay, tipY) - 42 * S + wob2 - whipY;
+      /* EL CUERPO ADQUIERE MEMORIA. Antes los puntos de control se calculaban
+         ANALÍTICAMENTE desde la cabeza cada frame: si la cabeza iba y volvía al mismo punto,
+         el cuerpo quedaba idéntico — sin historia, sin inercia, sin coleteo (el "whip" lo
+         fingía con un offset). Ahora son objetivos y los puntos reales los persiguen con
+         muelles de vida media CRECIENTE hacia la cabeza (0.075 s → 0.135 s): ese escalonado
+         es lo que produce el látigo. Los EXTREMOS siguen siendo exactos, así que la hebra
+         nunca se despega ni del hogar ni de la cabeza. */
+      let c1x = t1x;
+      let c1y = t1y;
+      let c2x = t2x;
+      let c2y = t2y;
+      if (ctrl) {
+        if (!ctrl.on) {
+          ctrl.on = true;
+          ctrl.x1 = t1x;
+          ctrl.y1 = t1y;
+          ctrl.x2 = t2x;
+          ctrl.y2 = t2y;
+        }
+        const hdt = Math.min(wd.dt, 1 / 30);
+        [ctrl.x1, ctrl.v1x] = damper(ctrl.x1, ctrl.v1x, t1x, 0.075, hdt);
+        [ctrl.y1, ctrl.v1y] = damper(ctrl.y1, ctrl.v1y, t1y, 0.075, hdt);
+        [ctrl.x2, ctrl.v2x] = damper(ctrl.x2, ctrl.v2x, t2x, 0.135, hdt);
+        [ctrl.y2, ctrl.v2y] = damper(ctrl.y2, ctrl.v2y, t2y, 0.135, hdt);
+        c1x = ctrl.x1;
+        c1y = ctrl.y1;
+        c2x = ctrl.x2;
+        c2y = ctrl.y2;
+      }
       for (let k = 0; k <= FN; k++) {
         const t = k / FN;
         const mt = 1 - t;
@@ -2043,7 +2115,10 @@ export default function EmplataGame(props: {
       ctx.lineCap = "round";
 
       // ancho por nodo: TAPER de la base al cuello, escalado por S (respira ±4% para "vida")
-      const breathe = 1 + Math.sin(wd.t * 0.09 + seed) * 0.04;
+      /* 0.86 Hz = 52 respiraciones/min: eso es JADEAR. Un bicho tranquilo va a 0.20-0.30 Hz,
+         y con una pizca de ruido para que no sea un émbolo. */
+      const breathe =
+        1 + (Math.sin(TAU * 0.26 * wd.ts + seed) * 0.75 + fbm(wd.ts * 0.55 + seed * 13) * 0.25) * 0.045;
       const wBase = 7.6 * S * breathe;
       const wTip = 3.2 * S * breathe;
       // construye la cinta como polígono (borde izq de ida, borde der de vuelta)
@@ -2149,14 +2224,21 @@ export default function EmplataGame(props: {
       ctx.rotate(ang + Math.PI / 2); // el eje largo sigue la hebra
       ctx.scale(S, S); // la cabeza escala con el cuerpo
       const spd = Math.hypot(hvx, hvy);
-      const st = clamp(spd * 0.0016, 0, 0.3); // squash&stretch: la cabeza se estira al ir rápido
+      /* Dos defectos: el coeficiente saturaba a 187 px/s y la cabeza vuela a 1200-1800 px/s,
+         así que el estiramiento era BINARIO (pegado al tope el 90% del tiempo, no comunicaba
+         velocidad); y 0.82 × 1.30 hacía que la cabeza GANARA 6.6% de área al ir rápido, que
+         es la lectura contraria a la de un ser con masa. Ahora satura a ~970 px/s y el área
+         se conserva. */
+      const st = clamp(spd * 0.00035, 0, 0.34);
+      const sy = 1 + st;
+      const sx = 1 / sy;
       const headG = ctx.createRadialGradient(-2, -3, 1, 0, 0, 9);
       headG.addColorStop(0, "#FBD27A");
       headG.addColorStop(0.6, "#EEAE3C");
       headG.addColorStop(1, "#B67C22");
       ctx.fillStyle = headG;
       ctx.beginPath();
-      ctx.ellipse(0, 0, 5.4 * (1 - st * 0.6), 6.6 * (1 + st), 0, 0, TAU);
+      ctx.ellipse(0, 0, 5.4 * sx, 6.6 * sy, 0, 0, TAU);
       ctx.fill();
       ctx.fillStyle = "rgba(255,252,240,0.8)";
       ctx.beginPath();
@@ -2168,9 +2250,18 @@ export default function EmplataGame(props: {
       if (eyes) {
         const perX = -dirY;
         const perY = dirX;
-        const blink = (wd.t + seed * 53) % 190 < 7 ? 0.12 : 1; // parpadeo DESINCRONIZADO por seed
+        /* El parpadeo tenía periodo EXACTO de 3.17 s: la señal más barata de "esto es un
+           bucle". Ahora el intervalo lo sortea el ruido (1.5-3.3 s) y a veces sale doble,
+           como un bicho de verdad. */
+        const bt = wd.ts + seed * 0.9;
+        const kb = Math.floor(bt / 2.4);
+        const tb0 = kb * 2.4 + 1.2 + fbm(kb * 1.7) * 0.9;
+        const dtb = bt - tb0;
+        const doble = fbm(kb * 3.3) > 0.55;
+        const blink = (dtb > 0 && dtb < 0.11) || (doble && dtb > 0.29 && dtb < 0.4) ? 0.12 : 1;
         const spd2 = Math.hypot(hvx, hvy);
-        const lx = spd2 > 10 ? clamp(hvx / spd2, -1, 1) * 1.3 : 0; // la pupila mira hacia el movimiento
+        // quieto, la pupila se quedaba CLAVADA en el centro; ahora hace sacadas lentas
+        const lx = spd2 > 10 ? clamp(hvx / spd2, -1, 1) * 1.3 : fbm(wd.ts * 0.19 + seed) * 0.9;
         const ly = clamp((spd2 > 10 ? clamp(hvy / spd2, -1, 1) * 1.1 : 0) + pupilDown * 0.7, -1.15, 1.15);
         ctx.save();
         ctx.translate(tipX, tipY); // marco local a la cabeza, escalado por S (ojos/boca crecen con ella)
@@ -2232,6 +2323,7 @@ export default function EmplataGame(props: {
       wd.dt = dt;
       wd.df = df;
       wd.t += df;
+      wd.ts += dt; // usa `dt` (no dtReal): el hit-stop congela también la vida idle
       // suaviza la inclinación del móvil → la luz se mueve con calma, no nerviosa (luz interactiva)
       wd.tiltX += (tiltTX - wd.tiltX) * (1 - Math.pow(0.9, df));
       wd.tiltY += (tiltTY - wd.tiltY) * (1 - Math.pow(0.9, df));
@@ -2450,7 +2542,7 @@ export default function EmplataGame(props: {
         [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, react ? 240 : 170, react ? 22 : 19, dt);
         [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, react ? 240 : 170, react ? 22 : 19, dt);
         m.pupil += (pupil - m.pupil) * (1 - Math.pow(0.86, df));
-        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy);
+        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy, 1, m.ctrl);
       }
 
       ctx.save();
@@ -3508,7 +3600,8 @@ export default function EmplataGame(props: {
         }
         [fd.hx, fd.hvx] = springStep(fd.hx!, fd.hvx!, tipX, 320, 26, dt);
         [fd.hy, fd.hvy] = springStep(fd.hy!, fd.hvy!, tipY, 320, 26, dt);
-        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true, 0.35, fd.hvx ?? 0, fd.hvy ?? 0);
+        if (!fd.ctrl) fd.ctrl = nuevoCtrl();
+        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true, 0.35, fd.hvx ?? 0, fd.hvy ?? 0, 1, fd.ctrl);
       }
 
 
@@ -3952,7 +4045,7 @@ export default function EmplataGame(props: {
               {!baseId
                 ? "Elige tu base para emplatar"
                 : proteinaIds.length === 0
-                  ? "Va sin proteína · se puede emplatar"
+                  ? "Va sin proteína"
                   : "\u00a0"}
             </span>
             <small>
@@ -3961,8 +4054,8 @@ export default function EmplataGame(props: {
                   ? `Arma tu caja · desde ${desdeBase}`
                   : "Sin bases disponibles hoy"
                 : tops.length > incluidos
-                  ? `${incluidos} toppings gratis · ${tops.length - incluidos} con precio`
-                  : `${tops.length}/${incluidos} toppings de la casa`}
+                  ? `${incluidos} gratis · ${tops.length - incluidos} con precio`
+                  : `${tops.length}/${incluidos} de cortesía`}
               {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
             </small>
             <div className="emp-total__row">
