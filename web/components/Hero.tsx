@@ -1,9 +1,11 @@
 import LogoMedia from "./LogoMedia";
 
+// El mismo arte horneado que sirve el juego, no emojis del sistema: los tres pasos son
+// lo primero que se ve y marcan el idioma visual del resto de la carta.
 const PASOS = [
-  { n: 1, ico: "🥔", label: "Base", desc: "criolla · francesa · spaghetti" },
-  { n: 2, ico: "🍗", label: "Proteína", desc: "chicharrón · res · pollo…" },
-  { n: 3, ico: "🌽", label: "Toppings", desc: "maicitos · piña · tocineta…" },
+  { n: 1, art: "/food/papa-criolla.webp", label: "Base", desc: "criolla · francesa · spaghetti" },
+  { n: 2, art: "/food/chicharron.webp", label: "Proteína", desc: "chicharrón · res · pollo…" },
+  { n: 3, art: "/food/maicitos.webp", label: "Toppings", desc: "maicitos · piña · tocineta…" },
 ];
 
 export default function Hero() {
@@ -18,9 +20,8 @@ export default function Hero() {
           {PASOS.map((p) => (
             <div className="hstep" role="listitem" key={p.n}>
               <span className="hstep__n">{p.n}</span>
-              <span className="hstep__ico" aria-hidden>
-                {p.ico}
-              </span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="hstep__art" src={p.art} alt="" aria-hidden />
               <b>{p.label}</b>
               <small>{p.desc}</small>
             </div>

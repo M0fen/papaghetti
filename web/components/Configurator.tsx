@@ -174,7 +174,13 @@ export default function Configurator({
             </Group>
 
             <button className="btn btn--ghost" onClick={sorprendeme} style={{ alignSelf: "flex-start" }}>
-              <span>🎲 Sorpréndeme</span>
+              <span>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ verticalAlign: -3, marginRight: 6 }}>
+                  <rect x="3" y="3" width="18" height="18" rx="4" />
+                  <path d="M8.5 8.5v.01M15.5 8.5v.01M8.5 15.5v.01M15.5 15.5v.01M12 12v.01" />
+                </svg>
+                Sorpréndeme
+              </span>
             </button>
           </div>
 

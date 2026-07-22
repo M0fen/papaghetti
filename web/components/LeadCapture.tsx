@@ -27,7 +27,7 @@ export default function LeadCapture() {
   if (ok) {
     return (
       <div className="loc__card">
-        <h3>✨ ¡Quedaste en el Club!</h3>
+        <h3>¡Quedaste en el Club!</h3>
         <p style={{ opacity: 0.85 }}>
           Te avisaremos de nuevos enredos y antojos. Gracias, {nombre.split(" ")[0]}.
         </p>
@@ -37,7 +37,7 @@ export default function LeadCapture() {
 
   return (
     <div className="loc__card">
-      <h3>✨ Club Papaghetti</h3>
+      <h3>Club Papaghetti</h3>
       <p style={{ opacity: 0.85, marginBottom: 14 }}>
         Déjanos tus datos y entérate primero de nuevos enredos y promos.
       </p>

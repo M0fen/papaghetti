@@ -427,8 +427,8 @@ a {
   max-height: 46vh;
   margin: 6px auto 2px;
   /* fundido suave de los bordes como seguro extra sobre el color exacto */
-  -webkit-mask-image: radial-gradient(ellipse 90% 92% at 50% 50%, #000 74%, transparent 100%);
-  mask-image: radial-gradient(ellipse 90% 92% at 50% 50%, #000 74%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 78% 82% at 50% 50%, #000 34%, transparent 90%);
+  mask-image: radial-gradient(ellipse 78% 82% at 50% 50%, #000 34%, transparent 90%);
   animation: fade-up 0.7s var(--pg-ease-twirl) 0.15s both;
 }
 .hero__logo video,
@@ -479,9 +479,21 @@ a {
   display: grid;
   place-items: center;
 }
-.hstep__ico {
-  font-size: 1.4rem;
-  line-height: 1;
+/* icono de sección en las cards de ubicación (reemplaza a los emojis) */
+.loc__ico {
+  width: 20px;
+  height: 20px;
+  vertical-align: -3px;
+  color: var(--pg-oro);
+  margin-right: 4px;
+}
+.hstep__art {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+  margin: 2px auto 0;
+  display: block;
+  filter: drop-shadow(0 6px 8px rgba(30, 22, 17, 0.18));
 }
 .hstep b {
   font-size: 0.9rem;

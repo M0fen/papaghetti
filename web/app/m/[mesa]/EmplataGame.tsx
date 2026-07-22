@@ -75,6 +75,13 @@ const YB = -0.05; // tapa de la CAMA (fracción de boxH; el nido se apoya aquí,
 const HM = 0.2; // altura del penacho (apex ≈ -0.25, anidado dentro de la caja)
 const FXLIM = 0.3; // límite lateral (= el lim del apilado anterior)
 const GOLDEN = 2.399963229728653; // ángulo áureo (phyllotaxis de Vogel → ruido azul, sin clusters)
+
+/* Unidades de DISEÑO de la escena (px a escala 1 = teléfono de 390). Todo lo demás las
+   multiplica por `U` (ver geo()), así el mismo dibujo sirve en un móvil y en un portátil.
+   MOBILE FIRST: a 390px U vale exactamente 1 → la escena del teléfono no se mueve un píxel. */
+const CAJA_BASE = 300; // ancho de la caja a escala 1
+const CARTA_W = 96; // +4 respecto al original: gana texto sin quitar cartas a la vista
+const CARTA_H = 118;
 /** Hash determinista str→[0,1): jitter/rot reproducibles (jamás Math.random posicional). */
 function hash01(str: string): number {
   let h = 2166136261;
@@ -887,6 +894,9 @@ export default function EmplataGame(props: {
     incluidos,
   });
   const faltaMin = faltaParaMinimo(subtotal, tipoActual, props.pedidoMinimo);
+  // La barra de abajo muestra LA COMIDA. El envío aparece en la hoja final, cuando el
+  // cliente ya eligió domicilio: cobrarlo antes de que lo pida se lee como sorpresa.
+  const totalComida = subtotal + impuesto;
 
   // ------- mundo del juego (refs, cero re-render) -------
   const world = useRef({
@@ -1216,6 +1226,30 @@ export default function EmplataGame(props: {
     let raf = 0;
     let W = 0;
     let H = 0;
+
+    // ---------- geometría de la escena ----------
+    /**
+     * LA ESCENA, A LA MEDIDA DE LA PANTALLA.
+     *
+     * El juego se calibró a ~390×844 (una mano) y todos los tamaños eran px fijos: en un
+     * portátil la caja topaba en 300px sobre un lienzo de 1440 y sobraba medio metro de
+     * piso vacío — se leía como una app de teléfono estirada en una pared. `U` escala la
+     * escena entera. Manda la ALTURA, que es lo que de verdad escasea en horizontal.
+     */
+    const geo = () => {
+      const U = clamp(Math.min(W / 390, H / 700), 1, 2.2);
+      const ancho = W >= 820; // tablet/desktop: hay sitio de sobra a los lados
+      const boxW = Math.min(W * (ancho ? 0.42 : 0.66), CAJA_BASE * U);
+      const boxH = boxW * 0.78;
+      const boxX = W / 2;
+      const boxY = H * (ancho ? 0.335 : 0.32);
+      const trayY = H * (ancho ? 0.6 : 0.555); // pestañas
+      const cardW = CARTA_W * U;
+      const cardH = CARTA_H * U;
+      const cardY = trayY + 34 * U + cardH / 2; // fila de cartas (sin solapar pestañas)
+      return { U, boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH };
+    };
+
     let dpr = 1;
     let lastT = 0; // timestamp del rAF anterior (reloj real, no contador de frames)
     const reduce =
@@ -1332,8 +1366,7 @@ export default function EmplataGame(props: {
     // ---- BANDA FRONTAL horneada (perf): todo lo estático de la banda (kraft+textura+canto
     // corrugado+motivo+wordmark+sello) en UN sprite → drawImage/frame en vez de patrón+arcos+texto.
     const bakeFrontBand = () => {
-      const boxW = Math.min(W * 0.66, 300);
-      const boxH = boxW * 0.78;
+      const { boxW, boxH } = geo(); // MISMA geometría que la escena (si no, la banda no calza)
       if (boxW < 10) return;
       const eh = boxH * 0.028;
       const left = -boxW / 2 - 3;
@@ -1574,21 +1607,16 @@ export default function EmplataGame(props: {
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
-    // ---------- geometría de la escena ----------
-    const geo = () => {
-      const boxW = Math.min(W * 0.66, 300);
-      const boxH = boxW * 0.78;
-      const boxX = W / 2;
-      const boxY = H * 0.32;
-      const trayY = H * 0.555; // pestañas
-      const cardW = 92;
-      const cardH = 118;
-      const cardY = trayY + 34 + cardH / 2; // fila de cartas (sin solapar pestañas)
-      return { boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH };
-    };
 
+    // Lo AGOTADO al final: no tiene por qué ocupar el mejor sitio de la bandeja (la
+    // tocineta agotada salía tercera, delante de cosas que sí se pueden pedir).
+    const ordenar = (l: Ingrediente[]) =>
+      [...l].sort((a, b) => Number(!!a.agotado) - Number(!!b.agotado));
+    const basesO = ordenar(bases);
+    const proteinasO = ordenar(proteinas);
+    const toppingsO = ordenar(toppings);
     const listaActiva = (): Ingrediente[] =>
-      sel.current.tab === 0 ? bases : sel.current.tab === 1 ? proteinas : toppings;
+      sel.current.tab === 0 ? basesO : sel.current.tab === 1 ? proteinasO : toppingsO;
 
     /** Radio de colisión (px) según categoría — la comida ocupa ~0.35 del sprite. */
     const radioDe = (cat: string, sc: number) => SPR * sc * 0.35;
@@ -1795,10 +1823,10 @@ export default function EmplataGame(props: {
 
     /** Devuelve la carta bajo (x,y) — o null. */
     const cartaEn = (x: number, y: number): { ing: Ingrediente; cx: number } | null => {
-      const { cardY, cardW, cardH } = geo();
+      const { U, cardY, cardW, cardH } = geo();
       if (y < cardY - cardH / 2 - 6 || y > cardY + cardH / 2 + 6) return null;
       const lista = listaActiva().filter((i) => i.activo);
-      const step = cardW + 10;
+      const step = cardW + 10 * U;
       const totalW = lista.length * step;
       const x0 = Math.max(14, (W - totalW) / 2) - world.current.trayScroll;
       for (let k = 0; k < lista.length; k++) {
@@ -2159,7 +2187,7 @@ export default function EmplataGame(props: {
       // suaviza la inclinación del móvil → la luz se mueve con calma, no nerviosa (luz interactiva)
       wd.tiltX += (tiltTX - wd.tiltX) * (1 - Math.pow(0.9, df));
       wd.tiltY += (tiltTY - wd.tiltY) * (1 - Math.pow(0.9, df));
-      const { boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH } = geo();
+      const { U, boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH } = geo();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       // sacudida de escena (crocante) — decae; se suma a la caja y la mascota (no al fondo)
       wd.shake *= Math.pow(0.72, df);
@@ -2987,26 +3015,27 @@ export default function EmplataGame(props: {
       ctx.fillRect(0, trayY - 30, W, H - trayY + 30);
       // pestañas
       const tabsTxt = ["LA BASE", "PROTEÍNA", "TOPPINGS"] as const;
-      const tw = Math.min(W / 3 - 8, 128);
+      const tw = Math.min(W / 3 - 8 * U, 128 * U);
+      const th0 = 40 * U;
       for (let k = 0; k < 3; k++) {
-        const tx = W / 2 + (k - 1) * (tw + 8);
+        const tx = W / 2 + (k - 1) * (tw + 8 * U);
         const activo = sel.current.tab === k;
         // inactiva: píldora OSCURA (no crema-sobre-crema translúcido que casi no se lee sobre la madera clara)
         ctx.fillStyle = activo ? "#F2A516" : "rgba(24,15,7,0.42)";
         ctx.beginPath();
-        ctx.roundRect(tx - tw / 2, trayY - 22, tw, 40, 999);
+        ctx.roundRect(tx - tw / 2, trayY - 22 * U, tw, th0, 999);
         ctx.fill();
-        ctx.font = fontB(12, 800);
+        ctx.font = fontB(12 * U, 800);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = activo ? "#1E1611" : "rgba(255,247,230,0.94)";
-        ctx.fillText(tabsTxt[k], tx, trayY - 2);
+        ctx.fillText(tabsTxt[k], tx, trayY - 2 * U);
         // check de completado (ámbar, disciplina de color — nunca verde-UI)
         const done = k === 0 ? !!sel.current.baseId : k === 1 ? sel.current.proteinaIds.length > 0 : sel.current.toppingIds.length > 0;
         if (done && !activo) {
           ctx.fillStyle = "#F2A516";
           ctx.beginPath();
-          ctx.arc(tx + tw / 2 - 12, trayY - 12, 4.5, 0, TAU);
+          ctx.arc(tx + tw / 2 - 12 * U, trayY - 12 * U, 4.5 * U, 0, TAU);
           ctx.fill();
         }
       }
@@ -3016,7 +3045,7 @@ export default function EmplataGame(props: {
         wd.trayVel *= Math.pow(0.92, df);
       }
       const lista = listaActiva().filter((i) => i.activo);
-      const step = cardW + 10;
+      const step = cardW + 10 * U;
       const totalW2 = lista.length * step;
       const maxScroll = Math.max(0, totalW2 - W + 28);
       wd.trayScroll = Math.max(0, Math.min(maxScroll, wd.trayScroll));
@@ -3036,14 +3065,18 @@ export default function EmplataGame(props: {
         const press = wd.pressed === ing.id ? 0.94 : 1;
         ctx.save();
         ctx.translate(cx, cardY + bob + (1 - ea) * 30);
-        ctx.scale(press, press);
+        // La carta se dibuja SIEMPRE en unidades de diseño (CARTA_W×CARTA_H) y la escena
+        // la escala: un solo dibujo sirve en móvil y en portátil.
+        ctx.scale(press * U, press * U);
         ctx.globalAlpha = ea;
+        const cardWd = CARTA_W;
+        const cardHd = CARTA_H;
         // ===== PLATO de cerámica (mise-en-place): el ingrediente servido en su plato =====
         // el TAMAÑO del plato cambia por categoría (base grande → topping pequeño)
         const plCat = ing.categoria;
         const prx = plCat === "base" ? 43 : plCat === "proteina" ? 38 : 33;
         const pry = prx * 0.42;
-        const ply = -cardH / 2 + 42; // el plato arriba; nombre/precio abajo
+        const ply = -cardHd / 2 + 42; // el plato arriba; nombre/precio abajo
         // glow ámbar de selección tras el plato
         if (selr) {
           const gsz = prx + 8 + Math.sin(wd.t * 0.09 + k) * 1.5;
@@ -3108,9 +3141,9 @@ export default function EmplataGame(props: {
         ctx.shadowColor = "rgba(18,9,3,0.7)"; // no se pierde si un sprite claro o el pool de luz asoma detrás
         ctx.shadowBlur = 4;
         ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.5)" : "#FBF1DE";
-        const [l1, l2] = wrap2(ctx, ing.nombre, cardW - 14);
-        ctx.fillText(l1, 0, cardH / 2 - (l2 ? 31 : 23));
-        if (l2) ctx.fillText(l2, 0, cardH / 2 - 19);
+        const [l1, l2] = wrap2(ctx, ing.nombre, cardWd - 6);
+        ctx.fillText(l1, 0, cardHd / 2 - (l2 ? 31 : 23));
+        if (l2) ctx.fillText(l2, 0, cardHd / 2 - 19);
         ctx.shadowBlur = 0;
         // precio / GRATIS chip (oro sobre bandeja oscura — legible; el espresso desaparecería)
         const idxT = sel.current.toppingIds.indexOf(ing.id);
@@ -3119,10 +3152,10 @@ export default function EmplataGame(props: {
         if (esGratis && !ing.agotado) {
           ctx.fillStyle = "#C69A5B";
           ctx.beginPath();
-          ctx.roundRect(-26, cardH / 2 - 9, 52, 16, 8);
+          ctx.roundRect(-26, cardHd / 2 - 9, 52, 16, 8);
           ctx.fill();
           ctx.fillStyle = "#2A1C0E";
-          ctx.fillText("GRATIS", 0, cardH / 2 - 0.5);
+          ctx.fillText("GRATIS", 0, cardHd / 2 - 0.5);
         } else {
           ctx.shadowColor = "rgba(18,9,3,0.7)";
           ctx.shadowBlur = 4;
@@ -3130,9 +3163,25 @@ export default function EmplataGame(props: {
           ctx.fillText(
             ing.agotado ? "AGOTADO" : ing.precio > 0 ? formatCOP(ing.precio) : "—",
             0,
-            cardH / 2 - 2,
+            cardHd / 2 - 2,
           );
           ctx.shadowBlur = 0;
+        }
+        // LA CORTESÍA, DONDE SE DECIDE: mientras queden toppings de la casa, la carta lo
+        // dice en vez de mostrar solo un precio que el cliente cree que va a pagar.
+        if (
+          ing.categoria === "topping" &&
+          !ing.agotado &&
+          !esGratis &&
+          sel.current.toppingIds.length < incluidos
+        ) {
+          ctx.font = fontB(9, 800);
+          ctx.fillStyle = "#C69A5B";
+          ctx.beginPath();
+          ctx.roundRect(-33, -cardHd / 2 + 1, 66, 14, 7); // DENTRO de la carta: no invade las pestañas
+          ctx.fill();
+          ctx.fillStyle = "#2A1C0E";
+          ctx.fillText("VA DE LA CASA", 0, -cardHd / 2 + 8.2);
         }
         // check de seleccionado (en el borde del plato)
         if (selr) {
@@ -3448,34 +3497,34 @@ export default function EmplataGame(props: {
           tv.cre += (pf.cre - tv.cre) * kk;
           tv.fre += (pf.fre - tv.fre) * kk;
           tv.dul += (pf.dul - tv.dul) * kk;
-          const mw = Math.min(W * 0.68, 256);
-          const mh = 52;
+          const mw = Math.min(W * 0.68, 256 * U);
+          const mh = 52 * U;
           const myc = H * 0.11;
           // píldora kraft SÓLIDA (vive sobre el punto más claro de la escena → sin fondo real nada
           // cumple contraste; 0.24 era ilegible). Borde crema tenue para asentarla.
           ctx.fillStyle = "rgba(26,17,8,0.66)";
           ctx.beginPath();
-          ctx.roundRect(W / 2 - mw / 2, myc - mh / 2, mw, mh, 14);
+          ctx.roundRect(W / 2 - mw / 2, myc - mh / 2, mw, mh, 14 * U);
           ctx.fill();
           ctx.strokeStyle = "rgba(255,244,220,0.14)";
           ctx.lineWidth = 1;
           ctx.stroke();
           // título evocador (13px + sombra → legible a plena luz)
-          ctx.font = fontD(13, 800);
+          ctx.font = fontD(13 * U, 800);
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.shadowColor = "rgba(0,0,0,0.45)";
           ctx.shadowBlur = 3;
           ctx.fillStyle = "rgba(255,248,232,0.98)";
-          ctx.fillText(tituloAntojo(pf, nA), W / 2, myc - mh / 2 + 13);
+          ctx.fillText(tituloAntojo(pf, nA), W / 2, myc - mh / 2 + 13 * U);
           ctx.shadowBlur = 0;
           // 4 barras: crocante / cremoso / fresco / dulce (anchas → los labels de 10px no se tocan)
-          const bw = 46;
-          const gap = 10;
+          const bw = 46 * U;
+          const gap = 10 * U;
           const totalB = EJES.length * bw + (EJES.length - 1) * gap;
           const bx0 = W / 2 - totalB / 2;
-          const by = myc + mh / 2 - 15;
-          const bh = 9;
+          const by = myc + mh / 2 - 15 * U;
+          const bh = 9 * U;
           let domK = 0;
           EJES.forEach((e, k) => {
             if (tv[e.k] > tv[EJES[domK].k]) domK = k;
@@ -3485,7 +3534,7 @@ export default function EmplataGame(props: {
             const bx = bx0 + k * (bw + gap);
             ctx.fillStyle = "rgba(251,241,222,0.16)";
             ctx.beginPath();
-            ctx.roundRect(bx, by, bw, bh, 4);
+            ctx.roundRect(bx, by, bw, bh, 4 * U);
             ctx.fill();
             const fw = Math.max(4, bw * clamp(v, 0, 1));
             if (k === domK && v > 0.15) {
@@ -3494,16 +3543,16 @@ export default function EmplataGame(props: {
             }
             ctx.fillStyle = e.color;
             ctx.beginPath();
-            ctx.roundRect(bx, by, fw, bh, 4);
+            ctx.roundRect(bx, by, fw, bh, 4 * U);
             ctx.fill();
             ctx.shadowBlur = 0;
             ctx.fillStyle = "rgba(255,255,255,0.22)"; // filo superior (relieve)
             ctx.beginPath();
-            ctx.roundRect(bx, by, fw, 2, 2);
+            ctx.roundRect(bx, by, fw, 2 * U, 2 * U);
             ctx.fill();
-            ctx.font = fontB(10, 800); // 8px era el peor texto de la app; sube a 10 legible
+            ctx.font = fontB(10 * U, 800); // 8px era el peor texto de la app; sube a 10 legible
             ctx.fillStyle = k === domK ? "rgba(255,246,224,0.98)" : "rgba(251,241,222,0.9)";
-            ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 8);
+            ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 8 * U);
           });
         }
       }
@@ -3814,7 +3863,8 @@ export default function EmplataGame(props: {
             </small>
             <div className="emp-total__row">
               <span className="emp-total__label">TOTAL</span>
-              <b>{formatCOP(total)}</b>
+              {/* la comida, sin envío: el domicilio todavía no lo ha elegido nadie */}
+              <b>{formatCOP(totalComida)}</b>
             </div>
           </div>
           <button
@@ -3917,6 +3967,10 @@ export default function EmplataGame(props: {
                 )}
               </>
             )}
+            <div className="emp-datos__linea">
+              <span>Tu caja</span>
+              <span>{formatCOP(totalComida)}</span>
+            </div>
             {domicilio > 0 && (
               <div className="emp-datos__linea">
                 <span>Domicilio</span>
@@ -3924,7 +3978,7 @@ export default function EmplataGame(props: {
               </div>
             )}
             <div className="emp-datos__total">
-              <span>Tu enredo</span>
+              <span>Total</span>
               <b>{formatCOP(total)}</b>
             </div>
             {faltaMin > 0 && (
