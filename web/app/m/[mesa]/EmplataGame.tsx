@@ -1222,7 +1222,16 @@ export default function EmplataGame(props: {
       const cardW = CARTA_W * U;
       const cardH = CARTA_H * U;
       const cardY = trayY + 34 * U + cardH / 2; // fila de cartas (sin solapar pestañas)
-      return { U, boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH };
+      /* LA CAJA SE APOYA EN LA MESA. El canto inferior real de la caja es la banda frontal
+         (boxY + 0.39·boxH) y el horizonte era `H * 0.42`, una constante que solo conocía
+         bakeBg: una depende del ANCHO (vía boxW) y la otra solo del ALTO, así que su
+         relación derivaba libre con el tamaño y la caja acababa flotando sobre la pared.
+         Ahora el horizonte se coloca un mordisco FIJO en unidades de caja por encima del
+         canto: 12% de boxH en cualquier pantalla. El clamp es solo raíl de seguridad para
+         relaciones de aspecto extremas. */
+      const baseY = boxY + boxH * 0.39;
+      const woodY = clamp(baseY - boxH * 0.12, H * 0.3, H * 0.46);
+      return { U, boxW, boxH, boxX, boxY, baseY, woodY, trayY, cardY, cardW, cardH };
     };
 
     /**
@@ -1464,7 +1473,7 @@ export default function EmplataGame(props: {
       c.width = Math.max(2, Math.round(W));
       c.height = Math.max(2, Math.round(H));
       const g = c.getContext("2d")!;
-      const woodY = H * 0.42; // la mesa sube para que la caja se APOYE en ella (no flote)
+      const { woodY } = geo(); // el horizonte lo fija la CAJA (ver geo): así se apoya de verdad
       // pared crema
       g.fillStyle = "#F6E7CB";
       g.fillRect(0, 0, W, H);
@@ -2301,6 +2310,12 @@ export default function EmplataGame(props: {
         // sigue a la caja (corrida en espera) y se desplaza un pelo OPUESTO a la luz interactiva (tilt)
         const cxs = boxXE + boxW * 0.02 - wd.tiltX * boxW * 0.08;
         ctx.save();
+        // La sombra es de MESA: recortada al plano de la mesa. Antes pintaba hasta 20 px por
+        // encima del horizonte —y durante la entrada, con la caja a media pared, la sombra
+        // entera— lo que remataba la lectura de "pegatina con sombra pintada".
+        ctx.beginPath();
+        ctx.rect(0, geo().woodY, W, H - geo().woodY);
+        ctx.clip();
         ctx.globalCompositeOperation = "multiply"; // la mesa asoma su tono cálido a través de la sombra (una-luz)
         // AMBIENTE: ancha, tenuísima, apenas ↘ (única capa con dirección de luz)
         const amb = ctx.createRadialGradient(cxs + boxW * 0.05, cy2 + boxH * 0.02, boxW * 0.06, cxs + boxW * 0.06, cy2 + boxH * 0.02, boxW * 0.85 * focoScaleE * spread);
@@ -2467,7 +2482,12 @@ export default function EmplataGame(props: {
         backG.addColorStop(1, "#6B4A20");
         ctx.fillStyle = backG;
         ctx.beginPath();
-        ctx.roundRect(-boxW * 0.42, -boxH * 0.42, boxW * 0.84, boxH * 0.48, 8);
+        /* Esquinas superiores VIVAS. El radio 8 dejaba, en cada esquina, 13.7 px² que no
+           pintaba NADIE (las paredes laterales arrancan en el vértice y crecen hacia fuera)
+           y asomaba el fondo crema contra el interior kraft: una muesca a máximo contraste
+           justo donde el ojo lee la silueta. Y el 8 era px fijo: pesaba 3.1% del ancho de
+           caja en móvil y 2.1% en portátil. */
+        ctx.roundRect(-boxW * 0.42, -boxH * 0.42, boxW * 0.84, boxH * 0.48, [0, 0, boxW * 0.031, boxW * 0.031]);
         ctx.fill();
         // corrugado interior: líneas verticales de la flauta (la comida las irá tapando)
         ctx.globalAlpha = 0.09;
@@ -2493,14 +2513,14 @@ export default function EmplataGame(props: {
         inS.addColorStop(1, "rgba(40,22,8,0)");
         ctx.fillStyle = inS;
         ctx.beginPath();
-        ctx.roundRect(-boxW * 0.42, -boxH * 0.42, boxW * 0.84, boxH * 0.3, 8);
+        ctx.roundRect(-boxW * 0.42, -boxH * 0.42, boxW * 0.84, boxH * 0.3, [0, 0, boxW * 0.031, boxW * 0.031]);
         ctx.fill();
         const inR = ctx.createLinearGradient(boxW * 0.42, 0, boxW * 0.18, 0);
         inR.addColorStop(0, "rgba(40,22,8,0.4)");
         inR.addColorStop(1, "rgba(40,22,8,0)");
         ctx.fillStyle = inR;
         ctx.beginPath();
-        ctx.roundRect(boxW * 0.12, -boxH * 0.42, boxW * 0.3, boxH * 0.48, 8);
+        ctx.roundRect(boxW * 0.12, -boxH * 0.42, boxW * 0.3, boxH * 0.48, [boxW * 0.031, 0, boxW * 0.031, boxW * 0.031]);
         ctx.fill();
         // branding interior: se lee al abrir vacía, la comida lo va tapando
         const marcaA = Math.max(0, 0.55 - wd.pila.length * 0.14) * Math.min(1, abre * 1.4);
@@ -2514,42 +2534,6 @@ export default function EmplataGame(props: {
           ctx.fillStyle = "rgba(230,190,130,0.8)";
           ctx.fillText("P A P A G H E T T I", 0, -boxH * 0.18);
           ctx.globalAlpha = 1;
-        }
-
-        // solapas laterales: se DESPLIEGAN al abrir (ángulo animado por `abre`)
-        const flapW = boxW * 0.22;
-        for (const side of [-1, 1]) {
-          ctx.save();
-          ctx.translate(side * boxW * 0.42, -boxH * 0.34);
-          ctx.rotate(side * 0.85 * abre);
-          // GROSOR del cartón: canto oscuro en el borde inferior de la solapa (se ve el espesor)
-          ctx.fillStyle = "#8A6636";
-          ctx.beginPath();
-          ctx.moveTo(0, boxH * 0.1);
-          ctx.lineTo(side * flapW, -flapW * 0.35);
-          ctx.lineTo(side * flapW, -flapW * 0.35 + 4);
-          ctx.lineTo(0, boxH * 0.1 + 4);
-          ctx.closePath();
-          ctx.fill();
-          const grad = ctx.createLinearGradient(0, 0, side * flapW, -flapW * 0.5);
-          grad.addColorStop(0, "#C69A5B");
-          grad.addColorStop(1, "#E2BA7E");
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.moveTo(0, boxH * 0.1);
-          ctx.lineTo(side * flapW, -flapW * 0.35);
-          ctx.lineTo(side * flapW * 0.7, -flapW * 0.6);
-          ctx.lineTo(0, -boxH * 0.02);
-          ctx.closePath();
-          ctx.fill();
-          // canto iluminado del pliegue
-          ctx.strokeStyle = "rgba(255,236,195,0.4)";
-          ctx.lineWidth = 1.2;
-          ctx.beginPath();
-          ctx.moveTo(0, -boxH * 0.02);
-          ctx.lineTo(side * flapW * 0.7, -flapW * 0.6);
-          ctx.stroke();
-          ctx.restore();
         }
 
         // ===== PAREDES LATERALES (volumen 3/4): la caja es un CONTENEDOR real, no una fachada.
@@ -2596,6 +2580,57 @@ export default function EmplataGame(props: {
           ctx.lineTo(boxW * 0.34, boxH * 0.02);
           ctx.closePath();
           ctx.fill();
+        }
+
+        /* SOLAPAS LATERALES, reconstruidas. Antes se dibujaban ANTES que las paredes (la
+           pared las repintaba y las partía en dos) y colgaban de un pivote situado a media
+           pared, 0.08·boxH por DEBAJO del canto: al rotar barrían hacia DENTRO del interior
+           y sobresalían 38.5 px por lado. Ahora cuelgan del CANTO SUPERIOR real de la pared
+           como un paralelogramo: ningún vértice puede caer dentro (todos con |x| ≥ 0.42·boxW
+           y creciendo hacia fuera) y el saliente máximo baja a la mitad, 25.3 px en móvil.
+           El escorzo va con `abre`: cerrada es un labio de canto, abierta una solapa larga. */
+        {
+          const ab = Math.min(1, abre); // mata el overshoot de easeOutBack
+          const thick = Math.max(4, boxW * 0.0155); // grosor visible del cartón
+          for (const side of [-1, 1]) {
+            const rax = side * boxW * 0.42;
+            const ray = -boxH * 0.42; // canto trasero-alto de la pared
+            const rbx = side * boxW * 0.5;
+            const rby = -boxH * 0.08; // canto delantero-bajo
+            const L = boxW * 0.1 * (0.28 + 0.72 * ab);
+            const ox = side * L * 0.94;
+            const oy = L * 0.26;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(side * boxW * 0.415, -boxH * 0.62, side * boxW * 0.34, boxH * 0.78);
+            ctx.clip(); // red de seguridad + evita el hairline en la unión solapa/pared
+            ctx.fillStyle = "#8A6636"; // grosor del cartón
+            ctx.beginPath();
+            ctx.moveTo(rax + ox, ray + oy);
+            ctx.lineTo(rbx + ox, rby + oy);
+            ctx.lineTo(rbx + ox, rby + oy + thick);
+            ctx.lineTo(rax + ox, ray + oy + thick);
+            ctx.closePath();
+            ctx.fill();
+            const gf = ctx.createLinearGradient(rax, ray, rbx + ox, rby + oy);
+            gf.addColorStop(0, side < 0 ? "#E2BA7E" : "#C69A5B"); // izq LIT, der en sombra:
+            gf.addColorStop(1, side < 0 ? "#C69A5B" : "#9A7038"); // coherente con las paredes
+            ctx.fillStyle = gf;
+            ctx.beginPath();
+            ctx.moveTo(rax, ray);
+            ctx.lineTo(rbx, rby);
+            ctx.lineTo(rbx + ox, rby + oy);
+            ctx.lineTo(rax + ox, ray + oy);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = "rgba(255,236,195,0.4)";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(rax, ray);
+            ctx.lineTo(rbx, rby);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
 
         // ===== SUELO interior: la comida se apoya en una superficie kraft (no flota en el vacío) =====
