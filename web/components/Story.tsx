@@ -27,7 +27,12 @@ export default function Story() {
             </div>
           </Reveal>
           <Reveal delay={120}>
-            <LogoMedia className="story__video" />
+            {/* El marco lleva el color EXACTO del fondo del video (#f4e4c9) y se funde
+                hacia la crema de la página: sin él, la caja del video se ve como un
+                recuadro recortado sobre el #fbf1de de la sección. */}
+            <div className="story__marco">
+              <LogoMedia className="story__video" />
+            </div>
           </Reveal>
         </div>
       </div>

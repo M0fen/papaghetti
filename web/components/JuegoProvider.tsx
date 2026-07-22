@@ -9,7 +9,7 @@
  * Dos entradas, una sola experiencia — y un solo bloqueo de scroll.
  */
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Ajustes, Ingrediente } from "@/lib/menu";
 import { TOPPINGS_INCLUIDOS } from "@/lib/menu";
 import EmplataGame from "@/app/m/[mesa]/EmplataGame";
@@ -57,7 +57,16 @@ export default function JuegoProvider({
 }) {
   const [abierto, setAbierto] = useState(false);
   const [precarga, setPrecarga] = useState<Precarga | null>(null);
-  const [rapidoFn, setRapidoFn] = useState<{ fn: () => void } | null>(null);
+
+  /**
+   * El callback de "camino rápido" vive en una REF, no en estado.
+   *
+   * Con estado se formaba un bucle infinito de render: onRapido guardaba un objeto nuevo
+   * → cambiaba el estado → el proveedor re-renderizaba → pedirRapido cambiaba de identidad
+   * → cambiaba el value del contexto → el efecto de EnredaTuPlato (deps [juego]) volvía a
+   * llamar onRapido → vuelta a empezar. Una ref no dispara render: se corta el ciclo.
+   */
+  const rapidoRef = useRef<(() => void) | null>(null);
 
   const abrir = useCallback((p?: Precarga | null) => {
     setPrecarga(p ?? null);
@@ -66,10 +75,15 @@ export default function JuegoProvider({
 
   const pedirRapido = useCallback(() => {
     setAbierto(false);
-    rapidoFn?.fn();
-  }, [rapidoFn]);
+    rapidoRef.current?.();
+  }, []);
 
-  const onRapido = useCallback((fn: () => void) => setRapidoFn({ fn }), []);
+  const onRapido = useCallback((fn: () => void) => {
+    rapidoRef.current = fn;
+  }, []);
+
+  // Value ESTABLE: si cambia de identidad, todos los consumidores re-renderizan.
+  const api = useMemo<JuegoApi>(() => ({ abrir, pedirRapido, onRapido }), [abrir, pedirRapido, onRapido]);
 
   // Bloqueo de scroll con `position:fixed; top:-scrollY`: con el documento scrolleado,
   // el viewport visual y el de layout se separan en móvil y el juego (position:fixed)
@@ -100,10 +114,20 @@ export default function JuegoProvider({
     };
   }, [abierto]);
 
-  const activos = (l: Ingrediente[]) => l.filter((i) => i.activo);
+  /**
+   * Las listas de ingredientes son DEPENDENCIA de los efectos del juego (el horneado de
+   * sprites y el bucle de render). Si se filtran durante el render, cada re-render del
+   * proveedor crea arrays nuevos → los efectos se desmontan y vuelven a montar → la escena
+   * se re-hornea entera. Eso era el PARPADEO. Memorizadas, la identidad no cambia.
+   */
+  const basesA = useMemo(() => bases.filter((i) => i.activo), [bases]);
+  const proteinasA = useMemo(() => proteinas.filter((i) => i.activo), [proteinas]);
+  const toppingsA = useMemo(() => toppings.filter((i) => i.activo), [toppings]);
+
+  const salir = useCallback(() => setAbierto(false), []);
 
   return (
-    <Ctx.Provider value={{ abrir, pedirRapido, onRapido }}>
+    <Ctx.Provider value={api}>
       {children}
       {abierto && (
         <div className="enreda-overlay">
@@ -115,15 +139,15 @@ export default function JuegoProvider({
             abierto={ajustes.abierto ?? true}
             impuestoPct={ajustes.impuestoPct ?? 0}
             incluidos={TOPPINGS_INCLUIDOS}
-            bases={activos(bases)}
-            proteinas={activos(proteinas)}
-            toppings={activos(toppings)}
+            bases={basesA}
+            proteinas={proteinasA}
+            toppings={toppingsA}
             canal="web"
             numMesas={ajustes.numMesas}
             costoDomicilio={ajustes.costoDomicilio}
             pedidoMinimo={ajustes.pedidoMinimo}
             precargar={precarga}
-            onSalir={() => setAbierto(false)}
+            onSalir={salir}
             onModoRapido={pedirRapido}
           />
         </div>

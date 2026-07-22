@@ -17,7 +17,7 @@
  * El cerebro manda: menú/precios/gratis/impuesto del catálogo. Física y arte son VIEW puro.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   formatCOP,
   estadoLabel,
@@ -822,6 +822,23 @@ export default function EmplataGame(props: {
     estadoRef.current = estado;
   }, [estado]);
 
+  /**
+   * FIRMA DEL MENÚ — blindaje contra el parpadeo.
+   *
+   * El horneado de sprites y el bucle de render dependían de las ARRAYS de ingredientes.
+   * Cualquier llamador que las filtrara durante su render (`bases.filter(...)` en el JSX)
+   * les daba identidad nueva en cada re-render → los efectos se desmontaban y la escena
+   * se re-horneaba entera, varias veces por segundo. Ahora dependen de esta firma: solo
+   * cambia cuando cambia el menú DE VERDAD (alta/baja, agotado, precio).
+   */
+  const menuSig = useMemo(
+    () =>
+      [...bases, ...proteinas, ...toppings]
+        .map((i) => `${i.id}:${i.activo ? 1 : 0}${i.agotado ? "x" : ""}:${i.precio}`)
+        .join("|"),
+    [bases, proteinas, toppings],
+  );
+
   // ------- precio (espejo de crearPedido, vía lib/precios) -------
   const all = [...bases, ...proteinas, ...toppings];
   const find = (id: string) => all.find((i) => i.id === id);
@@ -943,7 +960,7 @@ export default function EmplataGame(props: {
       img.src = `/food/${ing.id}.webp`;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bases, proteinas, toppings]);
+  }, [menuSig]);
 
   // ------- acciones -------
   /** Despacha al FIDEO MESERO: sale de la caja hacia la carta (cx,cy). */
@@ -3558,7 +3575,7 @@ export default function EmplataGame(props: {
       window.removeEventListener("deviceorientation", onOrient);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bases, proteinas, toppings, incluidos]);
+  }, [menuSig, incluidos]);
 
   // W4: al pedir otra caja, la escena canvas se reinicia sin desmontar (fase → arma)
   const otraCaja = useCallback(() => {

@@ -310,8 +310,11 @@ a {
   place-items: center;
   text-align: center;
   overflow: visible;
-  /* Color EXACTO del fondo del video decodificado (#F2E2C5) → logo flotando/adherido */
-  background: radial-gradient(120% 100% at 50% 34%, #f2e2c5 0%, #f2e2c5 64%, #ead7b2 100%);
+  /* Color EXACTO del fondo horneado del video, MEDIDO sobre el render (no estimado):
+     rgb(244,228,201) = #f4e4c9. Antes decía #f2e2c5 — desfasado en (2,2,4), y esa
+     diferencia mínima con borde duro es justo lo que el ojo lee como RECUADRO alrededor
+     del logo. Con el color idéntico bajo la caja del video, el borde deja de existir. */
+  background: radial-gradient(120% 100% at 50% 34%, #f4e4c9 0%, #f4e4c9 64%, #ead7b2 100%);
   padding-block: 92px 34px;
 }
 .hero__inner {
@@ -427,8 +430,9 @@ a {
   max-height: 46vh;
   margin: 6px auto 2px;
   /* fundido suave de los bordes como seguro extra sobre el color exacto */
-  -webkit-mask-image: radial-gradient(ellipse 78% 82% at 50% 50%, #000 34%, transparent 90%);
-  mask-image: radial-gradient(ellipse 78% 82% at 50% 50%, #000 34%, transparent 90%);
+  /* red de seguridad para los bordes, ya sin trabajo pesado que hacer */
+  -webkit-mask-image: radial-gradient(ellipse 98% 96% at 50% 50%, #000 78%, transparent 100%);
+  mask-image: radial-gradient(ellipse 98% 96% at 50% 50%, #000 78%, transparent 100%);
   animation: fade-up 0.7s var(--pg-ease-twirl) 0.15s both;
 }
 .hero__logo video,
@@ -439,6 +443,7 @@ a {
   object-position: center;
   display: block;
 }
+
 .hero__sub {
   opacity: 0;
   margin: 4px 0 0;
@@ -506,6 +511,19 @@ a {
 }
 
 /* Loop del logo en "Nuestra historia" (fondo crema → se funde) */
+.story__marco {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  /* mismo truco que en el hero: el color medido del video, difuminado hacia la página */
+  background: radial-gradient(
+    ellipse 74% 70% at 50% 48%,
+    #f4e4c9 0%,
+    #f4e4c9 52%,
+    rgba(244, 228, 201, 0) 100%
+  );
+}
 .story__video {
   position: relative;
   width: 100%;
