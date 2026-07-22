@@ -5,6 +5,8 @@ import ScrollHebra from "@/components/ScrollHebra";
 import Hero from "@/components/Hero";
 import EnredaTuPlato from "@/components/EnredaTuPlato";
 import JuegoProvider from "@/components/JuegoProvider";
+import CartaCompleta from "@/components/CartaCompleta";
+import DatosEstructurados from "@/components/DatosEstructurados";
 import FeaturedMenu from "@/components/FeaturedMenu";
 import Story from "@/components/Story";
 import Location from "@/components/Location";
@@ -38,6 +40,7 @@ export default async function Home() {
       <a href="#top" className="skip-link">
         Saltar al contenido
       </a>
+      <DatosEstructurados catalog={catalog} />
       <PromoBanner ajustes={ajustes} />
       <Nav offsetTop={hayBanner ? 38 : 0} />
       <ForkCursor />
@@ -64,6 +67,12 @@ export default async function Home() {
           />
           <Divider color="pomodoro" />
           <FeaturedMenu catalog={catalog} />
+          <CartaCompleta
+            bases={catalog.bases}
+            proteinas={catalog.proteinas}
+            toppings={catalog.toppings}
+          />
+          <Divider />
           <Story />
           <Location ajustes={catalog.ajustes} />
           <Footer />

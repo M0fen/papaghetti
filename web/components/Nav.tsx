@@ -22,7 +22,8 @@ export default function Nav({ offsetTop = 0 }: { offsetTop?: number }) {
       </a>
       <div className="nav__links">
         <a href="#arma">Arma tu enredo</a>
-        <a href="#menu">Menú</a>
+        <a href="#menu">Enredos insignia</a>
+        <a href="#carta">La carta</a>
         <a href="#ubicacion">Ubicación</a>
       </div>
       <a href="#arma" className="btn btn--gold" style={{ padding: "10px 18px" }}>

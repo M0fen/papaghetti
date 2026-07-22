@@ -28,6 +28,7 @@ import {
   type TipoServicio,
 } from "@/lib/menu";
 import { calcularTotales, faltaParaMinimo } from "@/lib/precios";
+import { EJES, perfilDe, rasgoDominante, saborDe, tituloAntojo, type Sabor } from "@/lib/sabor";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { useSonido } from "./sonido";
 
@@ -164,64 +165,7 @@ function wrap2(ctx: CanvasRenderingContext2D, text: string, maxW: number): [stri
    (el rasgo dominante decide el tinte de escena, las partículas y el gesto del fideo).
    No hay picante en el catálogo → los ejes que de verdad varían: cro/cre/fre/dul.
    ========================================================================= */
-type Sabor = { cro: number; cre: number; fre: number; dul: number };
-const EJES = [
-  { k: "cro" as const, label: "Crocante", color: "#E8A21E" },
-  { k: "cre" as const, label: "Cremoso", color: "#DDBE6A" }, // más saturado → la barra se ve (antes casi invisible)
-  { k: "fre" as const, label: "Fresco", color: "#8CB856" },
-  { k: "dul" as const, label: "Dulce", color: "#DE7A98" },
-];
-const SABOR_MAP: Record<string, Sabor> = {
-  "papa-criolla": { cro: 0.35, cre: 0.8, fre: 0.1, dul: 0.25 },
-  "papa-francesa": { cro: 0.95, cre: 0.2, fre: 0, dul: 0.1 },
-  spaghetti: { cro: 0.1, cre: 0.75, fre: 0.15, dul: 0.1 },
-  chicharron: { cro: 0.95, cre: 0.1, fre: 0, dul: 0 },
-  bolonesa: { cro: 0.15, cre: 0.7, fre: 0.25, dul: 0.15 },
-  "pollo-crispy": { cro: 0.9, cre: 0.25, fre: 0, dul: 0 },
-  mixta: { cro: 0.55, cre: 0.5, fre: 0, dul: 0 },
-  champinon: { cro: 0.2, cre: 0.45, fre: 0.75, dul: 0 },
-  maicitos: { cro: 0.35, cre: 0.5, fre: 0.2, dul: 0.7 },
-  "nuggets-pina": { cro: 0.6, cre: 0.1, fre: 0.35, dul: 0.95 },
-  tocineta: { cro: 0.85, cre: 0.1, fre: 0, dul: 0.1 },
-  hogao: { cro: 0, cre: 0.5, fre: 0.75, dul: 0.25 },
-  parmesano: { cro: 0.25, cre: 0.75, fre: 0, dul: 0 },
-  aguacate: { cro: 0, cre: 0.85, fre: 0.7, dul: 0.1 },
-  perejil: { cro: 0, cre: 0, fre: 1, dul: 0 },
-  "chicharron-crocante": { cro: 1, cre: 0, fre: 0, dul: 0 },
-};
-/** Perfil de un ingrediente (con defaults por categoría si es nuevo del admin). */
-function saborDe(ing: Ingrediente): Sabor {
-  const s = SABOR_MAP[ing.id];
-  if (s) return s;
-  if (ing.categoria === "base") return { cro: 0.4, cre: 0.5, fre: 0.1, dul: 0.15 };
-  if (ing.categoria === "proteina") return { cro: 0.6, cre: 0.3, fre: 0.1, dul: 0.05 };
-  return { cro: 0.3, cre: 0.4, fre: 0.4, dul: 0.3 };
-}
-/** Rasgo dominante de un ingrediente → tema de la reacción. */
-function rasgoDominante(ing: Ingrediente): "cro" | "cre" | "fre" | "dul" {
-  const s = saborDe(ing);
-  let best: keyof Sabor = "cre";
-  let bv = -1;
-  (["cro", "cre", "fre", "dul"] as const).forEach((k) => {
-    if (s[k] > bv) {
-      bv = s[k];
-      best = k;
-    }
-  });
-  return best;
-}
-/** Título evocador según el perfil agregado (para el termómetro). */
-function tituloAntojo(p: Sabor, n: number): string {
-  if (n === 0) return "TU ANTOJO";
-  const orden = (["cro", "cre", "fre", "dul"] as const).slice().sort((a, b) => p[b] - p[a]);
-  const top = orden[0];
-  const label = { cro: "CROCANTE", cre: "CREMOSO", fre: "FRESCO", dul: "DULCE" }[top];
-  const seg = orden[1];
-  const equilibrado = p[top] - p[seg] < 0.12 && p[top] > 0.2;
-  if (equilibrado) return "BIEN BALANCEADO";
-  const seg2 = { cro: "y crocante", cre: "y cremoso", fre: "y fresco", dul: "y dulce" }[seg];
-  return p[seg] > 0.35 ? `${label} ${seg2}` : label;
-}
+/* El modelo vive en lib/sabor.ts: lo comparten el juego y las fichas de la carta. */
 
 /* =========================================================================
    SPRITES — comida horneada con el modelo de luz del juego (una luz ↖).

@@ -11,7 +11,8 @@ import {
 } from "@/lib/menu";
 import { calcularTotales } from "@/lib/precios";
 import Reveal from "./Reveal";
-import Bowl from "./Bowl";
+import CajaMini from "./CajaMini";
+import Termometro from "./Termometro";
 import IngImg from "./IngImg";
 import PedirInsignia from "./PedirInsignia";
 import { useJuegoOpcional } from "./JuegoProvider";
@@ -76,12 +77,13 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img className="plato__foto" src={e.foto} alt={e.nombre} />
                     ) : (
-                      <Bowl base={base} proteina={proteina} toppings={toppings} mini />
+                      <CajaMini base={base} proteina={proteina} toppings={toppings} />
                     )}
                   </div>
                   <div className="plato__body">
                     <h3>{e.nombre}</h3>
                     <p className="plato__gancho">{e.gancho}</p>
+                    <Termometro ings={[base, proteina, ...toppings]} />
                     <div className="plato__row">
                       <span className="plato__precio">
                         {formatCOP(e.precio)}
@@ -164,12 +166,13 @@ function EnredoModal({
             // eslint-disable-next-line @next/next/no-img-element
             <img className="plato__foto plato__foto--big" src={enredo.foto} alt={enredo.nombre} />
           ) : (
-            <Bowl base={base} proteina={proteina} toppings={toppings} />
+            <CajaMini base={base} proteina={proteina} toppings={toppings} size="grande" />
           )}
         </div>
         <div className="modal__body">
           <h3>{enredo.nombre}</h3>
           <p className="plato__gancho">{enredo.gancho}</p>
+          <Termometro ings={[base, proteina, ...toppings]} />
           <ul className="modal__list">
             <li>
               <span>
