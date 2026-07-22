@@ -1211,6 +1211,27 @@ export default function EmplataGame(props: {
       return { U, boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH };
     };
 
+    /**
+     * LAS PESTAÑAS, UNA SOLA VEZ. El dibujo ya escalaba por U pero el hit-test seguía en
+     * píxeles crudos (8 y 128): en una tablet la píldora se pinta en un sitio y se toca en
+     * otro — en iPad el 63% izquierdo de "LA BASE" era sordo. Y `setTab` solo se llama desde
+     * ese hit-test: si falla, la pestaña queda INALCANZABLE (no hay botón DOM de respaldo).
+     * Las bandas táctiles (−26U..+24U) son a propósito más altas que el dibujo (−22U..+18U).
+     */
+    const tabsGeo = () => {
+      const { U, trayY } = geo();
+      const tw = Math.min(W / 3 - 8 * U, 128 * U);
+      return {
+        U,
+        trayY,
+        tw,
+        th: 40 * U,
+        tx: (k: number) => W / 2 + (k - 1) * (tw + 8 * U),
+        top: trayY - 26 * U,
+        bot: trayY + 24 * U,
+      };
+    };
+
     let dpr = 1;
     let lastT = 0; // timestamp del rAF anterior (reloj real, no contador de frames)
     const reduce =
@@ -1778,14 +1799,23 @@ export default function EmplataGame(props: {
     // ---------- input: tap vs drag de bandeja ----------
     let downX = 0;
     let downY = 0;
-    let moved = 0;
+    /**
+     * EXCURSIÓN MÁXIMA desde el punto de contacto, no suma de temblores.
+     * Antes se acumulaba `moved += |x - lastX|` y solo en X: (a) un barrido VERTICAL sobre
+     * una carta la seleccionaba sin querer, y (b) un tap lento con pulso tembloroso sumaba
+     * 8 px de jitter y se cancelaba sin ningún feedback. 10 px CSS, SIN escalar por U: el
+     * dedo mide lo mismo en un teléfono que en una tablet.
+     */
+    let maxExc = 0;
     let dragging = false;
     let lastX = 0;
+    let lastY = 0;
+    let lastMoveT = 0;
 
     /** Devuelve la carta bajo (x,y) — o null. */
     const cartaEn = (x: number, y: number): { ing: Ingrediente; cx: number } | null => {
       const { U, cardY, cardW, cardH } = geo();
-      if (y < cardY - cardH / 2 - 6 || y > cardY + cardH / 2 + 6) return null;
+      if (y < cardY - cardH / 2 - 6 * U || y > cardY + cardH / 2 + 6 * U) return null;
       const lista = listaActiva().filter((i) => i.activo);
       const step = cardW + 10 * U;
       const totalW = lista.length * step;
@@ -1809,11 +1839,13 @@ export default function EmplataGame(props: {
       tiltTY = clamp((bt - 45) / 28, -1, 1); // reposo ~45° (móvil sostenido en la mano)
     };
     let tiltOn = false;
+    let tiltAsked = false; // si el usuario DENIEGA, no volver a preguntar en cada toque
     const setupTilt = () => {
-      if (tiltOn || reduce || typeof window === "undefined") return;
+      if (tiltOn || tiltAsked || reduce || typeof window === "undefined") return;
       const DOE = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
       if (!DOE) return;
       if (typeof DOE.requestPermission === "function") {
+        tiltAsked = true;
         DOE.requestPermission()
           .then((st) => {
             if (st === "granted") {
@@ -1831,13 +1863,22 @@ export default function EmplataGame(props: {
     const onDown = (e: PointerEvent) => {
       s.unlock();
       setupTilt(); // activa la luz interactiva en el primer gesto (permiso iOS)
+      // ANTES del guard de fase: si la fase cambia con el dedo abajo, el `return` se
+      // llevaba el reset y `dragging` se quedaba pegado.
+      dragging = false;
+      world.current.trayVel = 0;
       if (faseRef.current !== "arma") return; // en espera la escena no recibe toques
       const r = canvas.getBoundingClientRect();
       downX = e.clientX - r.left;
       downY = e.clientY - r.top;
       lastX = downX;
-      moved = 0;
-      dragging = downY > geo().trayY + 40; // solo la fila de cartas se arrastra
+      lastY = downY;
+      lastMoveT = e.timeStamp;
+      maxExc = 0;
+      // El gate sale de la GEOMETRÍA de las cartas, no de un +40 a ojo: quedaban 16 px
+      // muertos en el borde superior donde el gesto ni arrastraba ni tocaba.
+      const g = geo();
+      dragging = downY > g.cardY - g.cardH / 2 - 10 * g.U;
       world.current.lastAct = world.current.t;
       const c = cartaEn(downX, downY);
       world.current.pressed = c ? c.ing.id : "";
@@ -1847,11 +1888,20 @@ export default function EmplataGame(props: {
       if (!e.buttons) return;
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left;
-      moved += Math.abs(x - lastX);
-      if (moved > 8) world.current.pressed = "";
+      const y = e.clientY - r.top;
+      maxExc = Math.max(maxExc, Math.hypot(x - downX, y - downY));
+      if (maxExc > 10) world.current.pressed = "";
       if (dragging) {
         world.current.trayScroll -= x - lastX;
-        world.current.trayVel = -(x - lastX);
+        /* La velocidad se medía en px por EVENTO y se consumía como px por FRAME de 60:
+           en un iPhone de 120 Hz el mismo gesto físico deslizaba la mitad. Ahora es px/s
+           normalizados a un frame de 60, con tope (la inercia multiplica por 1/(1−0.92) =
+           12.5×) y con media móvil para que un pico del stream no dispare un flick que
+           nadie hizo. */
+        const dtm = Math.max(8, e.timeStamp - lastMoveT);
+        const vNueva = clamp((-(x - lastX) / dtm) * 16.67, -22, 22);
+        world.current.trayVel = world.current.trayVel * 0.65 + vNueva * 0.35;
+        lastMoveT = e.timeStamp;
         // rastro dorado del pulgar (Fruit Ninja) — solo si se mueve de verdad
         if (Math.abs(x - lastX) > 1.5) {
           const tr = world.current.trail;
@@ -1860,22 +1910,27 @@ export default function EmplataGame(props: {
         }
       }
       lastX = x;
+      lastY = y;
     };
     const onUp = (e: PointerEvent) => {
+      // El reset va ANTES del guard de fase: si no, `dragging` no volvía NUNCA a false
+      // (no se soltaba en ningún sitio) y la inercia quedaba muerta con velocidad rancia.
+      dragging = false;
+      world.current.pressed = "";
+      if (e.timeStamp - lastMoveT > 90) world.current.trayVel = 0; // dedo parado = sin flick
       if (faseRef.current !== "arma") return;
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left;
       const y = e.clientY - r.top;
-      world.current.pressed = "";
       world.current.lastAct = world.current.t;
-      if (moved > 8) return; // fue drag
-      const { trayY, cardY, cardH } = geo();
-      // pestañas
-      if (y > trayY - 26 && y < trayY + 24) {
-        const tw = Math.min(W / 3 - 8, 128);
+      if (maxExc > 10) return; // fue drag: excursión máxima, no suma de temblores
+      const { cardY, cardH } = geo();
+      // pestañas: MISMA geometría que el dibujo (ver tabsGeo)
+      const T = tabsGeo();
+      if (y > T.top && y < T.bot) {
         for (let k = 0; k < 3; k++) {
-          const tx = W / 2 + (k - 1) * (tw + 8);
-          if (Math.abs(x - tx) < tw / 2) {
+          const tx = T.tx(k);
+          if (Math.abs(x - tx) < T.tw / 2) {
             setTab(k as 0 | 1 | 2);
             s.tone(600 + k * 120, 0.06, "triangle", 0.08);
             return;
@@ -1886,9 +1941,18 @@ export default function EmplataGame(props: {
       const c = cartaEn(x, y);
       if (c) tapIngrediente(c.ing, c.cx, cardY - cardH / 2 + 42);
     };
+    // gesto abortado por el sistema (multitáctil, rechazo de palma): sin esto la carta se
+    // queda encogida a 0.94 hasta el siguiente toque
+    const onCancel = () => {
+      dragging = false;
+      world.current.pressed = "";
+      world.current.trayVel = 0;
+      maxExc = 1e9;
+    };
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onCancel);
 
     // ---------- helpers de dibujo ----------
     const kraft = (x: number, y: number, w: number, h: number, r0: number, light: number) => {
@@ -2976,10 +3040,11 @@ export default function EmplataGame(props: {
       ctx.fillRect(0, trayY - 30, W, H - trayY + 30);
       // pestañas
       const tabsTxt = ["LA BASE", "PROTEÍNA", "TOPPINGS"] as const;
-      const tw = Math.min(W / 3 - 8 * U, 128 * U);
-      const th0 = 40 * U;
+      const TG = tabsGeo();
+      const tw = TG.tw;
+      const th0 = TG.th;
       for (let k = 0; k < 3; k++) {
-        const tx = W / 2 + (k - 1) * (tw + 8 * U);
+        const tx = TG.tx(k);
         const activo = sel.current.tab === k;
         // inactiva: píldora OSCURA (no crema-sobre-crema translúcido que casi no se lee sobre la madera clara)
         ctx.fillStyle = activo ? "#F2A516" : "rgba(24,15,7,0.42)";
@@ -3010,6 +3075,7 @@ export default function EmplataGame(props: {
       const totalW2 = lista.length * step;
       const maxScroll = Math.max(0, totalW2 - W + 28);
       wd.trayScroll = Math.max(0, Math.min(maxScroll, wd.trayScroll));
+      if (wd.trayScroll <= 0 || wd.trayScroll >= maxScroll) wd.trayVel = 0; // sin temblor en el tope
       const x0 = Math.max(14, (W - totalW2) / 2) - wd.trayScroll;
       for (let k = 0; k < lista.length; k++) {
         const ing = lista[k];
@@ -3572,6 +3638,7 @@ export default function EmplataGame(props: {
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onCancel);
       window.removeEventListener("deviceorientation", onOrient);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
