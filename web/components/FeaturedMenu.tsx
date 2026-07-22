@@ -32,7 +32,7 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
       <div className="container">
         <Reveal>
           <p className="eyebrow">Menú destacado</p>
-          <h2 style={{ fontSize: "clamp(2rem, 6vw, 3.2rem)", marginTop: 10 }}>
+          <h2>
             Los enredos insignia
           </h2>
           <p className="lead" style={{ marginTop: 12 }}>

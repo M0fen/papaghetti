@@ -33,6 +33,21 @@
   --pg-shadow: 0 10px 30px -12px rgba(30, 22, 17, 0.35);
   --pg-shadow-lg: 0 30px 60px -20px rgba(30, 22, 17, 0.45);
 
+  /* Escala tipográfica declarada. Antes convivían 34 tamaños sin relación entre sí y el
+     h2 iba INLINE en cinco archivos con cuatro márgenes distintos: el ojo lo lee como
+     "hecho a mano rápido", no como carta de restaurante caro. */
+  --pg-step--2: 0.75rem; /* 12px — micro-etiqueta; piso duro, nada baja de aquí */
+  --pg-step--1: 0.875rem; /* 14px — nota */
+  --pg-step-0: 1.0625rem; /* 17px — cuerpo */
+  --pg-step-1: 1.25rem; /* 20px — h3 menor */
+  --pg-step-2: 1.5rem; /* 24px — h3 mayor */
+  --pg-step-3: clamp(1.9rem, 5.4vw, 3rem); /* h2 de sección */
+
+  /* LA HEBRA como primitiva de marca: una sola teja que se repite. Sirve de subrayado,
+     separador y viñeta sin un solo nodo extra en el DOM ni una imagen que descargar. */
+  --hebra: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='11'%3E%3Cpath d='M0 5.5 Q4 1.5 8 5.5 T16 5.5' fill='none' stroke='%23c8321e' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  --hebra-tenue: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='9'%3E%3Cpath d='M0 4.5 Q4 1.4 8 4.5 T16 4.5' fill='none' stroke='%231e1611' stroke-width='1.6' stroke-linecap='round' opacity='.28'/%3E%3C/svg%3E");
+
   /* Motion */
   --pg-ease-twirl: cubic-bezier(0.22, 1, 0.36, 1);
   --pg-dur-fast: 180ms;
@@ -4324,3 +4339,181 @@ body.enreda-jugando .nav {
 .mesa__consumo span { font-size: 0.72rem; opacity: 0.55; }
 .mesa__consumo b { font-size: 1.1rem; }
 .salon-note { margin-top: 14px; font-size: 0.8rem; }
+
+
+/* =========================================================================
+   CARTA — sistema (escala, hebra de marca, contrastes)
+   ========================================================================= */
+
+/* El fantasma invertía con currentColor: dentro de una sección oscura el fondo pasaba a
+   crema y el texto TAMBIÉN, así que "Rappi" desaparecía al pasar el cursor. */
+.btn--ghost:hover,
+.btn--ghost:focus-visible {
+  background: var(--pg-espresso);
+  box-shadow: inset 0 0 0 2px var(--pg-espresso);
+}
+.btn--ghost:hover span,
+.btn--ghost:focus-visible span {
+  color: var(--pg-crema);
+}
+.section--dark .btn--ghost:hover,
+.section--dark .btn--ghost:focus-visible {
+  background: var(--pg-crema);
+  box-shadow: inset 0 0 0 2px var(--pg-crema);
+}
+.section--dark .btn--ghost:hover span,
+.section--dark .btn--ghost:focus-visible span {
+  color: var(--pg-espresso);
+}
+
+/* El h2 de sección, en UN solo sitio. Antes iba inline en cinco archivos con cuatro
+   márgenes distintos y dos tamaños: el ritmo vertical no se repetía en ninguna sección. */
+.section > .container > .reveal > h2,
+.section > .container > h2,
+.section h2 {
+  font-size: var(--pg-step-3);
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  margin: 10px 0 10px;
+  text-wrap: balance;
+}
+.section .lead {
+  margin-top: 0;
+  margin-bottom: clamp(20px, 3.6vw, 34px);
+}
+
+/* La hebra como lenguaje, no como adorno: viñeta del eyebrow, separador de línea de carta
+   y ancla del título de grupo. Cero nodos nuevos, cero descargas. */
+.eyebrow::before {
+  content: "";
+  width: 22px;
+  height: 9px;
+  flex-shrink: 0;
+  background: var(--hebra) repeat-x center;
+}
+.section--dark .eyebrow::before {
+  filter: hue-rotate(18deg) saturate(1.4) brightness(1.6);
+}
+.carta__item {
+  border-bottom: none;
+  position: relative;
+}
+.carta__item::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 9px;
+  background: var(--hebra-tenue) repeat-x center;
+  pointer-events: none;
+}
+.carta__h {
+  align-items: baseline;
+}
+.carta__h::after {
+  content: "";
+  flex: 1;
+  height: 9px;
+  margin-left: 6px;
+  background: var(--hebra-tenue) repeat-x center;
+  -webkit-mask-image: linear-gradient(90deg, #000 55%, transparent);
+  mask-image: linear-gradient(90deg, #000 55%, transparent);
+}
+
+/* La píldora de la carta salía SIN estilo: heredaba una regla contextual del armador que
+   fuera de él no aplica. Ahora es una clase propia. */
+.badge--nota {
+  font-family: var(--pg-font-body);
+  font-size: var(--pg-step--2);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 4px 11px;
+  border-radius: var(--pg-radius-pill);
+  background: var(--pg-espresso);
+  color: var(--pg-crema);
+}
+.section--dark .badge--nota {
+  background: var(--pg-oro);
+  color: var(--pg-espresso);
+}
+
+/* La escala, aplicada a la carta: el nombre del ingrediente sube y el precio baja — la
+   jerarquía se invierte a favor de la comida. */
+.carta__h {
+  font-size: var(--pg-step-2);
+}
+.carta__txt b {
+  font-size: var(--pg-step-0);
+  text-wrap: pretty;
+}
+.carta__nota,
+.carta__precio {
+  font-size: var(--pg-step--1);
+}
+/* La etiqueta sensorial bajaba a 2.63:1 con `filter: brightness()` sobre el color de la
+   barra: ilegible. Tinta propia por eje, medida ≥5:1 sobre crema. */
+.carta__eje {
+  font-size: var(--pg-step--2);
+  filter: none;
+}
+.plato__incluido {
+  font-size: var(--pg-step--2);
+}
+.plato__body h3 {
+  font-size: var(--pg-step-1);
+}
+
+/* Las tarjetas de Ubicación contrastaban 1.12:1 con su sección: no existían visualmente. */
+.loc__card {
+  background: #34281f;
+  border: 1px solid rgba(251, 241, 222, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(251, 241, 222, 0.07),
+    0 26px 44px -30px #000;
+}
+.loc__card h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* MOBILE FIRST roto: por debajo de 860px el sitio se quedaba literalmente SIN MENÚ. */
+@media (max-width: 860px) {
+  .nav {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  /* el nav pasa a dos filas: sin esto, el titular de la sección queda DEBAJO al saltar
+     a un anclaje (#carta, #menu…) */
+  .section,
+  .hero {
+    scroll-margin-top: 118px;
+  }
+  .nav__links {
+    display: flex;
+    order: 3;
+    width: 100%;
+    gap: 18px;
+    font-size: 0.86rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    margin: 2px 0 0;
+    padding: 2px 0 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav__links::-webkit-scrollbar {
+    display: none;
+  }
+  .nav__links a {
+    scroll-snap-align: start;
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plato:hover {
+    transform: none;
+  }
+}

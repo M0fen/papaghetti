@@ -9,7 +9,7 @@ export default function Story() {
           <Reveal>
             <div>
               <p className="eyebrow">Nuestra historia</p>
-              <h2 style={{ fontSize: "clamp(2rem, 6vw, 3.2rem)", margin: "10px 0 16px" }}>
+              <h2>
                 Todo empezó por un enredo
               </h2>
               <p style={{ opacity: 0.82, marginBottom: 14 }}>

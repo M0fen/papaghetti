@@ -29,7 +29,7 @@ export default function Location({ ajustes }: { ajustes: Ajustes }) {
       <div className="container">
         <Reveal>
           <p className="eyebrow">Ubicación y pedidos</p>
-          <h2 style={{ fontSize: "clamp(2rem, 6vw, 3.2rem)", margin: "10px 0 30px" }}>
+          <h2>
             Enrédate con nosotros
           </h2>
         </Reveal>

@@ -41,7 +41,7 @@ export default function CartaCompleta({
       <div className="container">
         <Reveal>
           <p className="eyebrow">La carta completa</p>
-          <h2 style={{ fontSize: "clamp(2rem, 6vw, 3.2rem)", margin: "10px 0 6px" }}>
+          <h2>
             Todo lo que puede entrar en tu caja
           </h2>
           <p className="lead">
@@ -57,7 +57,7 @@ export default function CartaCompleta({
             <Reveal key={g.k}>
               <div className="carta__grupo">
                 <h3 className="carta__h">
-                  {g.titulo} <span className="badge">{g.nota}</span>
+                  {g.titulo} <span className="badge badge--nota">{g.nota}</span>
                 </h3>
                 <ul className="carta__lista">
                   {items.map((ing) => {
@@ -69,7 +69,7 @@ export default function CartaCompleta({
                         <div className="carta__txt">
                           <b>{ing.nombre}</b>
                           <span className="carta__nota">{notaDe(ing)}</span>
-                          <span className="carta__eje" style={{ color: eje.color }}>
+                          <span className="carta__eje" style={{ color: eje.ink }}>
                             {eje.label}
                           </span>
                         </div>

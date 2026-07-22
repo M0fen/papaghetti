@@ -11,11 +11,14 @@ import type { Ingrediente } from "./menu";
 
 export type Sabor = { cro: number; cre: number; fre: number; dul: number };
 
+/* `color` pinta la barra; `ink` escribe. Antes la etiqueta usaba el color de la barra
+   oscurecido con filter y bajaba a 2.63:1 sobre crema — ilegible. Estas tintas están
+   medidas por encima de 5:1. */
 export const EJES = [
-  { k: "cro" as const, label: "Crocante", color: "#E8A21E" },
-  { k: "cre" as const, label: "Cremoso", color: "#DDBE6A" },
-  { k: "fre" as const, label: "Fresco", color: "#8CB856" },
-  { k: "dul" as const, label: "Dulce", color: "#DE7A98" },
+  { k: "cro" as const, label: "Crocante", color: "#E8A21E", ink: "#885F12" },
+  { k: "cre" as const, label: "Cremoso", color: "#DDBE6A", ink: "#766538" },
+  { k: "fre" as const, label: "Fresco", color: "#8CB856", ink: "#546E34" },
+  { k: "dul" as const, label: "Dulce", color: "#DE7A98", ink: "#955266" },
 ];
 
 const SABOR_MAP: Record<string, Sabor> = {

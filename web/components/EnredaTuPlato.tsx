@@ -60,7 +60,7 @@ export default function EnredaTuPlato({
       <div className="container">
         <Reveal>
           <p className="eyebrow">Arma tu enredo</p>
-          <h2 style={{ fontSize: "clamp(2rem, 6vw, 3.2rem)", margin: "10px 0 6px" }}>
+          <h2>
             Tú mandas en el enredo
           </h2>
           <p className="lead">
