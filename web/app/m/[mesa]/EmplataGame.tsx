@@ -106,7 +106,8 @@ const nuevoCtrl = (): CtrlFideo => ({ x1: 0, v1x: 0, y1: 0, v1y: 0, x2: 0, v2x: 
    dispuestos por ángulo áureo. Estructura y forma, foto reproducible. Ver recomputeSlots().
    ========================================================================= */
 const YB = -0.05; // tapa de la CAMA (fracción de boxH; el nido se apoya aquí, cerca del suelo)
-const HM = 0.3; // altura del penacho: 0.20→0.30 sube el apex a −0.35·boxH (hueco al rim 34→14px)
+const HM = 0.22; // altura del penacho: bajado de 0.30 para que las guarniciones se APOYEN sobre
+// la cama (a 0.30 flotaban en una fila alta, con hueco oscuro entre el nido y ellas)
 const FXLIM = 0.37; // límite lateral: 0.30→0.37 abre los flancos (comida a ±95px vs pared ±108)
 const FXENV = 0.42; // soporte de la envolvente: la cúpula no colapsa a la altura del suelo antes del muro
 
@@ -318,6 +319,23 @@ function shade(hex: string | undefined, f: number): string {
     g = parseInt(m[1].slice(2, 4), 16);
     b = parseInt(m[1].slice(4, 6), 16);
   }
+  const t = f > 0 ? [255, 244, 214] : [58, 34, 12];
+  const k = Math.abs(f);
+  return `rgb(${Math.round(r + (t[0] - r) * k)},${Math.round(g + (t[1] - g) * k)},${Math.round(b + (t[2] - b) * k)})`;
+}
+
+/** Como shade() pero acepta AMBAS fuentes de color: "#rrggbb" (catálogo) y "rgb(r,g,b)"
+ *  (wd.colores, el dominante real del sprite). shade() solo parsea hex → con rgb caía a
+ *  ámbar fijo y una sombra de aguacate salía naranja. */
+function parseRGB(c: string): [number, number, number] {
+  let m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c);
+  if (m) return [+m[1], +m[2], +m[3]];
+  m = /^#?([0-9a-f]{6})$/i.exec(c);
+  if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)];
+  return [202, 161, 90];
+}
+function shadeC(c: string, f: number): string {
+  const [r, g, b] = parseRGB(c);
   const t = f > 0 ? [255, 244, 214] : [58, 34, 12];
   const k = Math.abs(f);
   return `rgb(${Math.round(r + (t[0] - r) * k)},${Math.round(g + (t[1] - g) * k)},${Math.round(b + (t[2] - b) * k)})`;
@@ -2938,15 +2956,27 @@ export default function EmplataGame(props: {
             ctx.ellipse(lx + 2, ly + boxH * 0.05, boxW * 0.4, boxH * 0.07, 0, 0, TAU);
             ctx.fill();
           } else {
-            // DOBLE sombra: halo ambiente (grande, suave) + contacto (ceñido) — pega el item al montón
-            ctx.fillStyle = "rgba(40,22,8,0.1)";
+            // ANIDADO: la pieza se HUNDE en la comida de abajo. Sombra de contacto en MULTIPLY,
+            // parda-CÁLIDA (no negro-tierra), ceñida y sesgada al lado de sombra ↘. Y una
+            // micro-oclusión teñida del COLOR REAL de la pieza (aguacate→verde, hogao→rojo) que
+            // la funde con lo que la rodea en vez de un puck gris que la despega.
+            ctx.globalCompositeOperation = "multiply";
+            ctx.fillStyle = "rgba(74,42,12,0.1)"; // halo ambiente cálido
             ctx.beginPath();
             ctx.ellipse(lx + 2, ly + rp * 0.55, rp * 1.5, rp * 0.6, 0, 0, TAU);
             ctx.fill();
-            ctx.fillStyle = "rgba(40,22,8,0.3)";
+            ctx.fillStyle = "rgba(74,42,12,0.3)"; // contacto ceñido, sesgado ↘
             ctx.beginPath();
-            ctx.ellipse(lx + 2, ly + rp * 0.62, rp * 0.85, rp * 0.32, 0, 0, TAU);
+            ctx.ellipse(lx + rp * 0.18, ly + rp * 0.5, rp * 0.7, rp * 0.3, 0, 0, TAU);
             ctx.fill();
+            const oc = shadeC(wd.colores.get(p.id) ?? "#8C5A2A", -0.5); // tinte profundo del color de la pieza
+            ctx.globalAlpha = 0.18;
+            ctx.fillStyle = oc;
+            ctx.beginPath();
+            ctx.ellipse(lx + 2, ly + rp * 0.5, rp * 1.0, rp * 0.42, 0, 0, TAU);
+            ctx.fill();
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = 1;
           }
           p.land *= Math.pow(0.8, df); // el squash de impacto se recupera
           const sq = p.land * 0.32; // SQUASH de aterrizaje (conserva volumen: aplasta ancho)
