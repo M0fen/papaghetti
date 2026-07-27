@@ -738,7 +738,9 @@ type Fideo = {
 };
 /** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
  *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
-type PilaItem = { id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number };
+/** Una loseta del LECHO de una base: mismo sprite estampado N veces (solo dibujo). */
+type Tile = { dx: number; dy: number; s: number; rot: number; flip: number; depth: number };
+type PilaItem = { id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number; tiles?: Tile[] };
 type Puff = { x: number; y: number; life: number; max: number; r: number; tipo: "vapor" | "polvo" };
 type Pop = { x: number; y: number; life: number; texto: string; gratis: boolean };
 type Chispa = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number };
@@ -1681,13 +1683,46 @@ export default function EmplataGame(props: {
         p.s = sc;
         p.r = radioDe(find(p.id)?.categoria ?? "topping", sc) / boxW;
       };
-      // CAMA: llena el suelo, centrada, casi plana
+      // CAMA: un LECHO de 16 losetas del mismo sprite (la base era 1 solo sprite escalado 1.2,
+      // que por construcción cubría ~30% de la boca de la caja → "se ve vacía"). La
+      // multiplicación ocurre SOLO en el dibujo: wd.pila sigue con 1 item por base, así que el
+      // vuelo, la retirada y todos los `wd.pila.length` quedan intactos. Cada base tiene su
+      // gramática (nido de hebras ≠ montón de bolitas ≠ bastones aplastados).
+      const BED_ROWS = [
+        { dy: 0.02, xs: [-0.25, -0.08, 0.1, 0.27], s: 0.66, depth: 0.06 }, // ceja frontal (se apoya en el labio)
+        { dy: -0.09, xs: [-0.33, -0.14, 0.05, 0.23, 0.35], s: 0.74, depth: 0.38 },
+        { dy: -0.19, xs: [-0.28, -0.09, 0.11, 0.3], s: 0.7, depth: 0.68 },
+        { dy: -0.26, xs: [-0.17, 0.02, 0.21], s: 0.58, depth: 0.94 }, // CRESTA: roza el rim
+      ];
+      const BED_TUNE: Record<string, { scale: number; flatten: number; rot: number }> = {
+        spaghetti: { scale: 1.0, flatten: 1.0, rot: 0.3 }, // nidos: rot modesto (protege la luz del nido)
+        "papa-criolla": { scale: 0.9, flatten: 1.0, rot: 0.45 }, // bolitas: + chicas + densas
+        "papa-francesa": { scale: 0.98, flatten: 0.82, rot: 0.7 }, // bastones: aplasta vertical + jumble
+      };
       for (const p of base) {
-        p.fxT = (hash01(p.id) - 0.5) * 0.03;
+        p.fxT = 0;
         p.ty = YB;
         p.depth = 0.55;
-        p.rot = (hash01(p.id + "r") - 0.5) * 0.08;
-        setR(p, 1.2);
+        p.rot = 0;
+        setR(p, 1.0);
+        const tn = BED_TUNE[p.id] ?? { scale: 1, flatten: 1, rot: 0.3 };
+        const t: Tile[] = [];
+        BED_ROWS.forEach((row, ri) =>
+          row.xs.forEach((x, ci) => {
+            const h = hash01(`${p.id}|${ri}|${ci}`);
+            const h2 = hash01(`${p.id}|${ri}|${ci}|b`);
+            t.push({
+              dx: x + (h - 0.5) * 0.035, // ±4.5px de jitter horizontal
+              dy: (row.dy + (h2 - 0.5) * 0.022) * tn.flatten,
+              s: row.s * (0.88 + 0.24 * h2) * tn.scale, // 0.88…1.12 → mata la repetición idéntica
+              rot: (h - 0.5) * tn.rot * 0.5, // suave: no gira la luz horneada del sprite
+              flip: h2 < 0.5 ? -1 : 1, // variedad por espejo (el nido/bolita casi radial lo tolera)
+              depth: row.depth,
+            });
+          }),
+        );
+        t.sort((a, b) => b.depth - a.depth); // ordena AQUÍ (fondo→frente), no por frame
+        p.tiles = t;
       }
       // HÉROE(S): 1 en un tercio, o 2 como dúo jerárquico — su cara mira a cámara, nunca al centro muerto
       const heroFaces: Array<{ fx: number; ty: number; rx: number; ry: number }> = [];
@@ -2795,10 +2830,10 @@ export default function EmplataGame(props: {
           const ly = cp === 0 ? -boxH * 0.02 : p.fy * boxH; // la CAMA se apoya al frente, visible como lecho
           const rp = p.r * boxW;
           if (cp === 0) {
-            // CAMA: sombra ancha y plana que la asienta en el suelo
+            // CAMA: sombra ancha y plana que abraza las 16 losetas del lecho
             ctx.fillStyle = "rgba(40,22,8,0.34)";
             ctx.beginPath();
-            ctx.ellipse(lx + 2, ly + boxH * 0.05, boxW * 0.32, boxH * 0.07, 0, 0, TAU);
+            ctx.ellipse(lx + 2, ly + boxH * 0.05, boxW * 0.4, boxH * 0.07, 0, 0, TAU);
             ctx.fill();
           } else {
             // DOBLE sombra: halo ambiente (grande, suave) + contacto (ceñido) — pega el item al montón
@@ -2814,17 +2849,34 @@ export default function EmplataGame(props: {
           p.land *= Math.pow(0.8, df); // el squash de impacto se recupera
           ctx.save();
           ctx.translate(lx, ly);
-          ctx.rotate(p.rot);
           // SQUASH de aterrizaje con conservación de volumen (aplasta ancho, recupera)
           const sq = p.land * 0.32;
-          ctx.scale(1 + sq, 1 - sq);
-          // escala por profundidad: frente un pelo mayor, fondo menor → refuerza el escorzo del montículo
-          const sz = SPR * (cp === 0 ? p.s * 1.24 : p.s * (0.93 + 0.12 * (1 - (p.depth ?? 0.5)))); // cama ancha (lecho)
-          // niebla cálida de profundidad: los items más ALTOS (al fondo) se atenúan un pelo
-          const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1);
-          ctx.globalAlpha = 1 - prof * 0.14;
-          ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
-          ctx.globalAlpha = 1;
+          if (cp === 0 && p.tiles) {
+            // LECHO: estampa las 16 losetas (ya ordenadas fondo→frente). El squash de
+            // aterrizaje se aplica al conjunto para que la cama "se derrame" al caer.
+            ctx.scale(1 + sq, 1 - sq);
+            for (const t of p.tiles) {
+              const tsz = SPR * p.s * t.s * 1.24;
+              ctx.save();
+              ctx.translate(t.dx * boxW, t.dy * boxH);
+              ctx.rotate(t.rot);
+              ctx.scale(t.flip, 1);
+              ctx.globalAlpha = 1 - t.depth * 0.1; // niebla: el fondo del lecho recede
+              ctx.drawImage(spr, -tsz / 2, -tsz / 2, tsz, tsz);
+              ctx.restore();
+            }
+            ctx.globalAlpha = 1;
+          } else {
+            ctx.rotate(p.rot);
+            ctx.scale(1 + sq, 1 - sq);
+            // escala por profundidad: frente un pelo mayor, fondo menor → escorzo del montículo
+            const sz = SPR * p.s * (0.93 + 0.12 * (1 - (p.depth ?? 0.5)));
+            // niebla cálida de profundidad: los items más ALTOS (al fondo) se atenúan un pelo
+            const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1);
+            ctx.globalAlpha = 1 - prof * 0.14;
+            ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
+            ctx.globalAlpha = 1;
+          }
           ctx.restore();
         }
         ctx.restore();
