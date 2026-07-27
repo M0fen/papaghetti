@@ -2871,43 +2871,55 @@ export default function EmplataGame(props: {
         };
         // sort: capa (cama→proteína→toppings) y, DENTRO de toppings, por profundidad desc → el fondo
         // se dibuja primero y el frente lo ocluye (lectura 3/4 correcta del montículo)
-        // AO de GRUPO: una sombra que abraza toda la masa y la pega al piso (mata la lectura
-        // de "piezas flotando en fila"). Crece con la receta, con tope.
+        // LECHO: el relleno del suelo de la caja con el color de la base. Antes era un foco de
+        // color plano flotando SOBRE el rim (elipse que rebasaba la boca y trepaba la pared);
+        // los jueces lo señalaron como "lo pegado". Ahora se apoya en el SUELO, recortado al
+        // trapecio interior (sin canto elíptico), con grano de kraft en multiply para que lea
+        // como materia, no como glow. La luz va ↖ como toda la escena (fuera el sheen vertical).
+        const baseItem = wd.pila.find((q) => find(q.id)?.categoria === "base");
+        if (baseItem) {
+          const col = wd.colores.get(baseItem.id) ?? "rgb(202,161,90)";
+          const colT = col.replace("rgb(", "rgba(").replace(")", ",0)");
+          const cyc = -boxH * 0.02; // al plano del suelo (no flotando en la pared)
+          ctx.save();
+          // CLIP al trapecio del interior → el borde del lecho es la caja, no una elipse
+          ctx.beginPath();
+          ctx.moveTo(-boxW * 0.29, -boxH * 0.42);
+          ctx.lineTo(boxW * 0.29, -boxH * 0.42);
+          ctx.lineTo(boxW * 0.4, boxH * 0.1);
+          ctx.lineTo(-boxW * 0.4, boxH * 0.1);
+          ctx.closePath();
+          ctx.clip();
+          const cg = ctx.createRadialGradient(-boxW * 0.1, cyc - boxH * 0.05, boxW * 0.04, 0, cyc, boxW * 0.44); // foco ↖
+          cg.addColorStop(0, col);
+          cg.addColorStop(0.34, col);
+          cg.addColorStop(1, colT);
+          ctx.globalAlpha = 0.66;
+          ctx.fillStyle = cg;
+          ctx.beginPath();
+          ctx.ellipse(0, cyc, boxW * 0.4, boxH * 0.2, 0, 0, TAU); // 206×40, dentro de la boca
+          ctx.fill();
+          if (wd.kraftPat) {
+            // grano de cartón horneado (1 fill de patrón cacheado): rompe el plano
+            ctx.globalCompositeOperation = "multiply";
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = wd.kraftPat;
+            ctx.beginPath();
+            ctx.ellipse(0, cyc, boxW * 0.4, boxH * 0.2, 0, 0, TAU);
+            ctx.fill();
+            ctx.globalCompositeOperation = "source-over";
+          }
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        }
+        // AO de GRUPO: una sombra que abraza toda la masa y la pega al piso. Va DESPUÉS del
+        // lecho (antes se pintaba antes y el cojín opaco lo borraba → la comida no se anclaba).
         if (wd.pila.length > 1) {
           const rw = boxW * (0.3 + 0.03 * Math.min(6, wd.pila.length));
           ctx.fillStyle = "rgba(40,22,8,0.24)";
           ctx.beginPath();
           ctx.ellipse(2, -boxH * 0.01, rw, boxH * 0.11, 0, 0, TAU);
           ctx.fill();
-        }
-        // COJÍN: un lecho DIFUSO del color de la base que llena el suelo y las esquinas de la
-        // caja SIN repetir el sprite (repetirlo se veía a copia). Va bajo toda la comida; el
-        // sprite nítido de la base se apoya encima, así lee "lleno de eso" con una sola imagen.
-        const baseItem = wd.pila.find((q) => find(q.id)?.categoria === "base");
-        if (baseItem) {
-          const col = wd.colores.get(baseItem.id) ?? "rgb(202,161,90)";
-          const colT = col.replace("rgb(", "rgba(").replace(")", ",0)");
-          const cyc = -boxH * 0.13;
-          const cg = ctx.createRadialGradient(0, cyc, boxW * 0.05, 0, cyc, boxW * 0.5);
-          cg.addColorStop(0, col);
-          cg.addColorStop(0.62, col);
-          cg.addColorStop(1, colT);
-          ctx.save();
-          ctx.globalAlpha = 0.92;
-          ctx.fillStyle = cg;
-          ctx.beginPath();
-          ctx.ellipse(0, cyc, boxW * 0.45, boxH * 0.32, 0, 0, TAU);
-          ctx.fill();
-          // sombreado ↘ del cojín (una luz ↖): da volumen de montón, no disco plano
-          const sh = ctx.createLinearGradient(0, cyc - boxH * 0.2, 0, cyc + boxH * 0.2);
-          sh.addColorStop(0, "rgba(255,240,205,0.16)");
-          sh.addColorStop(0.5, "rgba(0,0,0,0)");
-          sh.addColorStop(1, "rgba(40,22,8,0.22)");
-          ctx.fillStyle = sh;
-          ctx.beginPath();
-          ctx.ellipse(0, cyc, boxW * 0.45, boxH * 0.32, 0, 0, TAU);
-          ctx.fill();
-          ctx.restore();
         }
         const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id) || (b.depth ?? 0.5) - (a.depth ?? 0.5));
         for (const p of ordenada) {
