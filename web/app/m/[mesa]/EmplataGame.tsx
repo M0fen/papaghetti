@@ -1731,7 +1731,7 @@ export default function EmplataGame(props: {
         p.ty = YB;
         p.depth = 0.55;
         p.rot = 0;
-        setR(p, 1.9); // porción generosa: el nido/montón llena el ancho del lecho
+        setR(p, 1.55); // CAMA baja y ancha (sz 149, bajo el rim); el lecho carga el ancho
       }
       // RANK por IDENTIDAD: la posición dependía del orden de PULSACIÓN (quitar un topping
       // movía a otro hasta 123 px). Anclando todo al índice del catálogo, "misma receta,
@@ -1751,13 +1751,13 @@ export default function EmplataGame(props: {
         if (nP === 1) {
           fx = side * 0.18;
           depth = 0.4;
-          sc = 0.82;
+          sc = 0.66;
           rot = side * 0.12;
         } else {
           const t = i / (nP - 1); // 0..1 a lo ancho
           fx = (t - 0.5) * Math.min(0.56, 0.28 + nP * 0.06); // el abanico se abre con N
           depth = 0.34 + (i % 2) * 0.16; // alterna cerca/lejos → escalonado, no fila plana
-          sc = 0.82 - Math.min(i, 4) * 0.035; // las primeras un pelo mayores (jerarquía)
+          sc = 0.66 - Math.min(i, 4) * 0.03; // las primeras un pelo mayores (jerarquía)
           rot = (i % 2 === 0 ? -1 : 1) * 0.12;
         }
         p.fxT = fx;
@@ -1790,7 +1790,7 @@ export default function EmplataGame(props: {
         p.depth = a[1];
         p.ty = moundY(p.fxT, p.depth);
         p.rot = (hash01(p.id + "r") - 0.5) * 0.26; // ±7.4° (era ±28.6°): no gira la luz horneada
-        setR(p, 0.62);
+        setR(p, 0.48);
       }
       // 1-2 toppings: slots frontales equilibrados (no un flanco vacío). Recalcula ty en la envolvente.
       const DUO: Array<[number, number]> = [[-0.2, 0.34], [0.21, 0.66]];
@@ -1865,7 +1865,7 @@ export default function EmplataGame(props: {
       const { boxW, boxH, boxX, boxY } = geo();
       const cat = ing.categoria;
       if (cat === "base") wd.pila = wd.pila.filter((p) => find(p.id)?.categoria !== "base"); // solo la base reemplaza a la base
-      const sc = cat === "base" ? 1.2 : cat === "proteina" ? 0.8 : 0.58;
+      const sc = cat === "base" ? 1.55 : cat === "proteina" ? 0.66 : 0.48;
       const fxDrop = clamp((xScreen - boxX) / boxW, -FXLIM, FXLIM); // desde donde cayó → FLUYE a su slot
       wd.pila.push({ id: ing.id, fx: fxDrop, fxT: fxDrop, fy: YB - 0.05, ty: YB, rot: 0, s: sc, r: radioDe(cat, sc) / boxW, land: 1, depth: 0.5 });
       recomputeSlots(); // EL NIDO decide el lugar determinista por rol + índice
@@ -2956,8 +2956,9 @@ export default function EmplataGame(props: {
           ctx.translate(lx, ly);
           // UN solo sprite (base grande y ancha como lecho; proteína/topping por profundidad).
           // La base se ensancha un pelo para leerse como porción tendida, no como bola.
-          const sz = SPR * p.s * (cp === 0 ? 1.0 : 0.93 + 0.12 * (1 - (p.depth ?? 0.5)));
-          const wideX = cp === 0 ? 1.12 : 1; // el lecho se extiende a lo ancho
+          // profundidad REAL: el frente ~1.08, el fondo ~0.78 (spread 38%, antes 12%)
+          const sz = SPR * p.s * (cp === 0 ? 1.0 : 0.78 + 0.3 * (1 - (p.depth ?? 0.5)));
+          const wideX = cp === 0 ? 1.3 : 1; // la cama se extiende a lo ancho como porción tendida
           const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1); // niebla cálida de profundidad
           ctx.save();
           ctx.scale((1 + sq) * wideX, 1 - sq); // squash ANTES del rotate: aplasta contra el SUELO
@@ -3726,7 +3727,7 @@ export default function EmplataGame(props: {
               vr: (Math.random() - 0.5) * 0.1,
               bounces: 0,
               sc: 0.68, // sale del rizo del fideo (≈ su tamaño colgando)
-              scT: catR === "base" ? 1.25 : catR === "proteina" ? 0.8 : 0.58, // → reposo, sin salto
+              scT: catR === "base" ? 1.55 : catR === "proteina" ? 0.66 : 0.48, // → reposo, sin salto
             });
             wd.fideos.splice(i, 1);
             continue;
