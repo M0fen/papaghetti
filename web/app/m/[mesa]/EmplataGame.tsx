@@ -781,9 +781,7 @@ type Fideo = {
 };
 /** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
  *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
-/** Una loseta del LECHO de una base: mismo sprite estampado N veces (solo dibujo). */
-type Tile = { dx: number; dy: number; s: number; rot: number; flip: number; depth: number };
-type PilaItem = { id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number; tiles?: Tile[] };
+type PilaItem = { id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number };
 type Puff = { x: number; y: number; life: number; max: number; r: number; tipo: "vapor" | "polvo" };
 type Pop = { x: number; y: number; life: number; texto: string; gratis: boolean };
 type Chispa = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number };
@@ -882,7 +880,7 @@ export default function EmplataGame(props: {
    * sale disabled, el aviso pide `baseId &&`, el ticket cae a "").
    */
   const [baseId, setBaseId] = useState<string>("");
-  const [proteinaIds, setProteinaIds] = useState<string[]>([]); // hasta 2 proteínas
+  const [proteinaIds, setProteinaIds] = useState<string[]>([]); // N proteínas, sin tope
   const [toppingIds, setToppingIds] = useState<string[]>([]);
   const [tab, setTab] = useState<0 | 1 | 2>(0);
   const [enviando, setEnviando] = useState(false);
@@ -957,9 +955,6 @@ export default function EmplataGame(props: {
     sprites: new Map<string, CanvasImageSource>(), // Off procedural o Image de IA (drawImage acepta ambos)
     glaze: new Map<string, Off>(), // medialuna especular ↖ por ingrediente (barniz húmedo)
     colores: new Map<string, string>(), // color dominante por ingrediente (partículas)
-    // LECHO horneado: las 16 losetas de la base se componen UNA vez en un offscreen y se
-    // dibujan como 1 sprite (16 blits/frame → 1). Se rehornea solo si cambia la base o el ancho.
-    bedCache: null as { id: string; boxW: number; canvas: Off; half: number } | null,
     vuelos: [] as Vuelo[],
     fideos: [] as Fideo[],
     fideoN: 0,
@@ -1049,7 +1044,6 @@ export default function EmplataGame(props: {
       img.onload = () => {
         world.current.sprites.set(ing.id, img);
         world.current.glaze.set(ing.id, bakeGlaze(img)); // re-hornea el barniz con el asset real
-        world.current.bedCache = null; // el lecho se rehornea con el sprite de IA (no el procedural)
         try {
           const c = document.createElement("canvas");
           c.width = 64;
@@ -1149,17 +1143,10 @@ export default function EmplataGame(props: {
         });
         despachar(ing, cx, cy);
       } else if (cat === "proteina") {
-        // multi-select con TOPE 2: toggle, y rechazo honesto de la 3ª
+        // multi-select SIN límite: las proteínas que quieras
         if (sel.current.proteinaIds.includes(ing.id)) {
           setProteinaIds((prev) => prev.filter((p) => p !== ing.id));
           sacarDeCaja(ing, cx, cy); // el fideo la saca y la devuelve a su plato
-          return;
-        }
-        if (sel.current.proteinaIds.length >= 2) {
-          s.tone(150, 0.08, "sine", 0.05); // "nope" grave
-          s.tone(110, 0.1, "sine", 0.04, undefined, 0.03);
-          if (navigator.vibrate) navigator.vibrate(12);
-          world.current.pops.push({ x: cx, y: cy - 20, life: 1, texto: "MÁX 2 PROTEÍNAS", gratis: false });
           return;
         }
         setProteinaIds((prev) => [...prev, ing.id]);
@@ -1191,8 +1178,8 @@ export default function EmplataGame(props: {
     try {
       const r = await enviarPedido({
         baseId,
-        proteinaId: proteinaIds[0] ?? "", // sin fallback silencioso: 0 proteínas = caja base honesta
-        proteinaId2: proteinaIds[1] ?? undefined,
+        proteinaId: proteinaIds[0] ?? "", // retro-compat; el array manda
+        proteinaIds, // N proteínas, sin límite
         toppingIds,
         canal,
         tipo: esWeb ? tipoSel : "mesa",
@@ -1735,70 +1722,43 @@ export default function EmplataGame(props: {
         p.s = sc;
         p.r = radioDe(find(p.id)?.categoria ?? "topping", sc) / boxW;
       };
-      // CAMA: un LECHO de 16 losetas del mismo sprite (la base era 1 solo sprite escalado 1.2,
-      // que por construcción cubría ~30% de la boca de la caja → "se ve vacía"). La
-      // multiplicación ocurre SOLO en el dibujo: wd.pila sigue con 1 item por base, así que el
-      // vuelo, la retirada y todos los `wd.pila.length` quedan intactos. Cada base tiene su
-      // gramática (nido de hebras ≠ montón de bolitas ≠ bastones aplastados).
-      const BED_ROWS = [
-        { dy: 0.02, xs: [-0.25, -0.08, 0.1, 0.27], s: 0.66, depth: 0.06 }, // ceja frontal (se apoya en el labio)
-        { dy: -0.09, xs: [-0.33, -0.14, 0.05, 0.23, 0.35], s: 0.74, depth: 0.38 },
-        { dy: -0.19, xs: [-0.28, -0.09, 0.11, 0.3], s: 0.7, depth: 0.68 },
-        { dy: -0.26, xs: [-0.17, 0.02, 0.21], s: 0.58, depth: 0.94 }, // CRESTA: roza el rim
-      ];
-      const BED_TUNE: Record<string, { scale: number; flatten: number; rot: number }> = {
-        spaghetti: { scale: 1.0, flatten: 1.0, rot: 0.3 }, // nidos: rot modesto (protege la luz del nido)
-        "papa-criolla": { scale: 0.9, flatten: 1.0, rot: 0.45 }, // bolitas: + chicas + densas
-        "papa-francesa": { scale: 0.98, flatten: 0.82, rot: 0.7 }, // bastones: aplasta vertical + jumble
-      };
+      // CAMA: UN solo sprite de la base (los assets ya son una porción: un nido, un montón de
+      // papas), grande y apoyado al frente como lecho. El relleno de la caja lo hace un COJÍN
+      // cálido del color de la base bajo la comida (ver el bucle de dibujo), no copias
+      // repetidas del sprite —eso se veía a repetición—.
       for (const p of base) {
         p.fxT = 0;
         p.ty = YB;
         p.depth = 0.55;
         p.rot = 0;
-        setR(p, 1.0);
-        const tn = BED_TUNE[p.id] ?? { scale: 1, flatten: 1, rot: 0.3 };
-        const t: Tile[] = [];
-        BED_ROWS.forEach((row, ri) =>
-          row.xs.forEach((x, ci) => {
-            const h = hash01(`${p.id}|${ri}|${ci}`);
-            const h2 = hash01(`${p.id}|${ri}|${ci}|b`);
-            t.push({
-              dx: x + (h - 0.5) * 0.035, // ±4.5px de jitter horizontal
-              dy: (row.dy + (h2 - 0.5) * 0.022) * tn.flatten,
-              s: row.s * (0.88 + 0.24 * h2) * tn.scale, // 0.88…1.12 → mata la repetición idéntica
-              rot: (h - 0.5) * tn.rot * 0.5, // suave: no gira la luz horneada del sprite
-              flip: h2 < 0.5 ? -1 : 1, // variedad por espejo (el nido/bolita casi radial lo tolera)
-              depth: row.depth,
-            });
-          }),
-        );
-        t.sort((a, b) => b.depth - a.depth); // ordena AQUÍ (fondo→frente), no por frame
-        p.tiles = t;
+        setR(p, 1.9); // porción generosa: el nido/montón llena el ancho del lecho
       }
       // RANK por IDENTIDAD: la posición dependía del orden de PULSACIÓN (quitar un topping
       // movía a otro hasta 123 px). Anclando todo al índice del catálogo, "misma receta,
       // misma foto" vuelve a ser cierto.
       const RANKp = (id: string) => proteinas.findIndex((x) => x.id === id);
       const RANKt = (id: string) => toppings.findIndex((x) => x.id === id);
-      // HÉROE(S): 1 en un tercio, o 2 como dúo jerárquico — su cara mira a cámara, nunca al centro muerto
+      // HÉROE(S): N proteínas (sin tope) repartidas en abanico frontal, jerárquicas — las
+      // primeras del catálogo mayores y adelante, alternando profundidad para escalonar.
       const heroFaces: Array<{ fx: number; ty: number; rx: number; ry: number }> = [];
       const protOrd = [...prot].sort((a, b) => RANKp(a.id) - RANKp(b.id));
+      const nP = protOrd.length;
       protOrd.forEach((p, i) => {
         let fx: number;
         let depth: number;
         let sc: number;
         let rot: number;
-        if (prot.length >= 2) {
-          fx = i === 0 ? -0.22 : 0.24;
-          depth = i === 0 ? 0.36 : 0.48;
-          sc = i === 0 ? 0.82 : 0.78;
-          rot = (i === 0 ? -1 : 1) * 0.12;
-        } else {
+        if (nP === 1) {
           fx = side * 0.18;
           depth = 0.4;
           sc = 0.82;
           rot = side * 0.12;
+        } else {
+          const t = i / (nP - 1); // 0..1 a lo ancho
+          fx = (t - 0.5) * Math.min(0.56, 0.28 + nP * 0.06); // el abanico se abre con N
+          depth = 0.34 + (i % 2) * 0.16; // alterna cerca/lejos → escalonado, no fila plana
+          sc = 0.82 - Math.min(i, 4) * 0.035; // las primeras un pelo mayores (jerarquía)
+          rot = (i % 2 === 0 ? -1 : 1) * 0.12;
         }
         p.fxT = fx;
         p.ty = moundY(fx, depth) - 0.02;
@@ -2920,6 +2880,35 @@ export default function EmplataGame(props: {
           ctx.ellipse(2, -boxH * 0.01, rw, boxH * 0.11, 0, 0, TAU);
           ctx.fill();
         }
+        // COJÍN: un lecho DIFUSO del color de la base que llena el suelo y las esquinas de la
+        // caja SIN repetir el sprite (repetirlo se veía a copia). Va bajo toda la comida; el
+        // sprite nítido de la base se apoya encima, así lee "lleno de eso" con una sola imagen.
+        const baseItem = wd.pila.find((q) => find(q.id)?.categoria === "base");
+        if (baseItem) {
+          const col = wd.colores.get(baseItem.id) ?? "rgb(202,161,90)";
+          const colT = col.replace("rgb(", "rgba(").replace(")", ",0)");
+          const cyc = -boxH * 0.13;
+          const cg = ctx.createRadialGradient(0, cyc, boxW * 0.05, 0, cyc, boxW * 0.5);
+          cg.addColorStop(0, col);
+          cg.addColorStop(0.62, col);
+          cg.addColorStop(1, colT);
+          ctx.save();
+          ctx.globalAlpha = 0.92;
+          ctx.fillStyle = cg;
+          ctx.beginPath();
+          ctx.ellipse(0, cyc, boxW * 0.45, boxH * 0.32, 0, 0, TAU);
+          ctx.fill();
+          // sombreado ↘ del cojín (una luz ↖): da volumen de montón, no disco plano
+          const sh = ctx.createLinearGradient(0, cyc - boxH * 0.2, 0, cyc + boxH * 0.2);
+          sh.addColorStop(0, "rgba(255,240,205,0.16)");
+          sh.addColorStop(0.5, "rgba(0,0,0,0)");
+          sh.addColorStop(1, "rgba(40,22,8,0.22)");
+          ctx.fillStyle = sh;
+          ctx.beginPath();
+          ctx.ellipse(0, cyc, boxW * 0.45, boxH * 0.32, 0, 0, TAU);
+          ctx.fill();
+          ctx.restore();
+        }
         const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id) || (b.depth ?? 0.5) - (a.depth ?? 0.5));
         for (const p of ordenada) {
           const spr = wd.sprites.get(p.id);
@@ -2953,62 +2942,26 @@ export default function EmplataGame(props: {
           const wet = wetDe(p.id);
           ctx.save();
           ctx.translate(lx, ly);
-          if (cp === 0 && p.tiles) {
-            // LECHO horneado: si el cache no vale (otra base u otro ancho), compón las 16
-            // losetas + su barniz en un offscreen; luego cada frame es UN solo drawImage.
-            const bc = wd.bedCache;
-            if (!bc || bc.id !== p.id || bc.boxW !== boxW) {
-              const half = boxW * 0.62; // semilado del lienzo del lecho (cubre losetas + margen)
-              const BQ = 2; // supersampling → nítido al escalar
-              const bcv = document.createElement("canvas");
-              bcv.width = Math.ceil(half * 2 * BQ);
-              bcv.height = Math.ceil(half * 2 * BQ);
-              const bg = bcv.getContext("2d")!;
-              bg.setTransform(BQ, 0, 0, BQ, half * BQ, half * BQ); // origen al centro
-              for (const t of p.tiles) {
-                const tsz = SPR * p.s * t.s * 1.24;
-                bg.save();
-                bg.translate(t.dx * boxW, t.dy * boxH);
-                bg.rotate(t.rot);
-                bg.scale(t.flip, 1);
-                bg.globalAlpha = 1 - t.depth * 0.1;
-                bg.drawImage(spr, -tsz / 2, -tsz / 2, tsz, tsz);
-                bg.restore();
-                if (gl && wet > 0.02 && t.depth < 0.2) {
-                  bg.save();
-                  bg.translate(t.dx * boxW, t.dy * boxH);
-                  bg.globalCompositeOperation = "lighter";
-                  bg.globalAlpha = wet * 0.5;
-                  bg.drawImage(gl, -tsz / 2 + tsz * 0.02, -tsz / 2, tsz, tsz);
-                  bg.restore();
-                }
-              }
-              wd.bedCache = { id: p.id, boxW, canvas: bcv, half };
-            }
-            const cache = wd.bedCache!;
-            // el squash de aterrizaje se aplica al lecho compuesto → "se derrama" al caer
-            ctx.scale(1 + sq, 1 - sq);
-            ctx.drawImage(cache.canvas, -cache.half, -cache.half, cache.half * 2, cache.half * 2);
-          } else {
-            // escala por profundidad: frente un pelo mayor, fondo menor → escorzo del montículo
-            const sz = SPR * p.s * (0.93 + 0.12 * (1 - (p.depth ?? 0.5)));
-            const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1); // niebla cálida de profundidad
-            ctx.save();
-            ctx.scale(1 + sq, 1 - sq); // squash ANTES del rotate: aplasta contra el SUELO, no el sprite
-            ctx.rotate(p.rot);
-            ctx.globalAlpha = 1 - prof * 0.14;
-            ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
+          // UN solo sprite (base grande y ancha como lecho; proteína/topping por profundidad).
+          // La base se ensancha un pelo para leerse como porción tendida, no como bola.
+          const sz = SPR * p.s * (cp === 0 ? 1.0 : 0.93 + 0.12 * (1 - (p.depth ?? 0.5)));
+          const wideX = cp === 0 ? 1.12 : 1; // el lecho se extiende a lo ancho
+          const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1); // niebla cálida de profundidad
+          ctx.save();
+          ctx.scale((1 + sq) * wideX, 1 - sq); // squash ANTES del rotate: aplasta contra el SUELO
+          ctx.rotate(p.rot);
+          ctx.globalAlpha = 1 - prof * 0.14;
+          ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
+          ctx.globalAlpha = 1;
+          ctx.restore();
+          // BARNIZ en espacio de pantalla (sin rotar ni squash): la medialuna apunta ↖ y no
+          // se deforma al aterrizar. tiltX la desliza un pelo → la comida "brilla" al inclinar.
+          if (gl && wet > 0.02) {
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = wet * (0.78 + 0.22 * clamp(wd.tiltX * 3, -1, 1)) * (1 - prof * 0.35);
+            ctx.drawImage(gl, (-sz / 2 + sz * 0.02) * wideX, -sz / 2, sz * wideX, sz);
+            ctx.globalCompositeOperation = "source-over";
             ctx.globalAlpha = 1;
-            ctx.restore();
-            // BARNIZ en espacio de pantalla (sin rotar ni squash): la medialuna apunta ↖ y no
-            // se deforma al aterrizar. tiltX la desliza un pelo → la comida "brilla" al inclinar.
-            if (gl && wet > 0.02) {
-              ctx.globalCompositeOperation = "lighter";
-              ctx.globalAlpha = wet * (0.78 + 0.22 * clamp(wd.tiltX * 3, -1, 1)) * (1 - prof * 0.35);
-              ctx.drawImage(gl, -sz / 2 + sz * 0.02, -sz / 2, sz, sz);
-              ctx.globalCompositeOperation = "source-over";
-              ctx.globalAlpha = 1;
-            }
           }
           ctx.restore();
         }
