@@ -106,8 +106,9 @@ const nuevoCtrl = (): CtrlFideo => ({ x1: 0, v1x: 0, y1: 0, v1y: 0, x2: 0, v2x: 
    dispuestos por ángulo áureo. Estructura y forma, foto reproducible. Ver recomputeSlots().
    ========================================================================= */
 const YB = -0.05; // tapa de la CAMA (fracción de boxH; el nido se apoya aquí, cerca del suelo)
-const HM = 0.2; // altura del penacho (apex ≈ -0.25, anidado dentro de la caja)
-const FXLIM = 0.3; // límite lateral (= el lim del apilado anterior)
+const HM = 0.3; // altura del penacho: 0.20→0.30 sube el apex a −0.35·boxH (hueco al rim 34→14px)
+const FXLIM = 0.37; // límite lateral: 0.30→0.37 abre los flancos (comida a ±95px vs pared ±108)
+const FXENV = 0.42; // soporte de la envolvente: la cúpula no colapsa a la altura del suelo antes del muro
 const GOLDEN = 2.399963229728653; // ángulo áureo (phyllotaxis de Vogel → ruido azul, sin clusters)
 
 /* Unidades de DISEÑO de la escena (px a escala 1 = teléfono de 390). Todo lo demás las
@@ -128,8 +129,8 @@ function hash01(str: string): number {
 /** Envolvente del montículo: alto al centro-fondo, cae a flancos y frente. ty en fracción de boxH
  *  (negativo = arriba). depth 0=frente/cámara, 1=fondo. Apex ≈ -0.33 (bajo el rim, no se sale). */
 function moundY(fx: number, depth: number): number {
-  const t = Math.min(1, Math.abs(fx) / FXLIM);
-  const prof = Math.pow(1 - t * t, 0.6);
+  const t = Math.min(1, Math.abs(fx) / FXENV); // por FXENV, no FXLIM: un topping en el flanco
+  const prof = Math.pow(1 - t * t, 0.6); // mantiene altura hasta el muro (antes caía al suelo)
   return YB - HM * prof * (0.4 + 0.6 * depth);
 }
 
@@ -1791,7 +1792,7 @@ export default function EmplataGame(props: {
             const dfx = pa.fxT - pb.fxT;
             const dty = pa.ty - pb.ty;
             const dist = Math.hypot(dfx, dty) || 0.0001;
-            const min = (pa.r + pb.r) * 0.68;
+            const min = (pa.r + pb.r) * 0.6; // 0.68→0.60: 32%→40% de solape, se funde
             if (dist < min) {
               const push = (min - dist) * 0.5;
               const ux = dfx / dist;
@@ -1804,7 +1805,20 @@ export default function EmplataGame(props: {
           }
         }
       }
-      for (const p of mov) p.fxT = clamp(p.fxT, -FXLIM, FXLIM);
+      // MURO elíptico + SUELO: el clamp plano expulsaba los toppings al borde, donde el labio
+      // frontal se los comía. Ahora el SPRITE ENTERO queda dentro del trapecio interior, y un
+      // suelo duro impide que ningún borde entre en la sombra del labio.
+      const FXMURO = (d: number) => 0.4 - 0.06 * d; // trapecio: 0.386 al frente, 0.34 al fondo
+      const TY_SUELO = -0.085; // borde inferior de comida por ENCIMA del labio oscuro
+      const TY_TECHO = -0.345; // nada supera la cúpula
+      for (const p of mov) {
+        const d = p.depth ?? 0.5;
+        const half = (p.r ?? 0) + 0.05; // margen = radio + media loseta → el sprite entero cabe
+        const lim = FXMURO(d) - half;
+        if (Math.abs(p.fxT) > lim) p.fxT = Math.sign(p.fxT) * lim;
+        p.ty = Math.min(p.ty, moundY(p.fxT, d) - 0.01); // re-asienta en la envolvente ancha
+        p.ty = clamp(p.ty, TY_TECHO, TY_SUELO);
+      }
     };
 
     /** Aterrizaje: el item se queda DONDE la física lo dejó (x real del vuelo) + squash + precio. */
@@ -2794,7 +2808,7 @@ export default function EmplataGame(props: {
         }
         ctx.save();
         ctx.beginPath();
-        ctx.rect(-boxW * 0.44, -boxH * 0.95, boxW * 0.88, boxH * 1.1);
+        ctx.rect(-boxW * 0.46, -boxH * 0.92, boxW * 0.92, boxH * 1.08); // más ancho: la comida besa la pared
         ctx.clip();
         // micro-manchas en el kraft del suelo (multiply, se desvanecen) — jugosidad del emplatado
         ctx.globalCompositeOperation = "multiply";
@@ -2819,6 +2833,15 @@ export default function EmplataGame(props: {
         };
         // sort: capa (cama→proteína→toppings) y, DENTRO de toppings, por profundidad desc → el fondo
         // se dibuja primero y el frente lo ocluye (lectura 3/4 correcta del montículo)
+        // AO de GRUPO: una sombra que abraza toda la masa y la pega al piso (mata la lectura
+        // de "piezas flotando en fila"). Crece con la receta, con tope.
+        if (wd.pila.length > 1) {
+          const rw = boxW * (0.3 + 0.03 * Math.min(6, wd.pila.length));
+          ctx.fillStyle = "rgba(40,22,8,0.24)";
+          ctx.beginPath();
+          ctx.ellipse(2, -boxH * 0.01, rw, boxH * 0.11, 0, 0, TAU);
+          ctx.fill();
+        }
         const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id) || (b.depth ?? 0.5) - (a.depth ?? 0.5));
         for (const p of ordenada) {
           const spr = wd.sprites.get(p.id);
