@@ -666,6 +666,49 @@ function bakeSprite(ing: Ingrediente): Off {
   return out;
 }
 
+/**
+ * BARNIZ: una medialuna especular ↖ recortada a la SILUETA del ingrediente (la lectura
+ * "húmedo/recién hecho" que pide el estilo Ghibli). Se hornea UNA vez por ingrediente y se
+ * dibuja en espacio de pantalla con blend `lighter`: así no gira con las rotaciones del
+ * montón (que apuntarían el brillo a cualquier lado) y una sola luz manda siempre.
+ * Técnica: se borra una copia desplazada ↘ del sprite (queda solo el filo ↖) y esa
+ * medialuna se tiñe de blanco-cálido con degradado. Vale para el Off procedural y el .webp.
+ */
+function bakeGlaze(src: CanvasImageSource): Off {
+  const { c, g } = makeOff();
+  g.drawImage(src, 0, 0, SPR, SPR);
+  g.globalCompositeOperation = "destination-out";
+  g.drawImage(src, SPR * 0.085, SPR * 0.105, SPR, SPR); // borra la copia ↘ → queda el filo ↖
+  g.globalCompositeOperation = "source-in";
+  const lg = g.createLinearGradient(SPR * 0.22, SPR * 0.16, SPR * 0.78, SPR * 0.72);
+  lg.addColorStop(0, "rgba(255,250,235,1)");
+  lg.addColorStop(0.55, "rgba(255,240,205,0.35)");
+  lg.addColorStop(1, "rgba(255,240,205,0)");
+  g.fillStyle = lg;
+  g.fillRect(0, 0, SPR, SPR);
+  return c;
+}
+/** Cuánto brilla cada ingrediente (0-1): salsas/cremosos mojados, fritos medios, secos casi nada. */
+const WET: Record<string, number> = {
+  hogao: 0.2,
+  bolonesa: 0.18,
+  aguacate: 0.14,
+  "papa-criolla": 0.13,
+  spaghetti: 0.12,
+  tocineta: 0.1,
+  chicharron: 0.1,
+  "chicharron-crocante": 0.1,
+  "papa-francesa": 0.09,
+  "pollo-crispy": 0.09,
+  nuggets: 0.09,
+  "nuggets-pina": 0.11,
+  parmesano: 0.04,
+  perejil: 0.05,
+  maicitos: 0.07,
+  champinon: 0.1,
+};
+const wetDe = (id: string) => WET[id] ?? 0.14;
+
 /** Color DOMINANTE de un sprite: media ponderada por SATURACIÓN² sobre TODA la región opaca. El
  *  velo ámbar del horneado es de baja saturación → pesa casi nada, así el burst sale del color real
  *  de la comida (Fruit Ninja). Antes era media aritmética del centro → todo tiraba a ámbar uniforme. */
@@ -912,7 +955,11 @@ export default function EmplataGame(props: {
   // ------- mundo del juego (refs, cero re-render) -------
   const world = useRef({
     sprites: new Map<string, CanvasImageSource>(), // Off procedural o Image de IA (drawImage acepta ambos)
+    glaze: new Map<string, Off>(), // medialuna especular ↖ por ingrediente (barniz húmedo)
     colores: new Map<string, string>(), // color dominante por ingrediente (partículas)
+    // LECHO horneado: las 16 losetas de la base se componen UNA vez en un offscreen y se
+    // dibujan como 1 sprite (16 blits/frame → 1). Se rehornea solo si cambia la base o el ancho.
+    bedCache: null as { id: string; boxW: number; canvas: Off; half: number } | null,
     vuelos: [] as Vuelo[],
     fideos: [] as Fideo[],
     fideoN: 0,
@@ -984,10 +1031,13 @@ export default function EmplataGame(props: {
     const col = world.current.colores;
     m.clear();
     col.clear();
+    const gz = world.current.glaze;
+    gz.clear();
     for (const ing of all) {
       const spr = bakeSprite(ing);
       m.set(ing.id, spr);
       col.set(ing.id, muestrearColor(spr));
+      gz.set(ing.id, bakeGlaze(spr));
     }
     // ASSETS DE COMIDA (IA plana en /public/food/{id}.webp) — carga DIFERIDA tras el procedural:
     // el procedural es el placeholder instantáneo (LCP intacto); al llegar el asset reemplaza el
@@ -998,6 +1048,8 @@ export default function EmplataGame(props: {
       img.decoding = "async";
       img.onload = () => {
         world.current.sprites.set(ing.id, img);
+        world.current.glaze.set(ing.id, bakeGlaze(img)); // re-hornea el barniz con el asset real
+        world.current.bedCache = null; // el lecho se rehornea con el sprite de IA (no el procedural)
         try {
           const c = document.createElement("canvas");
           c.width = 64;
@@ -2896,35 +2948,67 @@ export default function EmplataGame(props: {
             ctx.fill();
           }
           p.land *= Math.pow(0.8, df); // el squash de impacto se recupera
+          const sq = p.land * 0.32; // SQUASH de aterrizaje (conserva volumen: aplasta ancho)
+          const gl = wd.glaze.get(p.id); // barniz húmedo (medialuna especular ↖)
+          const wet = wetDe(p.id);
           ctx.save();
           ctx.translate(lx, ly);
-          // SQUASH de aterrizaje con conservación de volumen (aplasta ancho, recupera)
-          const sq = p.land * 0.32;
           if (cp === 0 && p.tiles) {
-            // LECHO: estampa las 16 losetas (ya ordenadas fondo→frente). El squash de
-            // aterrizaje se aplica al conjunto para que la cama "se derrame" al caer.
-            ctx.scale(1 + sq, 1 - sq);
-            for (const t of p.tiles) {
-              const tsz = SPR * p.s * t.s * 1.24;
-              ctx.save();
-              ctx.translate(t.dx * boxW, t.dy * boxH);
-              ctx.rotate(t.rot);
-              ctx.scale(t.flip, 1);
-              ctx.globalAlpha = 1 - t.depth * 0.1; // niebla: el fondo del lecho recede
-              ctx.drawImage(spr, -tsz / 2, -tsz / 2, tsz, tsz);
-              ctx.restore();
+            // LECHO horneado: si el cache no vale (otra base u otro ancho), compón las 16
+            // losetas + su barniz en un offscreen; luego cada frame es UN solo drawImage.
+            const bc = wd.bedCache;
+            if (!bc || bc.id !== p.id || bc.boxW !== boxW) {
+              const half = boxW * 0.62; // semilado del lienzo del lecho (cubre losetas + margen)
+              const BQ = 2; // supersampling → nítido al escalar
+              const bcv = document.createElement("canvas");
+              bcv.width = Math.ceil(half * 2 * BQ);
+              bcv.height = Math.ceil(half * 2 * BQ);
+              const bg = bcv.getContext("2d")!;
+              bg.setTransform(BQ, 0, 0, BQ, half * BQ, half * BQ); // origen al centro
+              for (const t of p.tiles) {
+                const tsz = SPR * p.s * t.s * 1.24;
+                bg.save();
+                bg.translate(t.dx * boxW, t.dy * boxH);
+                bg.rotate(t.rot);
+                bg.scale(t.flip, 1);
+                bg.globalAlpha = 1 - t.depth * 0.1;
+                bg.drawImage(spr, -tsz / 2, -tsz / 2, tsz, tsz);
+                bg.restore();
+                if (gl && wet > 0.02 && t.depth < 0.2) {
+                  bg.save();
+                  bg.translate(t.dx * boxW, t.dy * boxH);
+                  bg.globalCompositeOperation = "lighter";
+                  bg.globalAlpha = wet * 0.5;
+                  bg.drawImage(gl, -tsz / 2 + tsz * 0.02, -tsz / 2, tsz, tsz);
+                  bg.restore();
+                }
+              }
+              wd.bedCache = { id: p.id, boxW, canvas: bcv, half };
             }
-            ctx.globalAlpha = 1;
-          } else {
-            ctx.rotate(p.rot);
+            const cache = wd.bedCache!;
+            // el squash de aterrizaje se aplica al lecho compuesto → "se derrama" al caer
             ctx.scale(1 + sq, 1 - sq);
+            ctx.drawImage(cache.canvas, -cache.half, -cache.half, cache.half * 2, cache.half * 2);
+          } else {
             // escala por profundidad: frente un pelo mayor, fondo menor → escorzo del montículo
             const sz = SPR * p.s * (0.93 + 0.12 * (1 - (p.depth ?? 0.5)));
-            // niebla cálida de profundidad: los items más ALTOS (al fondo) se atenúan un pelo
-            const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1);
+            const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1); // niebla cálida de profundidad
+            ctx.save();
+            ctx.scale(1 + sq, 1 - sq); // squash ANTES del rotate: aplasta contra el SUELO, no el sprite
+            ctx.rotate(p.rot);
             ctx.globalAlpha = 1 - prof * 0.14;
             ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
             ctx.globalAlpha = 1;
+            ctx.restore();
+            // BARNIZ en espacio de pantalla (sin rotar ni squash): la medialuna apunta ↖ y no
+            // se deforma al aterrizar. tiltX la desliza un pelo → la comida "brilla" al inclinar.
+            if (gl && wet > 0.02) {
+              ctx.globalCompositeOperation = "lighter";
+              ctx.globalAlpha = wet * (0.78 + 0.22 * clamp(wd.tiltX * 3, -1, 1)) * (1 - prof * 0.35);
+              ctx.drawImage(gl, -sz / 2 + sz * 0.02, -sz / 2, sz, sz);
+              ctx.globalCompositeOperation = "source-over";
+              ctx.globalAlpha = 1;
+            }
           }
           ctx.restore();
         }
