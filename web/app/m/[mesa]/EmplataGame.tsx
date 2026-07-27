@@ -109,7 +109,6 @@ const YB = -0.05; // tapa de la CAMA (fracción de boxH; el nido se apoya aquí,
 const HM = 0.3; // altura del penacho: 0.20→0.30 sube el apex a −0.35·boxH (hueco al rim 34→14px)
 const FXLIM = 0.37; // límite lateral: 0.30→0.37 abre los flancos (comida a ±95px vs pared ±108)
 const FXENV = 0.42; // soporte de la envolvente: la cúpula no colapsa a la altura del suelo antes del muro
-const GOLDEN = 2.399963229728653; // ángulo áureo (phyllotaxis de Vogel → ruido azul, sin clusters)
 
 /* Unidades de DISEÑO de la escena (px a escala 1 = teléfono de 390). Todo lo demás las
    multiplica por `U` (ver geo()), así el mismo dibujo sirve en un móvil y en un portátil.
@@ -1725,9 +1724,15 @@ export default function EmplataGame(props: {
         t.sort((a, b) => b.depth - a.depth); // ordena AQUÍ (fondo→frente), no por frame
         p.tiles = t;
       }
+      // RANK por IDENTIDAD: la posición dependía del orden de PULSACIÓN (quitar un topping
+      // movía a otro hasta 123 px). Anclando todo al índice del catálogo, "misma receta,
+      // misma foto" vuelve a ser cierto.
+      const RANKp = (id: string) => proteinas.findIndex((x) => x.id === id);
+      const RANKt = (id: string) => toppings.findIndex((x) => x.id === id);
       // HÉROE(S): 1 en un tercio, o 2 como dúo jerárquico — su cara mira a cámara, nunca al centro muerto
       const heroFaces: Array<{ fx: number; ty: number; rx: number; ry: number }> = [];
-      prot.forEach((p, i) => {
+      const protOrd = [...prot].sort((a, b) => RANKp(a.id) - RANKp(b.id));
+      protOrd.forEach((p, i) => {
         let fx: number;
         let depth: number;
         let sc: number;
@@ -1750,40 +1755,61 @@ export default function EmplataGame(props: {
         setR(p, sc);
         heroFaces.push({ fx, ty: p.ty, rx: p.r * 0.95, ry: p.r * 1.15 });
       });
-      // TOPPINGS: ángulo áureo (densidad areal uniforme, sin rejilla), keep-out de la cara del héroe
+      // TOPPINGS anclados por IDENTIDAD en TRESBOLILLO de 3 gradas (el ángulo áureo dependía
+      // de N y del orden de tap → el "baile"). Cada topping tiene su sitio fijo; quitar otro
+      // ya no lo mueve.
+      const ANCLA_TOP: Record<string, [number, number]> = {
+        // [fx, depth] — grada trasera (alta)
+        maicitos: [0.05, 0.92],
+        hogao: [-0.17, 0.92],
+        perejil: [0.27, 0.92],
+        // grada media
+        "nuggets-pina": [-0.3, 0.58],
+        "chicharron-crocante": [-0.01, 0.58],
+        parmesano: [0.3, 0.58],
+        // grada frontal (baja)
+        aguacate: [-0.2, 0.24],
+        tocineta: [0.19, 0.24],
+      };
       const N = tops.length;
-      const FRONT = [{ fx: 0.02, depth: 0.24 }, { fx: 0.2, depth: 0.3 }, { fx: -0.22, depth: 0.3 }];
-      tops.forEach((p, k) => {
-        let fx: number;
-        let depth: number;
-        if (N <= 2) {
-          fx = FRONT[k].fx; // pocos → slots frontales (no un anillo vacío)
-          depth = FRONT[k].depth;
-        } else {
-          const theta = k * GOLDEN;
-          const rho = Math.sqrt((k + 0.5) / N);
-          fx = Math.cos(theta) * rho * FXLIM;
-          depth = clamp(0.55 + Math.sin(theta) * rho * 0.5, 0, 1); // corona hacia el fondo = altura
-        }
-        let ty = moundY(fx, depth) + (hash01(p.id) - 0.5) * 0.02;
+      for (const p of tops) {
+        const a = ANCLA_TOP[p.id] ?? [0, 0.58];
+        p.fxT = clamp(a[0], -FXLIM, FXLIM);
+        p.depth = a[1];
+        p.ty = moundY(p.fxT, p.depth);
+        p.rot = (hash01(p.id + "r") - 0.5) * 0.26; // ±7.4° (era ±28.6°): no gira la luz horneada
+        setR(p, 0.62);
+      }
+      // 1-2 toppings: slots frontales equilibrados (no un flanco vacío). Recalcula ty en la envolvente.
+      const DUO: Array<[number, number]> = [[-0.2, 0.34], [0.21, 0.66]];
+      if (N === 1) {
+        const p0 = tops[0];
+        p0.fxT = -0.03;
+        p0.depth = 0.62;
+        p0.ty = moundY(p0.fxT, p0.depth);
+      } else if (N === 2) {
+        const o = [...tops].sort((x, y) => RANKt(x.id) - RANKt(y.id));
+        o.forEach((p0, i) => {
+          p0.fxT = DUO[i][0];
+          p0.depth = DUO[i][1];
+          p0.ty = moundY(p0.fxT, p0.depth);
+        });
+      }
+      // keep-out de la cara del héroe: un topping nunca sobre el rostro de la proteína
+      for (const p0 of tops) {
         for (const hf of heroFaces) {
-          const dfx = fx - hf.fx;
-          const dty = ty - hf.ty;
+          const dfx = p0.fxT - hf.fx;
+          const dty = p0.ty - hf.ty;
           const nd = (dfx / hf.rx) ** 2 + (dty / hf.ry) ** 2;
           if (nd < 1) {
             const push = (1 - Math.sqrt(Math.max(nd, 0.0001))) * 0.16 + 0.02;
-            fx += (dfx >= 0 ? 1 : -1) * push;
-            ty += push * 0.45; // empuje hacia el frente/abajo, jamás sobre la cara
+            p0.fxT += (dfx >= 0 ? 1 : -1) * push;
+            p0.ty += push * 0.45;
           }
         }
-        p.fxT = clamp(fx, -FXLIM, FXLIM);
-        p.ty = ty;
-        p.depth = depth;
-        p.rot = (hash01(p.id + "r") - 0.5) * 1.0;
-        setR(p, 0.58);
-      });
-      // relajación de solapes (la comida se TOCA ~32%, sin torres) — O(N²), N≤12, trivial
-      const mov = [...prot, ...tops];
+      }
+      // relajación de solapes en ORDEN DE IDENTIDAD (determinista con cadenas de 3+ solapes)
+      const mov = [...protOrd, ...[...tops].sort((a, b) => RANKt(a.id) - RANKt(b.id))];
       for (let iter = 0; iter < 2; iter++) {
         for (let a = 0; a < mov.length; a++) {
           for (let b = a + 1; b < mov.length; b++) {
