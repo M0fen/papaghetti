@@ -2999,9 +2999,11 @@ export default function EmplataGame(props: {
           ctx.restore();
           // BARNIZ en espacio de pantalla (sin rotar ni squash): la medialuna apunta ↖ y no
           // se deforma al aterrizar. tiltX la desliza un pelo → la comida "brilla" al inclinar.
-          if (gl && wet > 0.02) {
+          // En un montón poblado se ATENÚA (1/√N) para no empastar a plástico y ahorrar fill.
+          const brillo = wet * (0.78 + 0.22 * clamp(wd.tiltX * 3, -1, 1)) * (1 - prof * 0.35) / Math.sqrt(Math.max(1, wd.pila.length - 2));
+          if (gl && brillo > 0.03) {
             ctx.globalCompositeOperation = "lighter";
-            ctx.globalAlpha = wet * (0.78 + 0.22 * clamp(wd.tiltX * 3, -1, 1)) * (1 - prof * 0.35);
+            ctx.globalAlpha = brillo;
             ctx.drawImage(gl, (-sz / 2 + sz * 0.02) * wideX, -sz / 2, sz * wideX, sz);
             ctx.globalCompositeOperation = "source-over";
             ctx.globalAlpha = 1;
