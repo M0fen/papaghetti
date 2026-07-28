@@ -1746,10 +1746,11 @@ export default function EmplataGame(props: {
       // repetidas del sprite —eso se veía a repetición—.
       for (const p of base) {
         p.fxT = 0;
-        p.ty = YB;
+        p.ty = -0.075; // sube el nido al VOLUMEN MEDIO del montón (antes YB, plantado abajo):
+        // así su corona sube hasta donde flotaban las guarniciones y cierra el hueco ámbar
         p.depth = 0.55;
         p.rot = 0;
-        setR(p, 1.55); // CAMA baja y ancha (sz 149, bajo el rim); el lecho carga el ancho
+        setR(p, 1.55); // CAMA (no crecer s: menos riesgo de rebasar el rim trasero)
       }
       // RANK por IDENTIDAD: la posición dependía del orden de PULSACIÓN (quitar un topping
       // movía a otro hasta 123 px). Anclando todo al índice del catálogo, "misma receta,
@@ -1773,7 +1774,7 @@ export default function EmplataGame(props: {
           rot = side * 0.12;
         } else {
           const t = i / (nP - 1); // 0..1 a lo ancho
-          fx = (t - 0.5) * Math.min(0.56, 0.28 + nP * 0.06); // el abanico se abre con N
+          fx = (t - 0.5) * Math.min(0.42, 0.2 + nP * 0.05); // abanico cerrado: los héroes se rozan
           depth = 0.34 + (i % 2) * 0.16; // alterna cerca/lejos → escalonado, no fila plana
           sc = 0.66 - Math.min(i, 4) * 0.03; // las primeras un pelo mayores (jerarquía)
           rot = (i % 2 === 0 ? -1 : 1) * 0.12;
@@ -1788,18 +1789,20 @@ export default function EmplataGame(props: {
       // TOPPINGS anclados por IDENTIDAD en TRESBOLILLO de 3 gradas (el ángulo áureo dependía
       // de N y del orden de tap → el "baile"). Cada topping tiene su sitio fijo; quitar otro
       // ya no lo mueve.
+      // Anclas ESTRECHAS (±0.30 → ±0.17): los vecinos de una grada quedan bajo la suma de sus
+      // radios → SOLAPAN en vez de flotar separados; las 3 gradas se interpenetran por depth.
       const ANCLA_TOP: Record<string, [number, number]> = {
         // [fx, depth] — grada trasera (alta)
-        maicitos: [0.05, 0.92],
-        hogao: [-0.17, 0.92],
-        perejil: [0.27, 0.92],
+        hogao: [-0.1, 0.92],
+        maicitos: [0.03, 0.92],
+        perejil: [0.16, 0.92],
         // grada media
-        "nuggets-pina": [-0.3, 0.58],
+        "nuggets-pina": [-0.17, 0.58],
         "chicharron-crocante": [-0.01, 0.58],
-        parmesano: [0.3, 0.58],
+        parmesano: [0.17, 0.58],
         // grada frontal (baja)
-        aguacate: [-0.2, 0.24],
-        tocineta: [0.19, 0.24],
+        aguacate: [-0.11, 0.24],
+        tocineta: [0.1, 0.24],
       };
       const N = tops.length;
       for (const p of tops) {
@@ -1811,7 +1814,7 @@ export default function EmplataGame(props: {
         setR(p, 0.48);
       }
       // 1-2 toppings: slots frontales equilibrados (no un flanco vacío). Recalcula ty en la envolvente.
-      const DUO: Array<[number, number]> = [[-0.2, 0.34], [0.21, 0.66]];
+      const DUO: Array<[number, number]> = [[-0.1, 0.34], [0.11, 0.7]]; // juntos e interpenetrados
       if (N === 1) {
         const p0 = tops[0];
         p0.fxT = -0.03;
@@ -2947,13 +2950,13 @@ export default function EmplataGame(props: {
           p.fx += (p.fxT - p.fx) * (1 - Math.pow(0.75, df)); // FLUYE a su slot (la composición se recompone viva)
           const cp = capa(p.id);
           const lx = p.fx * boxW;
-          const ly = cp === 0 ? -boxH * 0.02 : p.fy * boxH; // la CAMA se apoya al frente, visible como lecho
+          const ly = p.fy * boxH; // la CAMA también se asienta en la envolvente → es el corazón del montón
           const rp = p.r * boxW;
           if (cp === 0) {
             // CAMA: sombra ancha y plana que abraza las 16 losetas del lecho
             ctx.fillStyle = "rgba(40,22,8,0.34)";
             ctx.beginPath();
-            ctx.ellipse(lx + 2, ly + boxH * 0.05, boxW * 0.4, boxH * 0.07, 0, 0, TAU);
+            ctx.ellipse(lx + 2, -boxH * 0.02 + boxH * 0.05, boxW * 0.4, boxH * 0.07, 0, 0, TAU); // sombra al SUELO, no al centro elevado
             ctx.fill();
           } else {
             // ANIDADO: la pieza se HUNDE en la comida de abajo. Sombra de contacto en MULTIPLY,
@@ -2988,7 +2991,7 @@ export default function EmplataGame(props: {
           // La base se ensancha un pelo para leerse como porción tendida, no como bola.
           // profundidad REAL: el frente ~1.08, el fondo ~0.78 (spread 38%, antes 12%)
           const sz = SPR * p.s * (cp === 0 ? 1.0 : 0.78 + 0.3 * (1 - (p.depth ?? 0.5)));
-          const wideX = cp === 0 ? 1.3 : 1; // la cama se extiende a lo ancho como porción tendida
+          const wideX = cp === 0 ? 1.32 : 1; // la cama llena a lo ancho (semiancho ~98px < muro ~103)
           const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1); // niebla cálida de profundidad
           ctx.save();
           ctx.scale((1 + sq) * wideX, 1 - sq); // squash ANTES del rotate: aplasta contra el SUELO
