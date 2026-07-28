@@ -2901,7 +2901,7 @@ export default function EmplataGame(props: {
         if (baseItem) {
           const col = wd.colores.get(baseItem.id) ?? "rgb(202,161,90)";
           const colT = col.replace("rgb(", "rgba(").replace(")", ",0)");
-          const cyc = -boxH * 0.02; // al plano del suelo (no flotando en la pared)
+          const cyc = -boxH * 0.05; // faldón: sube a abrazar la base elevada (no charco aislado)
           ctx.save();
           // CLIP al trapecio del interior → el borde del lecho es la caja, no una elipse
           ctx.beginPath();
@@ -2918,7 +2918,7 @@ export default function EmplataGame(props: {
           ctx.globalAlpha = 0.66;
           ctx.fillStyle = cg;
           ctx.beginPath();
-          ctx.ellipse(0, cyc, boxW * 0.4, boxH * 0.2, 0, 0, TAU); // 206×40, dentro de la boca
+          ctx.ellipse(0, cyc, boxW * 0.44, boxH * 0.22, 0, 0, TAU); // faldón bajo el nido subido
           ctx.fill();
           if (wd.kraftPat) {
             // grano de cartón horneado (1 fill de patrón cacheado): rompe el plano
@@ -2926,7 +2926,7 @@ export default function EmplataGame(props: {
             ctx.globalAlpha = 0.3;
             ctx.fillStyle = wd.kraftPat;
             ctx.beginPath();
-            ctx.ellipse(0, cyc, boxW * 0.4, boxH * 0.2, 0, 0, TAU);
+            ctx.ellipse(0, cyc, boxW * 0.44, boxH * 0.22, 0, 0, TAU);
             ctx.fill();
             ctx.globalCompositeOperation = "source-over";
           }
@@ -2942,7 +2942,16 @@ export default function EmplataGame(props: {
           ctx.ellipse(2, -boxH * 0.01, rw, boxH * 0.11, 0, 0, TAU);
           ctx.fill();
         }
-        const ordenada = [...wd.pila].sort((a, b) => capa(a.id) - capa(b.id) || (b.depth ?? 0.5) - (a.depth ?? 0.5));
+        // orden: la BASE siempre detrás; el resto por `ty` ascendente (la pieza más baja en
+        // pantalla ocluye a la más alta), MEZCLANDO proteína y topping → lee como un montón
+        // relleno, no como capas separadas. localeCompare desempata → foto reproducible.
+        const ordenada = [...wd.pila].sort(
+          (a, b) =>
+            (capa(a.id) === 0 ? -1 : 0) - (capa(b.id) === 0 ? -1 : 0) ||
+            (a.ty ?? 0) - (b.ty ?? 0) ||
+            (b.depth ?? 0.5) - (a.depth ?? 0.5) ||
+            a.id.localeCompare(b.id),
+        );
         for (const p of ordenada) {
           const spr = wd.sprites.get(p.id);
           if (!spr) continue;
