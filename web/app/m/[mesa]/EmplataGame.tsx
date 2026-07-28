@@ -1811,7 +1811,7 @@ export default function EmplataGame(props: {
         p.depth = a[1];
         p.ty = moundY(p.fxT, p.depth);
         p.rot = (hash01(p.id + "r") - 0.5) * 0.26; // ±7.4° (era ±28.6°): no gira la luz horneada
-        setR(p, 0.48);
+        setR(p, 0.42 + hash01(p.id + "sz") * 0.16); // tamaño variado (0.42-0.58): rompe la fila de piezas iguales
       }
       // 1-2 toppings: slots frontales equilibrados (no un flanco vacío). Recalcula ty en la envolvente.
       const DUO: Array<[number, number]> = [[-0.1, 0.34], [0.11, 0.7]]; // juntos e interpenetrados
@@ -1851,7 +1851,7 @@ export default function EmplataGame(props: {
             const dfx = pa.fxT - pb.fxT;
             const dty = pa.ty - pb.ty;
             const dist = Math.hypot(dfx, dty) || 0.0001;
-            const min = (pa.r + pb.r) * 0.6; // 0.68→0.60: 32%→40% de solape, se funde
+            const min = (pa.r + pb.r) * 0.5; // tolera más solape: el montón se densifica en vez de esparcirse
             if (dist < min) {
               const push = (min - dist) * 0.5;
               const ux = dfx / dist;
