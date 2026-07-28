@@ -106,7 +106,7 @@ const nuevoCtrl = (): CtrlFideo => ({ x1: 0, v1x: 0, y1: 0, v1y: 0, x2: 0, v2x: 
    dispuestos por ángulo áureo. Estructura y forma, foto reproducible. Ver recomputeSlots().
    ========================================================================= */
 const YB = -0.05; // tapa de la CAMA (fracción de boxH; el nido se apoya aquí, cerca del suelo)
-const HM = 0.22; // altura del penacho: bajado de 0.30 para que las guarniciones se APOYEN sobre
+const HM = 0.24; // altura del penacho: 0.24 (subido un pelo de 0.22, menos hundido); NO ≥0.27 o cruza el rim. Las guarniciones se APOYAN sobre
 // la cama (a 0.30 flotaban en una fila alta, con hueco oscuro entre el nido y ellas)
 const FXLIM = 0.37; // límite lateral: 0.30→0.37 abre los flancos (comida a ±95px vs pared ±108)
 const FXENV = 0.42; // soporte de la envolvente: la cúpula no colapsa a la altura del suelo antes del muro
@@ -1828,6 +1828,14 @@ export default function EmplataGame(props: {
           p0.ty = moundY(p0.fxT, p0.depth);
         });
       }
+      // DERRAME premium: 1 topping FRONTAL (depth<0.3) asoma un pelo sobre el labio → caja
+      // colmada que rebosa. Hash-gated (determinista) y con tope duro (−0.073 = TY_SUELO+0.012)
+      // para que el gradiente del labio no se lo coma.
+      for (const p0 of tops) {
+        if (p0.depth < 0.3 && hash01(p0.id + "spill") < 0.5) {
+          p0.ty = Math.min(-0.073, p0.ty + 0.03);
+        }
+      }
       // keep-out de la cara del héroe: un topping nunca sobre el rostro de la proteína
       for (const p0 of tops) {
         for (const hf of heroFaces) {
@@ -1835,7 +1843,7 @@ export default function EmplataGame(props: {
           const dty = p0.ty - hf.ty;
           const nd = (dfx / hf.rx) ** 2 + (dty / hf.ry) ** 2;
           if (nd < 1) {
-            const push = (1 - Math.sqrt(Math.max(nd, 0.0001))) * 0.16 + 0.02;
+            const push = (1 - Math.sqrt(Math.max(nd, 0.0001))) * 0.11 + 0.015; // suave: apoya en el hombro, no expulsa
             p0.fxT += (dfx >= 0 ? 1 : -1) * push;
             p0.ty += push * 0.45;
           }
