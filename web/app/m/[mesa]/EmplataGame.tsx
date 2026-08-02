@@ -869,6 +869,7 @@ type Vuelo = {
   bounces: number;
   sc: number; // escala actual (interpola de la carta al reposo — sin salto)
   scT: number; // escala objetivo (la de reposo según categoría)
+  flash?: number; // 1 en el frame del impacto → destello aditivo brevísimo (decae en ~3 frames)
 };
 /** EL FIDEO MESERO — una hebra viva que trae/saca comida entre la carta y la caja.
  *  hx/hy = posición de la CABEZA gobernada por muelle (persigue al objetivo con lag → whip). */
@@ -1086,6 +1087,9 @@ export default function EmplataGame(props: {
     resettle: false, // el montón debe reacomodarse (cambió la cama o se sacó algo)
     selloHecho: false,
     hitStop: 0, // segundos de congelación al aterrizar el sello (golpe de juego de pelea)
+    // TRAUMA (Eiserloh, GDC 2016): canal único 0..1 — los impactos SUMAN, decae solo (lineal),
+    // y quien lo consume usa trauma² (los golpes chicos casi no se ven, los grandes explotan).
+    trauma: 0,
     selloScale: 0, // muelle de escala del sello (cae 1.7→1 con overshoot)
     selloScaleV: 0,
     selloRot: 0, // rotación aleatoria del sello (±6°)
@@ -2008,6 +2012,21 @@ export default function EmplataGame(props: {
       wd.pila.push({ id: ing.id, fx: fxDrop, fxT: fxDrop, fy: YB - 0.05, ty: YB, rot: 0, s: sc, r: radioDe(cat, sc) / boxW, land: 1, depth: 0.5 });
       recomputeSlots(); // EL NIDO decide el lugar determinista por rol + índice
       const nuevo = wd.pila[wd.pila.length - 1];
+      // el VECINO más cercano hereda el hundimiento (la pila reacciona en cadena, no es un
+      // corcho): su `land` dispara el mismo squash de impacto que ya recupera solo
+      if (!reduce && wd.pila.length > 1) {
+        let vec: PilaItem | null = null;
+        let best = 1e9;
+        for (const q of wd.pila) {
+          if (q === nuevo) continue;
+          const d = Math.abs(q.fxT - nuevo.fxT);
+          if (d < best) {
+            best = d;
+            vec = q;
+          }
+        }
+        if (vec) vec.land = Math.max(vec.land, 0.55);
+      }
       nuevo.fy = nuevo.ty - 0.05; // cae el último tramo a su slot (micro-asentamiento)
       const fx = nuevo.fxT;
       const ty = nuevo.ty;
@@ -2570,6 +2589,7 @@ export default function EmplataGame(props: {
       // suaviza la inclinación del móvil → la luz se mueve con calma, no nerviosa (luz interactiva)
       wd.tiltX += (tiltTX - wd.tiltX) * (1 - Math.pow(0.9, df));
       wd.tiltY += (tiltTY - wd.tiltY) * (1 - Math.pow(0.9, df));
+      wd.trauma = Math.max(0, wd.trauma - 1.8 * dtReal); // el trauma decae LINEAL (~0.55s de 1→0)
       const { U, boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH } = geo();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       // sacudida de escena (crocante) — decae; se suma a la caja y la mascota (no al fondo)
@@ -3451,6 +3471,14 @@ export default function EmplataGame(props: {
             wd.boxSquash = 1;
             s.ruido(0.04, 0.05, 900);
             if (!reduce && navigator.vibrate && e > 0.15) navigator.vibrate(Math.round(4 + e * 16)); // haptic escalado, 1er contacto
+            // EL GOLPE (Sakurai/Capcom: 2-3 frames bastan): micro-hit-stop proporcional a la
+            // energía + trauma + flash del sprite — la tríada visual-háptica en el MISMO frame
+            // que el vibrate. El sello conserva su 90ms (max, no suma).
+            if (!reduce && e > 0.15) {
+              wd.hitStop = Math.max(wd.hitStop, 0.028 + 0.022 * e); // ~30-50ms
+              wd.trauma = Math.min(1, wd.trauma + 0.45 + 0.3 * e);
+              v.flash = 1;
+            }
           } else {
             aterrizar(v.ing, v.x, clamp(v.vy / 14, 0, 1));
             wd.vuelos.splice(i, 1);
@@ -3464,6 +3492,16 @@ export default function EmplataGame(props: {
           ctx.rotate(v.rot);
           const sz = SPR * (boxW / BOXW_REF) * v.sc; // el vuelo escala igual que el aterrizaje (o salta de tamaño)
           ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
+          // FLASH del impacto: el propio sprite re-dibujado aditivo = pop caliente de ~3 frames.
+          // La intensidad la da el canal de trauma AL CUADRADO (golpe chico ≈ nada, grande revienta).
+          if (v.flash && v.flash > 0.05) {
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = v.flash * clamp(wd.trauma * wd.trauma * 1.5, 0, 1) * 0.75;
+            ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = 1;
+            v.flash *= Math.pow(0.5, df);
+          }
           ctx.restore();
         }
       }
