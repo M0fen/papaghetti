@@ -785,20 +785,87 @@ function bakeSprite(ing: Ingrediente): Off {
  * Técnica: se borra una copia desplazada ↘ del sprite (queda solo el filo ↖) y esa
  * medialuna se tiñe de blanco-cálido con degradado. Vale para el Off procedural y el .webp.
  */
-function bakeGlaze(src: CanvasImageSource): Off {
+/* EL FOIL DE COMIDA — el especular ES el material (fotografía/ilustración gastronómica: la regla
+   "brilla solo lo mojado, y cada materia brilla DISTINTO"). En vez de la medialuna genérica:
+   · HÚMEDO (salsas/cremosos/almíbar): filo ↖ + UN hotspot grande y liso que sigue la curvatura.
+   · FRITO (costras): NADA de hotspot — chispitas cortas en las aristas de la mitad superior.
+   · SECO (hierbas/quesos secos): micro-puntos dispersos, apenas.
+   Determinista por hash01(id·k); glint casi-blanco (color de la LUZ → bajo `lighter` preserva
+   el hue). Horneado una vez; en runtime lo BARRE el tilt (ver el dibujo de la pila). */
+const MATERIAL: Record<string, "humedo" | "frito" | "seco"> = {
+  hogao: "humedo",
+  bolonesa: "humedo",
+  aguacate: "humedo",
+  champinon: "humedo",
+  "nuggets-pina": "humedo", // piña calada: almíbar
+  spaghetti: "humedo", // aceitado
+  maicitos: "humedo", // queso fundido
+  perejil: "seco",
+  parmesano: "seco",
+};
+function bakeGlaze(src: CanvasImageSource, id = ""): Off {
+  const mat = MATERIAL[id] ?? "frito";
   const { c, g } = makeOff();
+  if (mat === "humedo") {
+    // filo ↖ (la medialuna de siempre) + HOTSPOT liso de superficie mojada
+    g.drawImage(src, 0, 0, SPR, SPR);
+    g.globalCompositeOperation = "destination-out";
+    g.drawImage(src, SPR * 0.085, SPR * 0.105, SPR, SPR); // borra la copia ↘ → queda el filo ↖
+    g.globalCompositeOperation = "source-in";
+    const lg = g.createLinearGradient(SPR * 0.22, SPR * 0.16, SPR * 0.78, SPR * 0.72);
+    lg.addColorStop(0, "rgba(248,251,255,1)");
+    lg.addColorStop(0.55, "rgba(242,246,252,0.35)");
+    lg.addColorStop(1, "rgba(242,246,252,0)");
+    g.fillStyle = lg;
+    g.fillRect(0, 0, SPR, SPR);
+    g.globalCompositeOperation = "source-over";
+    const hs = g.createRadialGradient(SPR * 0.38, SPR * 0.33, 1, SPR * 0.38, SPR * 0.33, SPR * 0.17);
+    hs.addColorStop(0, "rgba(250,252,255,0.85)");
+    hs.addColorStop(0.55, "rgba(248,251,255,0.28)");
+    hs.addColorStop(1, "rgba(248,251,255,0)");
+    g.fillStyle = hs;
+    g.save();
+    g.translate(SPR * 0.38, SPR * 0.33);
+    g.rotate(-0.5);
+    g.scale(1.25, 0.8); // elíptico: sigue la curvatura, no un sol
+    g.beginPath();
+    g.arc(0, 0, SPR * 0.17, 0, TAU);
+    g.fill();
+    g.restore();
+    g.fillStyle = "rgba(255,255,255,0.9)"; // la gota de reflejo (catchlight duro)
+    g.beginPath();
+    g.arc(SPR * 0.33, SPR * 0.28, SPR * 0.022, 0, TAU);
+    g.fill();
+  } else if (mat === "frito") {
+    // costra: chispitas cortas en las aristas — orientación y largo por hash (jamás random)
+    g.lineCap = "round";
+    for (let k = 0; k < 24; k++) {
+      const x = SPR * (0.16 + 0.68 * hash01(id + "gx" + k));
+      const y = SPR * (0.12 + 0.5 * hash01(id + "gy" + k));
+      const len = SPR * (0.02 + 0.035 * hash01(id + "gl" + k));
+      const a = hash01(id + "ga" + k) * Math.PI;
+      g.strokeStyle = `rgba(250,252,255,${0.35 + 0.45 * hash01(id + "go" + k)})`;
+      g.lineWidth = 1.2 + hash01(id + "gw" + k) * 1.4;
+      g.beginPath();
+      g.moveTo(x - Math.cos(a) * len, y - Math.sin(a) * len);
+      g.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+      g.stroke();
+    }
+  } else {
+    // seco: micro-puntos dispersos, apenas presentes
+    for (let k = 0; k < 11; k++) {
+      const x = SPR * (0.2 + 0.6 * hash01(id + "dx" + k));
+      const y = SPR * (0.16 + 0.5 * hash01(id + "dy" + k));
+      g.fillStyle = `rgba(250,252,255,${0.3 + 0.3 * hash01(id + "do" + k)})`;
+      g.beginPath();
+      g.arc(x, y, 0.8 + hash01(id + "dr" + k) * 1.1, 0, TAU);
+      g.fill();
+    }
+  }
+  // recorte final a la silueta REAL (chispitas/puntos nunca flotan fuera de la comida)
+  g.globalCompositeOperation = "destination-in";
   g.drawImage(src, 0, 0, SPR, SPR);
-  g.globalCompositeOperation = "destination-out";
-  g.drawImage(src, SPR * 0.085, SPR * 0.105, SPR, SPR); // borra la copia ↘ → queda el filo ↖
-  g.globalCompositeOperation = "source-in";
-  const lg = g.createLinearGradient(SPR * 0.22, SPR * 0.16, SPR * 0.78, SPR * 0.72);
-  // glint CASI-BLANCO (color de la LUZ, no del objeto): bajo blend `lighter` sube R/G/B parejo y
-  // PRESERVA el hue del ingrediente. Antes era crema cálida → recalentaba aguacate/hogao hacia naranja.
-  lg.addColorStop(0, "rgba(248,251,255,1)");
-  lg.addColorStop(0.55, "rgba(242,246,252,0.35)");
-  lg.addColorStop(1, "rgba(242,246,252,0)");
-  g.fillStyle = lg;
-  g.fillRect(0, 0, SPR, SPR);
+  g.globalCompositeOperation = "source-over";
   return c;
 }
 /** RIM CÁLIDO horneado DENTRO del sprite (contraluz de fotografía gastronómica: el filo superior
@@ -821,23 +888,24 @@ function conRim(src: CanvasImageSource): Off {
 }
 
 /** Cuánto brilla cada ingrediente (0-1): salsas/cremosos mojados, fritos medios, secos casi nada. */
+// Los HÚMEDOS suben (el hotspot del foil debe leerse); fritos/secos se quedan discretos.
 const WET: Record<string, number> = {
-  hogao: 0.2,
-  bolonesa: 0.18,
-  aguacate: 0.14,
+  hogao: 0.3,
+  bolonesa: 0.26,
+  aguacate: 0.2,
   "papa-criolla": 0.13,
-  spaghetti: 0.12,
+  spaghetti: 0.15,
   tocineta: 0.1,
   chicharron: 0.1,
   "chicharron-crocante": 0.1,
   "papa-francesa": 0.09,
   "pollo-crispy": 0.09,
   nuggets: 0.09,
-  "nuggets-pina": 0.11,
-  parmesano: 0.04,
+  "nuggets-pina": 0.2,
+  parmesano: 0.05,
   perejil: 0.05,
-  maicitos: 0.07,
-  champinon: 0.1,
+  maicitos: 0.16,
+  champinon: 0.16,
 };
 const wetDe = (id: string) => WET[id] ?? 0.14;
 
@@ -1171,7 +1239,7 @@ export default function EmplataGame(props: {
       const spr = conRim(bakeSprite(ing)); // el contraluz va horneado (cero coste por frame)
       m.set(ing.id, spr);
       col.set(ing.id, muestrearColor(spr));
-      gz.set(ing.id, bakeGlaze(spr));
+      gz.set(ing.id, bakeGlaze(spr, ing.id));
     }
     // ASSETS DE COMIDA (IA plana en /public/food/{id}.webp) — carga DIFERIDA tras el procedural:
     // el procedural es el placeholder instantáneo (LCP intacto); al llegar el asset reemplaza el
@@ -1183,7 +1251,7 @@ export default function EmplataGame(props: {
       img.onload = () => {
         const rimmed = conRim(img); // el asset también entra con su contraluz horneado
         world.current.sprites.set(ing.id, rimmed);
-        world.current.glaze.set(ing.id, bakeGlaze(rimmed)); // re-hornea el barniz con el asset real
+        world.current.glaze.set(ing.id, bakeGlaze(rimmed, ing.id)); // re-hornea el foil con el asset real
         try {
           const c = document.createElement("canvas");
           c.width = 64;
@@ -3280,14 +3348,22 @@ export default function EmplataGame(props: {
           ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
           ctx.globalAlpha = 1;
           ctx.restore();
-          // BARNIZ en espacio de pantalla (sin rotar ni squash): la medialuna apunta ↖ y no
-          // se deforma al aterrizar. tiltX la desliza un pelo → la comida "brilla" al inclinar.
-          // En un montón poblado se ATENÚA (1/√N) para no empastar a plástico y ahorrar fill.
-          const brillo = wet * (0.78 + 0.22 * clamp(wd.tiltX * 3, -1, 1)) * (1 - prof * 0.35) / Math.sqrt(Math.max(1, wd.pila.length - 2));
+          // EL FOIL en espacio de pantalla (sin rotar ni squash). El BARRIDO: una gaussiana
+          // sobre (tilt − posición de la pieza) → la luz pasa POR ENCIMA de la pila pieza a
+          // pieza al inclinar (o con el autopan) en vez de encender todo a la vez — la lectura
+          // holográfica de las cartas premium. Atenuado 1/√N para no empastar a plástico.
+          const sw = Math.exp(-((wd.tiltX * 2 - p.fxT * 1.6) ** 2) * 3.2);
+          const brillo = wet * (0.5 + 0.9 * sw) * (1 - prof * 0.35) / Math.sqrt(Math.max(1, wd.pila.length - 2));
           if (gl && brillo > 0.03) {
             ctx.globalCompositeOperation = "lighter";
             ctx.globalAlpha = brillo;
-            ctx.drawImage(gl, (-sz / 2 + sz * 0.02) * wideX, -sz / 2, sz * wideX, sz);
+            ctx.drawImage(
+              gl,
+              (-sz / 2 + sz * (0.02 + wd.tiltX * 0.06)) * wideX,
+              -sz / 2 + sz * wd.tiltY * 0.04,
+              sz * wideX,
+              sz,
+            );
             ctx.globalCompositeOperation = "source-over";
             ctx.globalAlpha = 1;
           }
