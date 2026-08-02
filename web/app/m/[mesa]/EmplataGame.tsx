@@ -1107,6 +1107,8 @@ export default function EmplataGame(props: {
     pressed: "",
     bg: null as Off | null, // fondo horneado (crema+luz+mostrador+grano) por resize
     vig: null as Off | null, // viñeta + velo cálido cacheados por resize
+    glowSoft: null as Off | null, // glow ancho de la luz viva (soft-light), horneado por resize
+    glowSpec: null as Off | null, // glow especular que barre la caja (screen), horneado por resize
     dotSprite: null as Off | null, // partícula de vapor horneada (dot suave)
     kraftPat: null as CanvasPattern | null, // textura de cartón (fibra + corrugado)
     stamp: null as Off | null, // sello "recién hecho" horneado
@@ -1795,6 +1797,22 @@ export default function EmplataGame(props: {
       g.fillStyle = vg;
       g.fillRect(0, 0, W, H);
       world.current.vig = c;
+      // GLOWS de la luz viva, horneados aquí (por resize): antes eran 2 createRadialGradient
+      // POR FRAME cuando el sensor estaba activo — con la cascada la luz vive SIEMPRE, así
+      // que la alocación por frame pasaba a ser permanente. Ahora son 2 sprites cacheados.
+      const { boxW: bw } = geo();
+      const mk = (size: number, stops: Array<[number, string]>) => {
+        const cc = document.createElement("canvas");
+        cc.width = cc.height = Math.max(2, Math.round(size));
+        const gg = cc.getContext("2d")!;
+        const rg = gg.createRadialGradient(size / 2, size / 2, size * 0.02, size / 2, size / 2, size / 2);
+        for (const [o, col] of stops) rg.addColorStop(o, col);
+        gg.fillStyle = rg;
+        gg.fillRect(0, 0, size, size);
+        return cc;
+      };
+      world.current.glowSoft = mk(bw * 1.7, [[0, "rgba(255,242,205,0.6)"], [1, "rgba(255,242,205,0)"]]);
+      world.current.glowSpec = mk(bw * 1.1, [[0, "rgba(255,246,222,0.14)"], [1, "rgba(255,246,222,0)"]]);
     };
 
     const resize = () => {
@@ -2135,32 +2153,32 @@ export default function EmplataGame(props: {
     // Subtil, dentro del concepto (no exagerado). iOS pide permiso en el primer toque. =====
     let tiltTX = 0;
     let tiltTY = 0;
+    /* LUZ VIVA — cascada de 3 niveles alimentando tiltTX/tiltTY (los consumidores no cambian):
+       1) SENSOR, solo donde llega sin diálogo (Android / navegadores sin requestPermission).
+          En iOS 13+ NO se pide permiso: nada de diálogo nativo al entrar (mandato del dueño).
+       2) PUNTERO como proxy (desktop / iOS): la luz sigue al cursor o al dedo.
+       3) AUTOPAN si no hay ni sensor ni puntero reciente: dos senos desfasados de período
+          largo (11.7s / 8.9s, amplitud 0.3) — la escena respira sola. Gate reduced-motion. */
+    let sensorLive = false; // se enciende con el PRIMER evento real del sensor
+    let ptrTX = 0;
+    let ptrTY = 0;
+    let ptrT = -1e9; // timestamp del último movimiento de puntero (ms de performance.now)
     const onOrient = (e: DeviceOrientationEvent) => {
+      if (e.gamma === null && e.beta === null) return; // evento vacío ≠ sensor vivo
+      sensorLive = true;
       const g = e.gamma ?? 0; // izq/der (−90..90)
       const bt = e.beta ?? 0; // adelante/atrás
       tiltTX = clamp(g / 28, -1, 1);
       tiltTY = clamp((bt - 45) / 28, -1, 1); // reposo ~45° (móvil sostenido en la mano)
     };
     let tiltOn = false;
-    let tiltAsked = false; // si el usuario DENIEGA, no volver a preguntar en cada toque
     const setupTilt = () => {
-      if (tiltOn || tiltAsked || reduce || typeof window === "undefined") return;
+      if (tiltOn || reduce || typeof window === "undefined") return;
       const DOE = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
       if (!DOE) return;
-      if (typeof DOE.requestPermission === "function") {
-        tiltAsked = true;
-        DOE.requestPermission()
-          .then((st) => {
-            if (st === "granted") {
-              window.addEventListener("deviceorientation", onOrient);
-              tiltOn = true;
-            }
-          })
-          .catch(() => {});
-      } else {
-        window.addEventListener("deviceorientation", onOrient);
-        tiltOn = true;
-      }
+      if (typeof DOE.requestPermission === "function") return; // iOS: sin diálogo — autopan/puntero
+      window.addEventListener("deviceorientation", onOrient);
+      tiltOn = true;
     };
 
     const onDown = (e: PointerEvent) => {
@@ -2188,6 +2206,14 @@ export default function EmplataGame(props: {
       canvas.setPointerCapture(e.pointerId);
     };
     const onMove = (e: PointerEvent) => {
+      // PROXY DE LUZ: sin sensor, el puntero/dedo es la luz (antes del guard de buttons —
+      // en desktop el hover no trae botones y es justo el caso que nos falta cubrir)
+      if (!sensorLive) {
+        const rr = canvas.getBoundingClientRect();
+        ptrTX = clamp(((e.clientX - rr.left) / W - 0.5) * 1.2, -1, 1);
+        ptrTY = clamp(((e.clientY - rr.top) / H - 0.45) * 1.4, -1, 1);
+        ptrT = performance.now();
+      }
       if (!e.buttons) return;
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left;
@@ -2587,6 +2613,18 @@ export default function EmplataGame(props: {
       wd.t += df;
       wd.ts += dt; // usa `dt` (no dtReal): el hit-stop congela también la vida idle
       // suaviza la inclinación del móvil → la luz se mueve con calma, no nerviosa (luz interactiva)
+      // CASCADA DE LA LUZ: sensor → puntero reciente (<4s) → autopan (dos senos desfasados,
+      // períodos 11.7/8.9s, amplitud 0.3 — la luz deriva sola, nunca está muerta). El suavizado
+      // de abajo (pow 0.9) hace de low-pass, así el salto de fuente no da un latigazo.
+      if (!sensorLive && !reduce) {
+        if (performance.now() - ptrT < 4000) {
+          tiltTX = ptrTX * 0.5; // el puntero manda con la mitad de excursión (clamp estilo Apple)
+          tiltTY = ptrTY * 0.4;
+        } else {
+          tiltTX = Math.sin((TAU * wd.ts) / 11.7) * 0.3;
+          tiltTY = Math.sin((TAU * wd.ts) / 8.9 + 1.3) * 0.3;
+        }
+      }
       wd.tiltX += (tiltTX - wd.tiltX) * (1 - Math.pow(0.9, df));
       wd.tiltY += (tiltTY - wd.tiltY) * (1 - Math.pow(0.9, df));
       wd.trauma = Math.max(0, wd.trauma - 1.8 * dtReal); // el trauma decae LINEAL (~0.55s de 1→0)
@@ -4152,26 +4190,32 @@ export default function EmplataGame(props: {
         }
       }
 
-      // ===== LUZ INTERACTIVA: un brillo cálido que SIGUE la inclinación del móvil (la luz es "real";
-      // la sombra ya se desplaza opuesta arriba). Solo con inclinación real (sensor concedido). Subtil.
-      if (!reduce && (Math.abs(wd.tiltX) > 0.015 || Math.abs(wd.tiltY) > 0.015)) {
-        const lgX = W * 0.32 + wd.tiltX * W * 0.3;
-        const lgY = H * 0.14 + wd.tiltY * H * 0.14;
-        ctx.globalCompositeOperation = "soft-light";
-        const lg = ctx.createRadialGradient(lgX, lgY, 10, lgX, lgY, H * 0.6);
-        lg.addColorStop(0, "rgba(255,242,205,0.6)");
-        lg.addColorStop(1, "rgba(255,242,205,0)");
-        ctx.fillStyle = lg;
-        ctx.fillRect(0, 0, W, H);
-        ctx.globalCompositeOperation = "screen"; // especular que barre la caja/comida con el tilt
-        const sgX = boxXE + wd.tiltX * boxW * 0.45;
-        const sgY = boxY + boxH * 0.1 + wd.tiltY * boxH * 0.35;
-        const sg = ctx.createRadialGradient(sgX, sgY, 4, sgX, sgY, boxW * 0.55);
-        sg.addColorStop(0, "rgba(255,246,222,0.14)");
-        sg.addColorStop(1, "rgba(255,246,222,0)");
-        ctx.fillStyle = sg;
-        ctx.fillRect(0, 0, W, H);
-        ctx.globalCompositeOperation = "source-over";
+      // ===== LUZ VIVA: el brillo cálido sigue al tilt — que con la cascada SIEMPRE tiene valor
+      // (sensor, puntero o autopan). Glows HORNEADOS (cero alloc/frame) y RECORTADOS al rect de
+      // la caja: antes eran 2 fills full-screen; ahora ~2 draws sobre <40% de pantalla. El alpha
+      // se modula con la magnitud para fundirse al cruzar el centro (sin parpadeo en el gate).
+      if (!reduce && wd.glowSoft && wd.glowSpec) {
+        const mag = Math.min(1, Math.hypot(wd.tiltX, wd.tiltY) / 0.12);
+        if (mag > 0.02) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(boxXE - boxW * 0.95, boxY - boxH * 1.0, boxW * 1.9, boxH * 1.85);
+          ctx.clip();
+          const s1 = wd.glowSoft.width;
+          const lgX = boxXE + wd.tiltX * boxW * 0.35;
+          const lgY = boxY - boxH * 0.25 + wd.tiltY * boxH * 0.3;
+          ctx.globalCompositeOperation = "soft-light";
+          ctx.globalAlpha = mag;
+          ctx.drawImage(wd.glowSoft, lgX - s1 / 2, lgY - s1 / 2);
+          const s2 = wd.glowSpec.width;
+          const sgX = boxXE + wd.tiltX * boxW * 0.45;
+          const sgY = boxY + boxH * 0.1 + wd.tiltY * boxH * 0.35;
+          ctx.globalCompositeOperation = "screen"; // especular que barre la caja/comida
+          ctx.drawImage(wd.glowSpec, sgX - s2 / 2, sgY - s2 / 2);
+          ctx.globalCompositeOperation = "source-over";
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        }
       }
       // ===== grado final: velo+viñeta HORNEADOS en un solo offscreen → 1 drawImage multiply.
       // (El velo soft-light por frame se fusionó dentro de bakeVig — presupuesto de post.) =====
