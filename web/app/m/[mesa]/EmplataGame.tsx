@@ -801,6 +801,25 @@ function bakeGlaze(src: CanvasImageSource): Off {
   g.fillRect(0, 0, SPR, SPR);
   return c;
 }
+/** RIM CÁLIDO horneado DENTRO del sprite (contraluz de fotografía gastronómica: el filo superior
+ *  de la silueta se enciende). Media luna = silueta menos sí-misma desplazada ↓; se funde con
+ *  `lighter` y quedan CERO draws extra por frame — el sprite ya sale con su contraluz puesto. */
+function conRim(src: CanvasImageSource): Off {
+  const { c, g } = makeOff();
+  g.drawImage(src, 0, 0, SPR, SPR);
+  const { c: cres, g: gc } = makeOff();
+  gc.drawImage(src, 0, 0, SPR, SPR);
+  gc.globalCompositeOperation = "destination-out";
+  gc.drawImage(src, 0, SPR * 0.035, SPR, SPR); // borra la copia ↓ → queda el filo superior
+  gc.globalCompositeOperation = "source-in";
+  gc.fillStyle = "rgba(255,224,158,0.62)"; // crema cálida: contraluz, no borde blanco duro
+  gc.fillRect(0, 0, SPR, SPR);
+  g.globalCompositeOperation = "lighter";
+  g.drawImage(cres, 0, 0, SPR, SPR);
+  g.globalCompositeOperation = "source-over";
+  return c;
+}
+
 /** Cuánto brilla cada ingrediente (0-1): salsas/cremosos mojados, fritos medios, secos casi nada. */
 const WET: Record<string, number> = {
   hogao: 0.2,
@@ -1109,6 +1128,7 @@ export default function EmplataGame(props: {
     vig: null as Off | null, // viñeta + velo cálido cacheados por resize
     glowSoft: null as Off | null, // glow ancho de la luz viva (soft-light), horneado por resize
     glowSpec: null as Off | null, // glow especular que barre la caja (screen), horneado por resize
+    wallShadow: null as Off | null, // silueta difusa de la pila sobre la pared trasera (por recompute)
     dotSprite: null as Off | null, // partícula de vapor horneada (dot suave)
     kraftPat: null as CanvasPattern | null, // textura de cartón (fibra + corrugado)
     stamp: null as Off | null, // sello "recién hecho" horneado
@@ -1148,7 +1168,7 @@ export default function EmplataGame(props: {
     const gz = world.current.glaze;
     gz.clear();
     for (const ing of all) {
-      const spr = bakeSprite(ing);
+      const spr = conRim(bakeSprite(ing)); // el contraluz va horneado (cero coste por frame)
       m.set(ing.id, spr);
       col.set(ing.id, muestrearColor(spr));
       gz.set(ing.id, bakeGlaze(spr));
@@ -1161,8 +1181,9 @@ export default function EmplataGame(props: {
       const img = new Image();
       img.decoding = "async";
       img.onload = () => {
-        world.current.sprites.set(ing.id, img);
-        world.current.glaze.set(ing.id, bakeGlaze(img)); // re-hornea el barniz con el asset real
+        const rimmed = conRim(img); // el asset también entra con su contraluz horneado
+        world.current.sprites.set(ing.id, rimmed);
+        world.current.glaze.set(ing.id, bakeGlaze(rimmed)); // re-hornea el barniz con el asset real
         try {
           const c = document.createElement("canvas");
           c.width = 64;
@@ -2017,6 +2038,41 @@ export default function EmplataGame(props: {
         p.ty = Math.min(p.ty, moundY(p.fxT, d) - 0.01); // re-asienta en la envolvente ancha
         p.ty = clamp(p.ty, TY_TECHO, TY_SUELO);
       }
+      bakeWallShadow(); // la pila cambió → su sombra en la pared trasera se re-hornea (evento, no frame)
+    };
+
+    /* SOMBRA DE LA PILA EN LA PARED TRASERA — la comida por fin HABITA la caja: su silueta,
+       difusa, cae sobre el interior (luz ↖ → sombra ↘). Se hornea SOLO al recomponer el nido:
+       silueta de los sprites en sus SLOTS a un offscreen minúsculo (32px) y el blur lo regala
+       el upscale bilineal al dibujarla (cero StackBlur, cero dependencias). 1 drawImage/frame. */
+    const bakeWallShadow = () => {
+      const wd = world.current;
+      if (!wd.pila.length) {
+        wd.wallShadow = null;
+        return;
+      }
+      const { boxW, boxH } = geo();
+      const SW = 48;
+      const SH = 22;
+      const c = document.createElement("canvas");
+      c.width = SW;
+      c.height = SH;
+      const g = c.getContext("2d")!;
+      // región local que mapea el offscreen: x ∈ ±0.5·boxW, y ∈ [−0.42, +0.1]·boxH
+      for (const p of wd.pila) {
+        const spr = wd.sprites.get(p.id);
+        if (!spr) continue;
+        const sz = SPR * (boxW / BOXW_REF) * p.s * 0.9;
+        const sx = ((p.fxT * boxW + boxW * 0.5) / boxW) * SW;
+        const sy = ((p.ty * boxH + boxH * 0.42) / (boxH * 0.52)) * SH;
+        const sw = (sz / boxW) * SW;
+        const sh = (sz / (boxH * 0.52)) * SH * 0.6; // achatada: cae sobre un plano casi vertical
+        g.drawImage(spr, sx - sw / 2, sy - sh / 2, sw, sh);
+      }
+      g.globalCompositeOperation = "source-in";
+      g.fillStyle = "rgb(46,28,12)"; // parda-cálida (la sombra de la escena, no negro)
+      g.fillRect(0, 0, SW, SH);
+      wd.wallShadow = c;
     };
 
     /** Aterrizaje: el item se queda DONDE la física lo dejó (x real del vuelo) + squash + precio. */
@@ -2901,6 +2957,22 @@ export default function EmplataGame(props: {
           ctx.stroke();
         }
         ctx.globalAlpha = 1;
+        // SOMBRA DE LA PILA sobre la pared (horneada en recomputeSlots; el blur lo pone el
+        // upscale bilineal 48px→pared). Desplazada ↘ desde la luz y respirando OPUESTA al tilt:
+        // la comida por fin ocupa el volumen de la caja, no un fondo plano.
+        if (wd.wallShadow) {
+          ctx.globalCompositeOperation = "multiply";
+          ctx.globalAlpha = 0.3;
+          ctx.drawImage(
+            wd.wallShadow,
+            -boxW * 0.46 + boxW * 0.055 - wd.tiltX * boxW * 0.05,
+            -boxH * 0.415 - wd.tiltY * boxH * 0.03,
+            boxW * 0.92,
+            boxH * 0.5,
+          );
+          ctx.globalCompositeOperation = "source-over";
+          ctx.globalAlpha = 1;
+        }
         // canto superior iluminado ↖ (la luz marca el borde del pliegue)
         ctx.strokeStyle = "rgba(255,236,195,0.5)";
         ctx.lineWidth = 1.6;
