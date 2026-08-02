@@ -1773,12 +1773,18 @@ export default function EmplataGame(props: {
       world.current.bg = c;
     };
 
-    // ---- VIÑETA cacheada (descentrada hacia la luz ↖, más oscura abajo-derecha) ----
+    // ---- VIÑETA + VELO cacheados en UN offscreen (descentrada hacia la luz ↖) ----
+    // Antes el velo cálido era un fill soft-light a pantalla completa POR FRAME además del
+    // multiply de la viñeta: dos pasadas full-screen con blends caros (fill-rate puro en
+    // Android medio — Mozilla bug 762973). Multiply por un casi-blanco cálido recorta ~4% el
+    // azul = mismo baño de temperatura, horneado. Presupuesto de post: 1 drawImage multiply.
     const bakeVig = () => {
       const c = document.createElement("canvas");
       c.width = Math.max(2, Math.round(W));
       c.height = Math.max(2, Math.round(H));
       const g = c.getContext("2d")!;
+      g.fillStyle = "rgba(255,246,228,0.38)"; // velo: multiplica azul ×0.96 → baño ámbar sutil
+      g.fillRect(0, 0, W, H);
       const vg = g.createRadialGradient(W * 0.34, H * 0.28, H * 0.2, W * 0.5, H * 0.6, H * 0.95);
       vg.addColorStop(0, "rgba(28,20,14,0)");
       vg.addColorStop(1, "rgba(28,20,14,0.32)");
@@ -4129,15 +4135,13 @@ export default function EmplataGame(props: {
         ctx.fillRect(0, 0, W, H);
         ctx.globalCompositeOperation = "source-over";
       }
-      // ===== grado final: velo cálido (soft-light) + viñeta (multiply) — temperatura unificada =====
-      ctx.globalCompositeOperation = "soft-light";
-      ctx.fillStyle = "rgba(242,165,22,0.06)";
-      ctx.fillRect(0, 0, W, H);
+      // ===== grado final: velo+viñeta HORNEADOS en un solo offscreen → 1 drawImage multiply.
+      // (El velo soft-light por frame se fusionó dentro de bakeVig — presupuesto de post.) =====
       if (wd.vig) {
         ctx.globalCompositeOperation = "multiply";
         ctx.drawImage(wd.vig, 0, 0, W, H);
+        ctx.globalCompositeOperation = "source-over";
       }
-      ctx.globalCompositeOperation = "source-over";
     };
     raf = requestAnimationFrame(frame);
 
