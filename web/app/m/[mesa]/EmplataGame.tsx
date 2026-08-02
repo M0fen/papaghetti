@@ -684,6 +684,12 @@ function bakeSprite(ing: Ingrediente): Off {
     }
   } else if (/pina|piña|nugget/.test(id)) {
     // trocitos de piña calada
+    // AO de contacto que AGRUPA los trozos (mismo trato que las monedas de criolla): sin él,
+    // los 3 cubos flotaban como stickers sueltos sin leerse como una porción
+    g.fillStyle = "rgba(74,42,8,0.42)";
+    g.beginPath();
+    g.ellipse(cx, cy + R * 0.24, R * 0.68, R * 0.26, 0, 0, TAU);
+    g.fill();
     for (const [px, py] of [[-0.34, 0.12], [0.34, 0.04], [0, -0.3]] as const) {
       const x = cx + px * R;
       const y = cy + py * R;
@@ -748,14 +754,17 @@ function bakeSprite(ing: Ingrediente): Off {
   }
 
   // ===== HORNEADO VOLUMÉTRICO (todas las siluetas, una sola luz ↖) =====
+  // Alpha 0.30→0.15 y radio estrechado (resolución del juez del ARTE-PLAN-2): a 0.30 el velo
+  // crema/sombra RE-EMPASTABA en ámbar la separación de color que cada sprite ya trae de su
+  // paleta (criolla saturada / pollo pálido / piña ácida quedaban otra vez hermanas).
   g.globalCompositeOperation = "source-atop";
-  const vg = g.createRadialGradient(cx - R * 0.5, cy - R * 0.55, R * 0.1, cx, cy, R * 1.5);
-  vg.addColorStop(0, "rgba(255,248,225,0.30)");
+  const vg = g.createRadialGradient(cx - R * 0.5, cy - R * 0.55, R * 0.1, cx, cy, R * 1.1);
+  vg.addColorStop(0, "rgba(255,248,225,0.15)");
   vg.addColorStop(0.55, "rgba(255,248,225,0)");
   g.fillStyle = vg;
   g.fillRect(0, 0, SPR, SPR);
   const dg = g.createLinearGradient(cx + R * 0.9, cy + R * 0.9, cx - R * 0.3, cy - R * 0.3);
-  dg.addColorStop(0, "rgba(58,32,10,0.30)");
+  dg.addColorStop(0, "rgba(58,32,10,0.15)");
   dg.addColorStop(0.5, "rgba(58,32,10,0)");
   g.fillStyle = dg;
   g.fillRect(0, 0, SPR, SPR);
@@ -3389,6 +3398,15 @@ export default function EmplataGame(props: {
         ctx.beginPath();
         ctx.arc(0, 0, 4, 0, 2.4);
         ctx.stroke();
+        // recién nacida QUEMA blanco y se apaga al dorado (mismo trato que el burst)
+        if (ch.life > 0.72) {
+          ctx.globalAlpha = (ch.life - 0.72) * 3.2;
+          ctx.strokeStyle = "#FFF6E6";
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(0, 0, 4, 0.4, 2.0);
+          ctx.stroke();
+        }
         ctx.restore();
       }
       ctx.globalCompositeOperation = "source-over";

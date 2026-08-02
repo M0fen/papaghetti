@@ -400,7 +400,8 @@
   color: rgba(30, 22, 17, 0.55);
 }
 .emp-chip.is-on .emp-chip__price {
-  color: var(--tomate);
+  /* espresso, no tomate: el rojo en un precio connota ERROR justo en el momento de decidir */
+  color: var(--espresso);
 }
 
 .emp-espaciador {

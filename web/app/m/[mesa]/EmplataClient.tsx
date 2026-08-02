@@ -19,6 +19,71 @@ type Modo = "emplata" | "rapido";
 
 type Drop = { key: number; emoji: string; foto?: string };
 
+/* Iconos SVG propios — CERO emoji de sistema (mandato de marca, mismo lenguaje que el shell del
+   juego: stroke=currentColor, trazo 1.7). El emoji de INGREDIENTE (i.emoji) se queda: es contenido
+   del catálogo y solo aparece como fallback cuando falta la foto. */
+const ico = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+const IcoSonido = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" />
+    <path d="M16.5 8.5a5 5 0 0 1 0 7" />
+  </svg>
+);
+const IcoMute = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" />
+    <path d="m17 9 5 6" />
+    <path d="m22 9-5 6" />
+  </svg>
+);
+const IcoRayo = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" />
+  </svg>
+);
+const IcoCaja = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M3 8l9-5 9 5-9 5-9-5z" />
+    <path d="M3 8v8l9 5 9-5V8" />
+    <path d="M12 13v8" />
+  </svg>
+);
+const IcoLuna = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+  </svg>
+);
+const IcoTicket = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M5 3h14v18l-2.4-1.6L14.2 21l-2.2-1.6L9.8 21l-2.4-1.6L5 21V3z" />
+    <path d="M9 8h6" />
+    <path d="M9 12h6" />
+  </svg>
+);
+const IcoLlama = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M12 22c4 0 7-2.7 7-6.6 0-3.2-2-5.5-3.8-7.4C13.7 6.4 13 4.6 13 2c-3 2-4.2 4.4-4 6.8.1 1.4-.8 1.9-1.7 1-.5-.5-.8-1.2-.8-2C4.6 9.4 4 11.5 4 13.6 4 19.3 8 22 12 22z" />
+  </svg>
+);
+const IcoCampana = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z" />
+    <path d="M10 19a2 2 0 0 0 4 0" />
+  </svg>
+);
+const IcoChispas = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...ico} aria-hidden>
+    <path d="M12 3v4" />
+    <path d="M12 17v4" />
+    <path d="M3 12h4" />
+    <path d="M17 12h4" />
+    <path d="m5.6 5.6 2.8 2.8" />
+    <path d="m15.6 15.6 2.8 2.8" />
+    <path d="m18.4 5.6-2.8 2.8" />
+    <path d="m8.4 15.6-2.8 2.8" />
+  </svg>
+);
+
 // ---------------------------------------------------------------------------
 export default function EmplataClient({
   mesa,
@@ -195,21 +260,21 @@ export default function EmplataClient({
             onClick={s.toggleMute}
             aria-label={s.mute ? "Activar sonido" : "Silenciar"}
           >
-            {s.mute ? "🔇" : "🔊"}
+            {s.mute ? <IcoMute /> : <IcoSonido />}
           </button>
           <button
             type="button"
             className={`emp-mini emp-modo ${modo === "rapido" ? "is-on" : ""}`}
             onClick={() => setModo(modo === "rapido" ? "emplata" : "rapido")}
           >
-            {modo === "rapido" ? "🥡 EMPLATAR" : "⚡ PEDIR YA"}
+            {modo === "rapido" ? <><IcoCaja /> EMPLATAR</> : <><IcoRayo /> PEDIR YA</>}
           </button>
         </div>
       </header>
 
       {!abierto && (
         <div className="emp-cerrado" role="status">
-          😴 Estamos cerrados ahora — vuelve en horario de servicio.
+          <IcoLuna /> Estamos cerrados ahora — vuelve en horario de servicio.
         </div>
       )}
 
@@ -234,13 +299,13 @@ export default function EmplataClient({
               const activo = orden.indexOf(estado) === k;
               return (
                 <li key={e} className={`${done ? "done" : ""} ${activo ? "activo" : ""}`}>
-                  <i>{k === 0 ? "🧾" : k === 1 ? "🔥" : "🔔"}</i>
+                  <i>{k === 0 ? <IcoTicket /> : k === 1 ? <IcoLlama /> : <IcoCampana />}</i>
                   {estadoLabel[e]}
                 </li>
               );
             })}
           </ol>
-          {estado === "listo" && <p className="emp-listo">¡Tu caja está lista! 🎉</p>}
+          {estado === "listo" && <p className="emp-listo"><IcoChispas /> ¡Tu caja está lista!</p>}
           <button type="button" className="emp-cta emp-cta--sec" onClick={otraCaja}>
             Pedir otra caja
           </button>
