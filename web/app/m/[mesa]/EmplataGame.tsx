@@ -208,6 +208,13 @@ function wrap2(ctx: CanvasRenderingContext2D, text: string, maxW: number): [stri
    ========================================================================= */
 type Off = HTMLCanvasElement;
 const SPR = 96; // px lógicos del sprite (unidad de dibujo/display)
+/* Ancho de caja de REFERENCIA = el móvil de diseño (390px → boxW = 390·0.66 = 257.4). La comida se
+   dibujaba a un tamaño FIJO en píxeles mientras la caja SÍ crecía con la pantalla: en desktop el
+   nido ocupaba el 38% del ancho de la caja contra el 58% en móvil → caja grande y vacía con la
+   comida encogida en el centro. Escalando la comida por boxW/BOXW_REF la composición se vuelve
+   INVARIANTE DE ESCALA: a 390px sale idéntica bit a bit (el factor es exactamente 1) y cualquier
+   otro tamaño hereda sus proporciones — y con ellas sus guardas de rim y de labio. */
+const BOXW_REF = 390 * 0.66;
 const R = 34; // radio base de la comida dentro del sprite
 // SUPERSAMPLING: se hornea a SPR·Q y se dibuja a tamaño de display → nítido aun en la base heroína
 // (~240px device). Q=2 equilibra nitidez (la base sube a 192px, ~1.25× upscale) y coste en gama media.
@@ -1800,8 +1807,9 @@ export default function EmplataGame(props: {
     const listaActiva = (): Ingrediente[] =>
       sel.current.tab === 0 ? basesO : sel.current.tab === 1 ? proteinasO : toppingsO;
 
-    /** Radio de colisión (px) según categoría — la comida ocupa ~0.35 del sprite. */
-    const radioDe = (cat: string, sc: number) => SPR * sc * 0.35;
+    /** Radio de colisión (px) según categoría — la comida ocupa ~0.35 del sprite. Escala con la
+     *  caja (ver BOXW_REF) para que el solape y la relajación sean los mismos en toda pantalla. */
+    const radioDe = (cat: string, sc: number) => SPR * sc * 0.35 * (geo().boxW / BOXW_REF);
 
     /**
      * EL NIDO SERVIBLE — coloca cada ingrediente en un SLOT determinista (rol + índice) formando
@@ -2258,6 +2266,9 @@ export default function EmplataGame(props: {
       hvy = 0,
       scale = 1,
       ctrl: CtrlFideo | null = null,
+      /* Agranda SOLO cabeza+ojos+boca (no el cuerpo). En reposo la cabeza medía ~13px en móvil
+         y la cara era indescifrable; el vuelo y el KDS se quedan en 1 para no tocar sus gestos. */
+      headScale = 1,
     ) => {
       const wd = world.current;
       const S = scale; // el fideo escala con su objeto (p.ej. la caja crecida en la espera)
@@ -2434,7 +2445,7 @@ export default function EmplataGame(props: {
       ctx.save();
       ctx.translate(tipX, tipY);
       ctx.rotate(ang + Math.PI / 2); // el eje largo sigue la hebra
-      ctx.scale(S, S); // la cabeza escala con el cuerpo
+      ctx.scale(S * headScale, S * headScale); // la cabeza escala con el cuerpo (+ realce en reposo)
       const spd = Math.hypot(hvx, hvy);
       /* Dos defectos: el coeficiente saturaba a 187 px/s y la cabeza vuela a 1200-1800 px/s,
          así que el estiramiento era BINARIO (pegado al tope el 90% del tiempo, no comunicaba
@@ -2482,7 +2493,7 @@ export default function EmplataGame(props: {
         const ly = clamp((spd2 > 10 ? clamp(hvy / spd2, -1, 1) * 1.1 : 0) + pupilDown * 0.7, -1.15, 1.15);
         ctx.save();
         ctx.translate(tipX, tipY); // marco local a la cabeza, escalado por S (ojos/boca crecen con ella)
-        ctx.scale(S, S);
+        ctx.scale(S * headScale, S * headScale);
         for (const sd of [-1, 1]) {
           const ex = -dirX * 0.5 + perX * sd * 2.7;
           const ey = -dirY * 0.5 + perY * sd * 2.7;
@@ -2759,10 +2770,15 @@ export default function EmplataGame(props: {
               break;
           }
         }
+        // RESPIRA: el `breathe` del cuerpo solo escalaba el ancho ±4.5% (±0.34px sobre 7.6 →
+        // invisible) y, parada, los muelles de ctrl no animaban nada: la hebra quedaba TIESA.
+        // Un bob vertical del objetivo sube y baja la criatura entera — la lectura clásica de
+        // "está viva". Determinista (wd.ts + seed), sin allocaciones ni draw calls.
+        ty += Math.sin(TAU * 0.26 * wd.ts + 5) * up * 0.03;
         [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, react ? 240 : 170, react ? 22 : 19, dt);
         [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, react ? 240 : 170, react ? 22 : 19, dt);
         m.pupil += (pupil - m.pupil) * (1 - Math.pow(0.86, df));
-        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy, 1, m.ctrl);
+        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy, 1, m.ctrl, 1.2);
       }
 
       ctx.save();
@@ -3109,7 +3125,7 @@ export default function EmplataGame(props: {
           // UN solo sprite (base grande y ancha como lecho; proteína/topping por profundidad).
           // La base se ensancha un pelo para leerse como porción tendida, no como bola.
           // profundidad REAL: el frente ~1.08, el fondo ~0.78 (spread 38%, antes 12%)
-          const sz = SPR * p.s * (cp === 0 ? 1.0 : 0.78 + 0.3 * (1 - (p.depth ?? 0.5)));
+          const sz = SPR * (boxW / BOXW_REF) * p.s * (cp === 0 ? 1.0 : 0.78 + 0.3 * (1 - (p.depth ?? 0.5)));
           const wideX = cp === 0 ? 1.32 : 1; // la cama llena a lo ancho (semiancho ~98px < muro ~103)
           const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1); // niebla cálida de profundidad
           ctx.save();
@@ -3422,7 +3438,7 @@ export default function EmplataGame(props: {
           ctx.save();
           ctx.translate(v.x, v.y);
           ctx.rotate(v.rot);
-          const sz = SPR * v.sc;
+          const sz = SPR * (boxW / BOXW_REF) * v.sc; // el vuelo escala igual que el aterrizaje (o salta de tamaño)
           ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
           ctx.restore();
         }
