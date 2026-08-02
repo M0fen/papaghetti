@@ -46,12 +46,14 @@ const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
    agarre se reubica a otro al azar, así el siguiente agarre nace en un lugar distinto.
    axf/ayf = offset del ancla (fracción de boxW/boxH desde la base de la caja); up = cuánto se
    asoma; io = hacia dónde queda el interior de la caja. */
+/* `up` se recortó (0.62→0.52 · 0.44→0.38 · 0.48→0.42): el tallo en reposo medía ~124px de alto
+   por ~7.6 de ancho (relación 25:1) y leía como un palo con una bolita, no como una criatura. */
 const HOMES = [
-  { axf: -0.42, ayf: -0.3, up: 0.62, io: 1 }, // costado izquierdo
-  { axf: 0.42, ayf: -0.3, up: 0.62, io: -1 }, // costado derecho
-  { axf: 0.0, ayf: -0.52, up: 0.44, io: 0 }, // asoma por ARRIBA (centro)
-  { axf: -0.24, ayf: -0.48, up: 0.48, io: 1 }, // arriba-izquierda
-  { axf: 0.24, ayf: -0.48, up: 0.48, io: -1 }, // arriba-derecha
+  { axf: -0.42, ayf: -0.3, up: 0.52, io: 1 }, // costado izquierdo
+  { axf: 0.42, ayf: -0.3, up: 0.52, io: -1 }, // costado derecho
+  { axf: 0.0, ayf: -0.52, up: 0.38, io: 0 }, // asoma por ARRIBA (centro)
+  { axf: -0.24, ayf: -0.48, up: 0.42, io: 1 }, // arriba-izquierda
+  { axf: 0.24, ayf: -0.48, up: 0.42, io: -1 }, // arriba-derecha
 ];
 const otroHome = (cur: number) => {
   let n = Math.floor(Math.random() * HOMES.length);
@@ -369,25 +371,100 @@ function bakeSprite(ing: Ingrediente): Off {
   g.lineCap = "round";
 
   if (/spaghetti|pasta|fideo/.test(id)) {
-    // nido de spaghetti: hebras ámbar enrolladas con brillo
-    for (let ring = 0; ring < 3; ring++) {
-      const rr = R * (0.85 - ring * 0.22);
-      g.strokeStyle = ring === 0 ? "#B97A24" : ring === 1 ? "#E9A32C" : "#F6C566";
-      g.lineWidth = R * 0.34;
+    // NIDO DE SPAGHETTI. Antes: 3 anillos concéntricos con un HUECO negro central → soga/dona. Un
+    // primer rediseño con bucles cerrados desplazados seguía leyendo como espiral/remolino con pozo.
+    // La verdad del fideo es una MARAÑA: hebras cortas onduladas en TODAS direcciones, no aros. Aquí:
+    // (1) masa OPACA abovedada (el centro es lo más denso y claro — jamás un hoyo), (2) ~26 hebras
+    // cortas en distribución GIRASOL (ángulo áureo → reparto uniforme sin patrón de anillos) con
+    // orientación variada que se cruzan, tono intercalado por índice y grosor variable, (3) domo de
+    // profundidad, (4) filo húmedo por hebra. Todo es función de k → foto reproducible; horneado una
+    // vez, cero coste por frame. La vista 3/4 la da un scale(1,0.72) que envuelve TODO el nido (se
+    // dibuja en espacio circular y sale achatado, sin deformar cada hebra a mano).
+    g.save();
+    g.translate(cx, cy);
+    g.scale(1, 0.72);
+    // (1) MASA base opaca: domo cálido, cima ↖ clara → falda oscura. Nunca deja ver el fondo.
+    const masa = g.createRadialGradient(-R * 0.12, -R * 0.16, R * 0.06, 0, 0, R * 1.04);
+    masa.addColorStop(0, "#F8C765"); // el CENTRO es lo más claro (mound iluminado, no un pozo)
+    masa.addColorStop(0.5, "#D2913A");
+    masa.addColorStop(1, "#7C4E16");
+    g.fillStyle = masa;
+    g.beginPath();
+    g.arc(0, 0, R * 0.98, 0, TAU);
+    g.fill();
+    const NEB = 26;
+    const tono = ["#B0731F", "#C9852A", "#E39B2E", "#F3BE5A", "#F8D07E"];
+    // parámetros deterministas por hebra (girasol + orientación variada → maraña, no aros)
+    const P = (k: number) => {
+      const rad = R * 0.58 * Math.sqrt((k + 0.4) / NEB);
+      const ang = k * 2.3999632; // ángulo áureo → reparto uniforme de posiciones
+      return {
+        px: Math.cos(ang) * rad,
+        py: Math.sin(ang) * rad,
+        th: k * 1.7, // orientación DESACOPLADA de la posición → maraña real (si sigue al ángulo → swirl → anillo)
+        len: R * (0.55 + 0.4 * (((k * 7) % 5) / 5)),
+        seed: k * 1.3,
+      };
+    };
+    // una hebra: arco corto ondulado centrado en (px,py), orientado th; uy la sube (cresta húmeda ↖)
+    const noodle = (px: number, py: number, th: number, len: number, seed: number, uy: number) => {
       g.beginPath();
-      for (let k = 0; k <= 26; k++) {
-        const a = (k / 26) * TAU;
-        const w = rr * (1 + 0.1 * Math.sin(a * 4 + ring * 2));
-        if (k === 0) g.moveTo(cx + Math.cos(a) * w, cy + Math.sin(a) * w * 0.72);
-        else g.lineTo(cx + Math.cos(a) * w, cy + Math.sin(a) * w * 0.72);
+      const M = 9;
+      const ct = Math.cos(th);
+      const st = Math.sin(th);
+      for (let j = 0; j <= M; j++) {
+        const t = j / M - 0.5;
+        const along = t * len;
+        const perp = Math.sin(t * Math.PI * 2.2 + seed) * R * 0.16;
+        const x = px + ct * along - st * perp;
+        const y = py + st * along + ct * perp + uy;
+        if (j === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
       }
+    };
+    // (2) CUERPOS de hebra (tono intercalado por índice, grosor variable)
+    for (let k = 0; k < NEB; k++) {
+      const p = P(k);
+      g.strokeStyle = tono[(k * 3) % tono.length];
+      g.lineWidth = R * (0.1 + 0.06 * Math.abs(Math.sin(k * 2.3)));
+      noodle(p.px, p.py, p.th, p.len, p.seed, 0);
       g.stroke();
     }
-    g.strokeStyle = "rgba(255,240,200,0.8)";
-    g.lineWidth = R * 0.09;
-    g.beginPath();
-    g.arc(cx - R * 0.2, cy - R * 0.24, R * 0.5, Math.PI * 0.9, Math.PI * 1.7);
-    g.stroke();
+    // CORONA central: 5 hebras que CRUZAN el medio en distintos ángulos → el centro es la zona MÁS
+    // densa (jamás un pozo). Es la lección del panel: en la pasta hero el centro es el punto más lleno.
+    for (const c of [0, 1, 2, 3, 4]) {
+      g.strokeStyle = tono[(c * 2) % tono.length];
+      g.lineWidth = R * 0.12;
+      noodle(Math.cos(c * 2.4) * R * 0.1, Math.sin(c * 2.4) * R * 0.1, c * 1.257 + 0.4, R * 0.82, c * 2.1, 0);
+      g.stroke();
+    }
+    // 3 hebras ESTRELLA (más largas, gruesas y claras) encima → una que el ojo puede seguir
+    for (const k of [4, 12, 20]) {
+      const p = P(k);
+      g.strokeStyle = "#F5C866";
+      g.lineWidth = R * 0.19;
+      noodle(p.px, p.py, p.th, p.len * 1.12, p.seed, 0);
+      g.stroke();
+    }
+    // (3) DOMO de profundidad (source-atop, confinado a la masa+hebras ya pintadas)
+    g.save();
+    g.globalCompositeOperation = "source-atop";
+    const domo = g.createLinearGradient(0, -R, 0, R);
+    domo.addColorStop(0, "rgba(255,238,196,0.20)");
+    domo.addColorStop(1, "rgba(58,32,12,0.18)");
+    g.fillStyle = domo;
+    g.fillRect(-R * 1.1, -R * 1.1, R * 2.2, R * 2.2);
+    g.restore();
+    // (4) FILO húmedo por hebra (después del domo, para que no lo apague): la cresta ↖ mojada
+    g.lineCap = "round";
+    for (let k = 0; k < NEB; k++) {
+      const p = P(k);
+      g.strokeStyle = "rgba(255,246,214,0.42)";
+      g.lineWidth = R * 0.035;
+      noodle(p.px, p.py, p.th, p.len * 0.86, p.seed, -R * 0.05);
+      g.stroke();
+    }
+    g.restore();
   } else if (/criolla/.test(id)) {
     // papitas criollas — naranja SATURADO (distinto del pollo pálido y la piña ácida; no comparten mid+dark)
     const pts: Array<[number, number, number]> = [
@@ -699,9 +776,11 @@ function bakeGlaze(src: CanvasImageSource): Off {
   g.drawImage(src, SPR * 0.085, SPR * 0.105, SPR, SPR); // borra la copia ↘ → queda el filo ↖
   g.globalCompositeOperation = "source-in";
   const lg = g.createLinearGradient(SPR * 0.22, SPR * 0.16, SPR * 0.78, SPR * 0.72);
-  lg.addColorStop(0, "rgba(255,250,235,1)");
-  lg.addColorStop(0.55, "rgba(255,240,205,0.35)");
-  lg.addColorStop(1, "rgba(255,240,205,0)");
+  // glint CASI-BLANCO (color de la LUZ, no del objeto): bajo blend `lighter` sube R/G/B parejo y
+  // PRESERVA el hue del ingrediente. Antes era crema cálida → recalentaba aguacate/hogao hacia naranja.
+  lg.addColorStop(0, "rgba(248,251,255,1)");
+  lg.addColorStop(0.55, "rgba(242,246,252,0.35)");
+  lg.addColorStop(1, "rgba(242,246,252,0)");
   g.fillStyle = lg;
   g.fillRect(0, 0, SPR, SPR);
   return c;
@@ -1583,9 +1662,12 @@ export default function EmplataGame(props: {
           g.stroke();
         }
       }
-      // pool de luz ↖ (la premisa lumínica, por fin visible)
-      const luz = g.createRadialGradient(W * 0.3, H * 0.08, 20, W * 0.32, H * 0.16, H * 0.95);
-      luz.addColorStop(0, "rgba(255,247,224,0.85)");
+      // pool de luz ↖ (la premisa lumínica, por fin visible). En DESKTOP (ancho) el foco se abre y
+      // baja de intensidad: en pantalla grande el radio pequeño + stop 0.85 reventaba a un punto
+      // quemado ("glow digital"). Móvil queda EXACTO como antes (mobile-first).
+      const anchoBg = W >= 820;
+      const luz = g.createRadialGradient(W * 0.3, H * 0.08, anchoBg ? H * 0.16 : 20, W * 0.32, H * 0.16, H * 0.95);
+      luz.addColorStop(0, anchoBg ? "rgba(255,247,224,0.55)" : "rgba(255,247,224,0.85)");
       luz.addColorStop(0.5, "rgba(255,236,200,0.18)");
       luz.addColorStop(1, "rgba(120,80,40,0.12)");
       g.fillStyle = luz;
@@ -1791,18 +1873,22 @@ export default function EmplataGame(props: {
       // ya no lo mueve.
       // Anclas ESTRECHAS (±0.30 → ±0.17): los vecinos de una grada quedan bajo la suma de sus
       // radios → SOLAPAN en vez de flotar separados; las 3 gradas se interpenetran por depth.
+      // REPARTO POR GRADA: antes los tres toppings más pedidos (hogao/maicitos/perejil) estaban
+      // los TRES en la grada trasera → al elegir los comunes se apelmazaban en una repisa al fondo
+      // y el proscenio del nido quedaba pelado. Ahora cada uno cae en una grada distinta, así
+      // CUALQUIER combinación habitual reparte volumen entre fondo, medio y frente.
       const ANCLA_TOP: Record<string, [number, number]> = {
         // [fx, depth] — grada trasera (alta)
-        hogao: [-0.1, 0.92],
-        maicitos: [0.03, 0.92],
-        perejil: [0.16, 0.92],
+        perejil: [0.16, 0.9],
+        "chicharron-crocante": [-0.01, 0.88],
+        "nuggets-pina": [-0.18, 0.92],
         // grada media
-        "nuggets-pina": [-0.17, 0.58],
-        "chicharron-crocante": [-0.01, 0.58],
-        parmesano: [0.17, 0.58],
+        hogao: [-0.12, 0.54],
+        tocineta: [0.11, 0.6],
         // grada frontal (baja)
-        aguacate: [-0.11, 0.24],
-        tocineta: [0.1, 0.24],
+        aguacate: [-0.13, 0.24],
+        maicitos: [0.03, 0.28],
+        parmesano: [0.17, 0.3],
       };
       const N = tops.length;
       for (const p of tops) {
@@ -2181,8 +2267,8 @@ export default function EmplataGame(props: {
          no en frames, para que no cambie de velocidad con el framerate. */
       const F1 = 2.1;
       const F2 = 2.1 * 0.809016994374947;
-      const wob = Math.sin(TAU * F1 * wd.ts + seed) * 7 * S;
-      const wob2 = Math.cos(TAU * F2 * wd.ts + seed * 1.7) * 6 * S;
+      const wob = Math.sin(TAU * F1 * wd.ts + seed) * 10 * S; // más ondulado: el tallo corto necesita curva
+      const wob2 = Math.cos(TAU * F2 * wd.ts + seed * 1.7) * 8 * S;
       const dx = tipX - ax;
       const dy = tipY - ay;
       // WHIP: el cuerpo TRAILA la velocidad de la cabeza (follow-through) → ondula como ser vivo,
@@ -2236,8 +2322,10 @@ export default function EmplataGame(props: {
          y con una pizca de ruido para que no sea un émbolo. */
       const breathe =
         1 + (Math.sin(TAU * 0.26 * wd.ts + seed) * 0.75 + fbm(wd.ts * 0.55 + seed * 13) * 0.25) * 0.045;
-      const wBase = 7.6 * S * breathe;
-      const wTip = 3.2 * S * breathe;
+      // engrosada (7.6/3.2 → 9.0/4.2): baja la relación de esbeltez de ~25:1 a ~18:1 → hebra de
+      // pasta con cuerpo, no un alambre. Sin tocar las proporciones verticales ni los gestos.
+      const wBase = 9.0 * S * breathe;
+      const wTip = 4.2 * S * breathe;
       // construye la cinta como polígono (borde izq de ida, borde der de vuelta)
       const ribbon = (grow: number, offx: number, offy: number) => {
         ctx.beginPath();
@@ -2250,7 +2338,9 @@ export default function EmplataGame(props: {
           const nl = Math.hypot(nx, ny) || 1;
           nx /= nl;
           ny /= nl;
-          const hw = ((wBase + (wTip - wBase) * t) * 0.5 + grow) ;
+          // clamp ≥0.5: con `grow` NEGATIVO (el filo de lomo) la punta fina colapsaría y el
+          // polígono se auto-intersectaría.
+          const hw = Math.max(0.5, (wBase + (wTip - wBase) * t) * 0.5 + grow);
           const lx = fx0[k] - ny * hw + offx;
           const ly = fy0[k] + nx * hw + offy;
           if (k === 0) ctx.moveTo(lx, ly);
@@ -2265,7 +2355,7 @@ export default function EmplataGame(props: {
           const nl = Math.hypot(nx, ny) || 1;
           nx /= nl;
           ny /= nl;
-          const hw = ((wBase + (wTip - wBase) * t) * 0.5 + grow);
+          const hw = Math.max(0.5, (wBase + (wTip - wBase) * t) * 0.5 + grow);
           const rx = fx0[k] + ny * hw + offx;
           const ry = fy0[k] - nx * hw + offy;
           ctx.lineTo(rx, ry);
@@ -2286,12 +2376,17 @@ export default function EmplataGame(props: {
       ribbon(0.6, 2.4, 2.8);
       ctx.fillStyle = "rgba(50,28,10,0.3)";
       ctx.fill();
-      // cuerpo ámbar (degradado a lo largo)
+      // CUERPO ámbar. Era un createLinearGradient POR FRAME y POR HEBRA (con 3 hebras, 180
+      // gradientes/segundo — el gemelo exacto del bug que ya se cazó en headGrad). Sus extremos
+      // son coords de dispositivo y cambian cada frame, así que no se puede cachear: se sustituye
+      // por un tono medio sólido y el modelado cilíndrico lo da el filo de lomo de abajo.
       ribbon(0, 0, 0);
-      const bodyG = ctx.createLinearGradient(ax, ay, tipX, tipY);
-      bodyG.addColorStop(0, "#B27821");
-      bodyG.addColorStop(1, "#F0AC36");
-      ctx.fillStyle = bodyG;
+      ctx.fillStyle = "#D9922B";
+      ctx.fill();
+      // FILO DE LOMO: una cinta interior más clara a lo LARGO del eje → lee como un cilindro
+      // mojado en vez de una banda de goma plana. Un fill, sin gradientes.
+      ribbon(-wBase * 0.3, 0, 0);
+      ctx.fillStyle = "rgba(255,248,220,0.32)";
       ctx.fill();
       // filo de brillo ↖ (línea fina sobre el borde superior-izquierdo)
       ctx.strokeStyle = "rgba(255,244,210,0.7)";
@@ -2549,15 +2644,18 @@ export default function EmplataGame(props: {
         ctx.beginPath();
         ctx.ellipse(cxs, cy2, boxW * 0.42 * focoScaleE, boxH * 0.08 * focoScaleE, 0, 0, TAU);
         ctx.fill();
-        // CONTACTO: ceñido, stops que se desploman → línea de contacto casi dura (contact-hardening)
-        const con = ctx.createRadialGradient(cxs, cy2, 1, cxs, cy2, boxW * 0.22 * focoScaleE);
+        // CONTACTO: ceñido, stops que se desploman → línea de contacto casi dura (contact-hardening).
+        // Su centro se ancla al CANTO de la caja (cyC), no a cy2 (que cae bajo el canto): antes el
+        // núcleo oscuro quedaba en el hueco → la caja levitaba. Y más plano (rY 0.05→0.035).
+        const cyC = base + boxH * 0.082 * focoScaleE;
+        const con = ctx.createRadialGradient(cxs, cyC, 1, cxs, cyC, boxW * 0.22 * focoScaleE);
         con.addColorStop(0, `rgba(58,32,14,${0.5 * fade})`);
         con.addColorStop(0.25, `rgba(58,32,14,${0.34 * fade})`);
         con.addColorStop(0.5, `rgba(58,32,14,${0.12 * fade})`);
         con.addColorStop(1, "rgba(58,32,14,0)");
         ctx.fillStyle = con;
         ctx.beginPath();
-        ctx.ellipse(cxs, cy2, boxW * 0.22 * focoScaleE, boxH * 0.05 * focoScaleE, 0, 0, TAU);
+        ctx.ellipse(cxs, cyC, boxW * 0.22 * focoScaleE, boxH * 0.035 * focoScaleE, 0, 0, TAU);
         ctx.fill();
         ctx.restore();
       }
@@ -2907,9 +3005,13 @@ export default function EmplataGame(props: {
         // como materia, no como glow. La luz va ↖ como toda la escena (fuera el sheen vertical).
         const baseItem = wd.pila.find((q) => find(q.id)?.categoria === "base");
         if (baseItem) {
-          const col = wd.colores.get(baseItem.id) ?? "rgb(202,161,90)";
+          // el lecho OSCURECE hacia salsa/char (shadeC -0.35), no repite el tono de la comida que
+          // sostiene: antes lecho y base eran el MISMO naranja → una sola mancha sin fondo ni foco.
+          const col = shadeC(wd.colores.get(baseItem.id) ?? "rgb(202,161,90)", -0.35);
           const colT = col.replace("rgb(", "rgba(").replace(")", ",0)");
-          const cyc = -boxH * 0.05; // faldón: sube a abrazar la base elevada (no charco aislado)
+          // faldón: abraza la base elevada. Con SOLO base (pila.length===1) sube más para cerrar el
+          // hueco cojín↔sprite → la caja deja de leerse "casi vacía" en la primera acción.
+          const cyc = wd.pila.length === 1 ? -boxH * 0.075 : -boxH * 0.05;
           ctx.save();
           // CLIP al trapecio del interior → el borde del lecho es la caja, no una elipse
           ctx.beginPath();
@@ -2923,7 +3025,7 @@ export default function EmplataGame(props: {
           cg.addColorStop(0, col);
           cg.addColorStop(0.34, col);
           cg.addColorStop(1, colT);
-          ctx.globalAlpha = 0.66;
+          ctx.globalAlpha = wd.pila.length === 1 ? 0.78 : 0.66; // base-only: cuerpo más denso = caja llena
           ctx.fillStyle = cg;
           ctx.beginPath();
           ctx.ellipse(0, cyc, boxW * 0.44, boxH * 0.22, 0, 0, TAU); // faldón bajo el nido subido
@@ -2945,7 +3047,7 @@ export default function EmplataGame(props: {
         // lecho (antes se pintaba antes y el cojín opaco lo borraba → la comida no se anclaba).
         if (wd.pila.length > 1) {
           const rw = boxW * (0.3 + 0.03 * Math.min(6, wd.pila.length));
-          ctx.fillStyle = "rgba(40,22,8,0.24)";
+          ctx.fillStyle = "rgba(28,22,18,0.30)"; // AO de grupo: gris-marrón frío y denso = ancla fría (la comida cálida se despega)
           ctx.beginPath();
           ctx.ellipse(2, -boxH * 0.01, rw, boxH * 0.11, 0, 0, TAU);
           ctx.fill();
