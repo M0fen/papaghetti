@@ -46,14 +46,14 @@ const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
    agarre se reubica a otro al azar, así el siguiente agarre nace en un lugar distinto.
    axf/ayf = offset del ancla (fracción de boxW/boxH desde la base de la caja); up = cuánto se
    asoma; io = hacia dónde queda el interior de la caja. */
-/* `up` se recortó (0.62→0.52 · 0.44→0.38 · 0.48→0.42): el tallo en reposo medía ~124px de alto
-   por ~7.6 de ancho (relación 25:1) y leía como un palo con una bolita, no como una criatura. */
+/* PROTAGONISTA: con cuerpo 12px, gorro y pañuelo, el tallo vuelve a crecer (0.52→0.6) sin leer
+   como palo — la relación queda ~9:1 y la toque corona la silueta. */
 const HOMES = [
-  { axf: -0.42, ayf: -0.3, up: 0.52, io: 1 }, // costado izquierdo
-  { axf: 0.42, ayf: -0.3, up: 0.52, io: -1 }, // costado derecho
-  { axf: 0.0, ayf: -0.52, up: 0.38, io: 0 }, // asoma por ARRIBA (centro)
-  { axf: -0.24, ayf: -0.48, up: 0.42, io: 1 }, // arriba-izquierda
-  { axf: 0.24, ayf: -0.48, up: 0.42, io: -1 }, // arriba-derecha
+  { axf: -0.42, ayf: -0.3, up: 0.6, io: 1 }, // costado izquierdo
+  { axf: 0.42, ayf: -0.3, up: 0.6, io: -1 }, // costado derecho
+  { axf: 0.0, ayf: -0.52, up: 0.46, io: 0 }, // asoma por ARRIBA (centro)
+  { axf: -0.24, ayf: -0.48, up: 0.5, io: 1 }, // arriba-izquierda
+  { axf: 0.24, ayf: -0.48, up: 0.5, io: -1 }, // arriba-derecha
 ];
 const otroHome = (cur: number) => {
   let n = Math.floor(Math.random() * HOMES.length);
@@ -1231,7 +1231,8 @@ export default function EmplataGame(props: {
     hojas: [] as Hoja[], // ESPOLVOREAR: hojitas/virutas con flip fake-3D (confetti de Segijn)
     cortesFx: [] as CorteFx[], // CORTAR: destello de hoja (streak horneado, 3-4 frames)
     pale: new Map<string, CanvasImageSource>(), // variante CRUDA por id (sizzle: crudo→dorado)
-    streak: null as Off | null, // la hoja del cuchillo, horneada
+    streak: null as Off | null, // la hoja del cuchillo (destello), horneada
+    knife: null as Off | null, // EL CUCHILLO del chef (hoja + mango), horneado
     manchas: [] as Mancha[], // micro-manchas en el kraft del suelo (multiply)
     trail: [] as Trail[], // rastro dorado del pulgar al arrastrar la bandeja
     trayScroll: 0,
@@ -1293,6 +1294,7 @@ export default function EmplataGame(props: {
       home: 0, // índice en HOMES (se reubica tras cada agarre y de vez en cuando)
       init: false,
       ctrl: nuevoCtrl(),
+      tapVar: 0, // rota las reacciones al tap (jamás la misma dos veces seguidas)
     },
     t: 0,
     ts: 0, // reloj en SEGUNDOS (wd.t está en frames-a-60): la vida no puede depender del framerate
@@ -2021,6 +2023,46 @@ export default function EmplataGame(props: {
       skg.ellipse(48, 7, 47, 4.5, 0, 0, TAU);
       skg.fill();
       world.current.streak = sk;
+      // EL CUCHILLO DE CHEF (apunta +x): mango espresso con remache + hoja de acero con filo
+      const kn = document.createElement("canvas");
+      kn.width = 68;
+      kn.height = 18;
+      const kg = kn.getContext("2d")!;
+      kg.fillStyle = "#4A2E14"; // mango
+      kg.beginPath();
+      kg.roundRect(2, 5.2, 19, 7.6, 3.4);
+      kg.fill();
+      kg.fillStyle = "#6B4526"; // lomo del mango (luz ↖)
+      kg.beginPath();
+      kg.roundRect(3.5, 6, 16, 2.6, 2);
+      kg.fill();
+      kg.fillStyle = "#C9A227"; // remaches
+      kg.beginPath();
+      kg.arc(8, 9, 1.1, 0, TAU);
+      kg.arc(15, 9, 1.1, 0, TAU);
+      kg.fill();
+      const bg3 = kg.createLinearGradient(0, 3, 0, 15); // hoja: acero frío (el único frío de la escena = se lee metal)
+      bg3.addColorStop(0, "#F3F7FA");
+      bg3.addColorStop(0.55, "#C9D4DC");
+      bg3.addColorStop(1, "#9FAEBB");
+      kg.fillStyle = bg3;
+      kg.beginPath();
+      kg.moveTo(20, 3.6);
+      kg.lineTo(58, 3.2);
+      kg.quadraticCurveTo(66, 4.4, 66, 8.2);
+      kg.quadraticCurveTo(60, 14.8, 44, 14.6);
+      kg.lineTo(20, 14.2);
+      kg.closePath();
+      kg.fill();
+      kg.strokeStyle = "rgba(255,255,255,0.85)"; // el FILO
+      kg.lineWidth = 1.1;
+      kg.beginPath();
+      kg.moveTo(21, 14);
+      kg.quadraticCurveTo(48, 14.9, 65.2, 8.4);
+      kg.stroke();
+      kg.fillStyle = "#8C9AA8"; // virola
+      kg.fillRect(19.4, 4, 2.2, 11);
+      world.current.knife = kn;
       const bc = document.createElement("canvas");
       bc.width = Math.max(2, Math.round(W / 4));
       bc.height = Math.max(2, Math.round(H / 4));
@@ -2508,6 +2550,22 @@ export default function EmplataGame(props: {
       const y = e.clientY - r.top;
       world.current.lastAct = world.current.t;
       if (maxExc > 10) return; // fue drag: excursión máxima, no suma de temblores
+      // TAP SOBRE EL CHEF: responde (Tamagotchi: corto, interrumpible, y JAMÁS la misma
+      // reacción dos veces seguidas — rota reverencia / brinco / saludo)
+      {
+        const m = world.current.masc;
+        if (m.init && world.current.fideos.length === 0 && world.current.vuelos.length === 0 && Math.hypot(x - m.hx, y - m.hy) < 46) {
+          const pool = [13, 10, 4];
+          m.tapVar = (m.tapVar + 1) % pool.length;
+          m.mode = pool[m.tapVar];
+          m.modeT = world.current.t;
+          m.dur = 42;
+          s.tone(880, 0.06, "triangle", 0.055);
+          s.tone(1318, 0.07, "triangle", 0.05, 0.06);
+          if (navigator.vibrate) navigator.vibrate(8);
+          return;
+        }
+      }
       const { cardY, cardH } = geo();
       // pestañas: MISMA geometría que el dibujo (ver tabsGeo)
       const T = tabsGeo();
@@ -2584,6 +2642,9 @@ export default function EmplataGame(props: {
       /* Agranda SOLO cabeza+ojos+boca (no el cuerpo). En reposo la cabeza medía ~13px en móvil
          y la cara era indescifrable; el vuelo y el KDS se quedan en 1 para no tocar sus gestos. */
       headScale = 1,
+      /* Mirada al PUNTERO cuando está quieto (protagonista interactivo): −1..1 desplaza la
+         pupila; 0 = sacadas de ruido de siempre. */
+      lookX = 0,
     ) => {
       const wd = world.current;
       const S = scale; // el fideo escala con su objeto (p.ej. la caja crecida en la espera)
@@ -2648,10 +2709,10 @@ export default function EmplataGame(props: {
          y con una pizca de ruido para que no sea un émbolo. */
       const breathe =
         1 + (Math.sin(TAU * 0.26 * wd.ts + seed) * 0.75 + fbm(wd.ts * 0.55 + seed * 13) * 0.25) * 0.045;
-      // engrosada (7.6/3.2 → 9.0/4.2): baja la relación de esbeltez de ~25:1 a ~18:1 → hebra de
-      // pasta con cuerpo, no un alambre. Sin tocar las proporciones verticales ni los gestos.
-      const wBase = 9.0 * S * breathe;
-      const wTip = 4.2 * S * breathe;
+      // PROTAGONISTA: 12/5.4 (era 9/4.2 y antes 7.6/3.2) — cuerpo con presencia de personaje
+      // principal, no de adorno. La esbeltez queda ~9:1 con los HOMES nuevos.
+      const wBase = 12.0 * S * breathe;
+      const wTip = 5.4 * S * breathe;
       // construye la cinta como polígono (borde izq de ida, borde der de vuelta)
       const ribbon = (grow: number, offx: number, offy: number) => {
         ctx.beginPath();
@@ -2787,6 +2848,42 @@ export default function EmplataGame(props: {
       ctx.beginPath();
       ctx.arc(-1.8, -2.4, 1.5, 0, TAU);
       ctx.fill();
+      // ===== EL CHEF: TOQUE BLANCA (el prop que convierte mascota en PROTAGONISTA — la silueta
+      // dice "chef" hasta en negro) + PAÑUELO al cuello en el tomate de la casa. Colores
+      // estáticos, cero allocs; como vive en drawFideo, el chef ES el chef también al repartir.
+      // (En este marco local, +y apunta HACIA FUERA de la hebra: el gorro va en +y, el cuello en −y.)
+      ctx.fillStyle = "#F4EDDD"; // banda del gorro, sobre la frente
+      ctx.beginPath();
+      ctx.roundRect(-5.6, 5.0, 11.2, 3.6, 1.4);
+      ctx.fill();
+      ctx.fillStyle = "rgba(120,95,60,0.25)"; // sombra de contacto del gorro sobre la frente
+      ctx.fillRect(-5.2, 4.4, 10.4, 0.9);
+      // el globo de la toque (tres nubes)
+      ctx.fillStyle = "#FFFDF6";
+      ctx.beginPath();
+      ctx.arc(-3.4, 10.2, 3.4, 0, TAU);
+      ctx.arc(0, 12, 4.1, 0, TAU);
+      ctx.arc(3.4, 10.2, 3.4, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = "rgba(200,180,140,0.28)"; // pliegue del globo contra la banda
+      ctx.beginPath();
+      ctx.ellipse(0, 8.9, 4.6, 1.1, 0, 0, TAU);
+      ctx.fill();
+      // pañuelo rojo al cuello (lado del cuerpo = −y local): nudo + una punta al viento
+      ctx.fillStyle = "#C8321E";
+      ctx.beginPath();
+      ctx.moveTo(-3.4, -5.6);
+      ctx.lineTo(3.4, -5.6);
+      ctx.lineTo(0, -8.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#A72413";
+      ctx.beginPath();
+      ctx.moveTo(0.4, -6.2);
+      ctx.lineTo(3.2, -6.0);
+      ctx.lineTo(2.4, -9.4);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
 
       // ===== OJITOS con esclerótica + PUPILA DIRECCIONAL (mira hacia donde se mueve / al ingrediente) =====
@@ -2803,8 +2900,8 @@ export default function EmplataGame(props: {
         const doble = fbm(kb * 3.3) > 0.55;
         const blink = (dtb > 0 && dtb < 0.11) || (doble && dtb > 0.29 && dtb < 0.4) ? 0.12 : 1;
         const spd2 = Math.hypot(hvx, hvy);
-        // quieto, la pupila se quedaba CLAVADA en el centro; ahora hace sacadas lentas
-        const lx = spd2 > 10 ? clamp(hvx / spd2, -1, 1) * 1.3 : fbm(wd.ts * 0.19 + seed) * 0.9;
+        // quieto: sigue al PUNTERO si hay uno reciente (lookX); si no, sacadas lentas de ruido
+        const lx = spd2 > 10 ? clamp(hvx / spd2, -1, 1) * 1.3 : lookX !== 0 ? clamp(lookX, -1, 1) * 1.25 : fbm(wd.ts * 0.19 + seed) * 0.9;
         const ly = clamp((spd2 > 10 ? clamp(hvy / spd2, -1, 1) * 1.1 : 0) + pupilDown * 0.7, -1.15, 1.15);
         ctx.save();
         ctx.translate(tipX, tipY); // marco local a la cabeza, escalado por S (ojos/boca crecen con ella)
@@ -3018,11 +3115,12 @@ export default function EmplataGame(props: {
         // REACCIÓN por sabor: al aterrizar un ingrediente, el fideo hace un gesto temático
         const react = wd.reactMode >= 0 && wd.t - wd.reactT < 48;
         if (wd.t - m.modeT > m.dur && !react) {
-          let nm = Math.floor(Math.random() * 8);
-          if (nm === m.mode) nm = (nm + 1) % 8;
+          let nm = Math.floor(Math.random() * 9); // 0-7 clásicos + AFILAR el cuchillo
+          if (nm === m.mode) nm = (nm + 1) % 9;
+          if (nm === 8) nm = 12; // 8-11 son reacciones por sabor; el afilado vive en 12
           m.mode = nm;
           m.modeT = wd.t;
-          m.dur = 55 + Math.random() * 130; // ~1-3s por modo
+          m.dur = nm === 12 ? 110 + Math.random() * 60 : 55 + Math.random() * 130; // ~1-3s por modo
           if (Math.random() < 0.28) m.home = otroHome(m.home); // se muda de vez en cuando
         }
         const em = react ? wd.reactMode : m.mode;
@@ -3091,6 +3189,16 @@ export default function EmplataGame(props: {
               ty = ay - up * (1.02 + 0.14 * Math.abs(Math.sin(age * 0.42)));
               pupil = 0.3;
               break;
+            case 12: // AFILAR el cuchillo: el maestro cuida su herramienta (serrucho corto + tings)
+              tx = ax + io * boxW * 0.07;
+              ty = ay - up * (0.86 + 0.02 * Math.sin(age * 0.5));
+              pupil = 0.95; // concentrado en la hoja
+              break;
+            case 13: // TAP del cliente: reverencia corta de maestro (interrumpible, <600ms)
+              ty = ay - up * (age < 13 ? 0.52 : 1.04);
+              tx = ax + io * 3;
+              pupil = 0.25;
+              break;
             default: // 11: premium: reverencia (baja y sube con gracia)
               ty = ay - up * (age < 18 ? 0.42 : 1.06);
               tx = ax;
@@ -3106,7 +3214,28 @@ export default function EmplataGame(props: {
         [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, react ? 240 : 170, react ? 22 : 19, dt);
         [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, react ? 240 : 170, react ? 22 : 19, dt);
         m.pupil += (pupil - m.pupil) * (1 - Math.pow(0.86, df));
-        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy, 1, m.ctrl, 1.2);
+        // MIRADA AL PUNTERO (protagonista interactivo): si hay puntero reciente y no hay sensor,
+        // la pupila sigue el cursor/dedo; si no, sacadas de ruido de siempre.
+        const lookP =
+          !sensorLive && performance.now() - ptrT < 2500
+            ? clamp(((ptrTX / 1.2 + 0.5) * W - m.hx) / 130, -1, 1)
+            : 0;
+        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy, 1, m.ctrl, 1.5, lookP);
+        // el CUCHILLO en mano durante el afilado: serrucho corto contra una chaira invisible,
+        // con TINGS de chispa ocasionales en el filo (el maestro cuida su herramienta)
+        if (em === 12 && wd.knife && !reduce) {
+          const kx = m.hx + io * 17 + Math.sin(age * 0.5) * 4;
+          const ky = m.hy + 10;
+          ctx.save();
+          ctx.translate(kx, ky);
+          ctx.rotate(io * -0.35 + Math.sin(age * 0.5) * 0.16);
+          ctx.drawImage(wd.knife, -24, -4.8, 48, 12.7);
+          ctx.restore();
+          if (Math.random() < 0.018 * df) {
+            wd.chispas.push({ x: kx + io * 16, y: ky - 2, vx: io * 1.2, vy: -1.4, rot: 0, vr: 0.2, life: 0.5 });
+            s.tone(2100, 0.03, "triangle", 0.02); // ting
+          }
+        }
       }
 
       ctx.save();
@@ -4016,25 +4145,38 @@ export default function EmplataGame(props: {
       }
       ctx.globalAlpha = 1;
 
-      // ===== ✂ DESTELLO de la hoja (streak horneado, lighter, 3-4 frames) =====
-      if (wd.cortesFx.length) ctx.globalCompositeOperation = "lighter";
+      // ===== ✂ EL TAJO DEL CHEF: el CUCHILLO barre (sólido) y la estela brilla (lighter) =====
       for (let i = wd.cortesFx.length - 1; i >= 0; i--) {
         const cf = wd.cortesFx[i];
-        cf.life -= 0.2 * df;
+        cf.life -= 0.14 * df;
         if (cf.life <= 0 || !wd.streak) {
           wd.cortesFx.splice(i, 1);
           continue;
         }
-        const sk = wd.streak;
-        const lw = 96 * (boxW / BOXW_REF) * (1 + (1 - cf.life) * 0.5);
+        const kw2 = boxW / BOXW_REF;
+        // estela luminosa
+        ctx.globalCompositeOperation = "lighter";
+        const lw = 96 * kw2 * (1 + (1 - cf.life) * 0.5);
         ctx.save();
         ctx.translate(cf.x, cf.y);
         ctx.rotate(cf.ang);
         ctx.globalAlpha = cf.life;
-        ctx.drawImage(sk, -lw / 2, -lw * 0.07, lw, lw * 0.14);
+        ctx.drawImage(wd.streak, -lw / 2, -lw * 0.07, lw, lw * 0.14);
         ctx.restore();
+        // el cuchillo del chef, barriendo a lo largo del tajo (llega, corta y sale)
+        if (wd.knife) {
+          ctx.globalCompositeOperation = "source-over";
+          const sweep = (1 - cf.life) * 1.9 - 0.95; // −0.95 → +0.95 rad durante la vida
+          ctx.save();
+          ctx.translate(cf.x + Math.cos(cf.ang) * (1 - cf.life) * 30, cf.y + Math.sin(cf.ang) * (1 - cf.life) * 30);
+          ctx.rotate(cf.ang + sweep * 0.35);
+          ctx.globalAlpha = Math.min(1, cf.life * 1.8);
+          const kwid = 60 * kw2;
+          ctx.drawImage(wd.knife, -kwid * 0.72, -kwid * 0.13, kwid, kwid * 0.265);
+          ctx.restore();
+        }
+        ctx.globalCompositeOperation = "source-over";
       }
-      ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
 
       // ===== vapor idle de la caja (más generoso cuando el plato está completo: "se ve rico") =====
@@ -4532,7 +4674,7 @@ export default function EmplataGame(props: {
         [fd.hx, fd.hvx] = springStep(fd.hx!, fd.hvx!, tipX, 320, 26, dt);
         [fd.hy, fd.hvy] = springStep(fd.hy!, fd.hvy!, tipY, 320, 26, dt);
         if (!fd.ctrl) fd.ctrl = nuevoCtrl();
-        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true, 0.35, fd.hvx ?? 0, fd.hvy ?? 0, 1, fd.ctrl);
+        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true, 0.35, fd.hvx ?? 0, fd.hvy ?? 0, 1, fd.ctrl, 1.25);
       }
 
 
