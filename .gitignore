@@ -42,3 +42,4 @@ yarn-error.log*
 web/qa-*.mjs
 web/dbg.mjs
 *.webp.bak
+*.bak384

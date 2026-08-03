@@ -805,47 +805,53 @@ const MATERIAL: Record<string, "humedo" | "frito" | "seco"> = {
 };
 function bakeGlaze(src: CanvasImageSource, id = ""): Off {
   const mat = MATERIAL[id] ?? "frito";
-  const { c, g } = makeOff();
+  // a la resolución de la FUENTE (mismo arreglo que conRim: no degradar el asset a 192px)
+  const nw = (src as HTMLImageElement).naturalWidth || (src as HTMLCanvasElement).width || SPR * Q;
+  const S = Math.max(SPR * Q, Math.min(1024, nw));
+  const kS = S / (SPR * Q); // escala de trazos/puntos (afinados a 192)
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const g = c.getContext("2d")!;
   if (mat === "humedo") {
     // filo ↖ (la medialuna de siempre) + HOTSPOT liso de superficie mojada
-    g.drawImage(src, 0, 0, SPR, SPR);
+    g.drawImage(src, 0, 0, S, S);
     g.globalCompositeOperation = "destination-out";
-    g.drawImage(src, SPR * 0.085, SPR * 0.105, SPR, SPR); // borra la copia ↘ → queda el filo ↖
+    g.drawImage(src, S * 0.085, S * 0.105, S, S); // borra la copia ↘ → queda el filo ↖
     g.globalCompositeOperation = "source-in";
-    const lg = g.createLinearGradient(SPR * 0.22, SPR * 0.16, SPR * 0.78, SPR * 0.72);
+    const lg = g.createLinearGradient(S * 0.22, S * 0.16, S * 0.78, S * 0.72);
     lg.addColorStop(0, "rgba(248,251,255,1)");
     lg.addColorStop(0.55, "rgba(242,246,252,0.35)");
     lg.addColorStop(1, "rgba(242,246,252,0)");
     g.fillStyle = lg;
-    g.fillRect(0, 0, SPR, SPR);
+    g.fillRect(0, 0, S, S);
     g.globalCompositeOperation = "source-over";
-    const hs = g.createRadialGradient(SPR * 0.38, SPR * 0.33, 1, SPR * 0.38, SPR * 0.33, SPR * 0.17);
+    const hs = g.createRadialGradient(S * 0.38, S * 0.33, 1, S * 0.38, S * 0.33, S * 0.17);
     hs.addColorStop(0, "rgba(250,252,255,0.85)");
     hs.addColorStop(0.55, "rgba(248,251,255,0.28)");
     hs.addColorStop(1, "rgba(248,251,255,0)");
     g.fillStyle = hs;
     g.save();
-    g.translate(SPR * 0.38, SPR * 0.33);
+    g.translate(S * 0.38, S * 0.33);
     g.rotate(-0.5);
     g.scale(1.25, 0.8); // elíptico: sigue la curvatura, no un sol
     g.beginPath();
-    g.arc(0, 0, SPR * 0.17, 0, TAU);
+    g.arc(0, 0, S * 0.17, 0, TAU);
     g.fill();
     g.restore();
     g.fillStyle = "rgba(255,255,255,0.9)"; // la gota de reflejo (catchlight duro)
     g.beginPath();
-    g.arc(SPR * 0.33, SPR * 0.28, SPR * 0.022, 0, TAU);
+    g.arc(S * 0.33, S * 0.28, S * 0.022, 0, TAU);
     g.fill();
   } else if (mat === "frito") {
     // costra: chispitas cortas en las aristas — orientación y largo por hash (jamás random)
     g.lineCap = "round";
     for (let k = 0; k < 24; k++) {
-      const x = SPR * (0.16 + 0.68 * hash01(id + "gx" + k));
-      const y = SPR * (0.12 + 0.5 * hash01(id + "gy" + k));
-      const len = SPR * (0.02 + 0.035 * hash01(id + "gl" + k));
+      const x = S * (0.16 + 0.68 * hash01(id + "gx" + k));
+      const y = S * (0.12 + 0.5 * hash01(id + "gy" + k));
+      const len = S * (0.02 + 0.035 * hash01(id + "gl" + k));
       const a = hash01(id + "ga" + k) * Math.PI;
       g.strokeStyle = `rgba(250,252,255,${0.35 + 0.45 * hash01(id + "go" + k)})`;
-      g.lineWidth = 1.2 + hash01(id + "gw" + k) * 1.4;
+      g.lineWidth = (1.2 + hash01(id + "gw" + k) * 1.4) * kS;
       g.beginPath();
       g.moveTo(x - Math.cos(a) * len, y - Math.sin(a) * len);
       g.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
@@ -854,17 +860,17 @@ function bakeGlaze(src: CanvasImageSource, id = ""): Off {
   } else {
     // seco: micro-puntos dispersos, apenas presentes
     for (let k = 0; k < 11; k++) {
-      const x = SPR * (0.2 + 0.6 * hash01(id + "dx" + k));
-      const y = SPR * (0.16 + 0.5 * hash01(id + "dy" + k));
+      const x = S * (0.2 + 0.6 * hash01(id + "dx" + k));
+      const y = S * (0.16 + 0.5 * hash01(id + "dy" + k));
       g.fillStyle = `rgba(250,252,255,${0.3 + 0.3 * hash01(id + "do" + k)})`;
       g.beginPath();
-      g.arc(x, y, 0.8 + hash01(id + "dr" + k) * 1.1, 0, TAU);
+      g.arc(x, y, (0.8 + hash01(id + "dr" + k) * 1.1) * kS, 0, TAU);
       g.fill();
     }
   }
   // recorte final a la silueta REAL (chispitas/puntos nunca flotan fuera de la comida)
   g.globalCompositeOperation = "destination-in";
-  g.drawImage(src, 0, 0, SPR, SPR);
+  g.drawImage(src, 0, 0, S, S);
   g.globalCompositeOperation = "source-over";
   return c;
 }
@@ -872,17 +878,26 @@ function bakeGlaze(src: CanvasImageSource, id = ""): Off {
  *  de la silueta se enciende). Media luna = silueta menos sí-misma desplazada ↓; se funde con
  *  `lighter` y quedan CERO draws extra por frame — el sprite ya sale con su contraluz puesto. */
 function conRim(src: CanvasImageSource): Off {
-  const { c, g } = makeOff();
-  g.drawImage(src, 0, 0, SPR, SPR);
-  const { c: cres, g: gc } = makeOff();
-  gc.drawImage(src, 0, 0, SPR, SPR);
+  // A LA RESOLUCIÓN DE LA FUENTE. La primera versión metía el asset de 384px en el offscreen
+  // de 192 (makeOff) → TODA la comida perdía la mitad de su resolución y se re-escalaba borrosa
+  // (el dueño lo vio: "opacas y pixeladas"). El offscreen ahora respeta el tamaño natural.
+  const nw = (src as HTMLImageElement).naturalWidth || (src as HTMLCanvasElement).width || SPR * Q;
+  const S = Math.max(SPR * Q, Math.min(1024, nw));
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const g = c.getContext("2d")!;
+  g.drawImage(src, 0, 0, S, S);
+  const cres = document.createElement("canvas");
+  cres.width = cres.height = S;
+  const gc = cres.getContext("2d")!;
+  gc.drawImage(src, 0, 0, S, S);
   gc.globalCompositeOperation = "destination-out";
-  gc.drawImage(src, 0, SPR * 0.035, SPR, SPR); // borra la copia ↓ → queda el filo superior
+  gc.drawImage(src, 0, S * 0.035, S, S); // borra la copia ↓ → queda el filo superior
   gc.globalCompositeOperation = "source-in";
   gc.fillStyle = "rgba(255,224,158,0.62)"; // crema cálida: contraluz, no borde blanco duro
-  gc.fillRect(0, 0, SPR, SPR);
+  gc.fillRect(0, 0, S, S);
   g.globalCompositeOperation = "lighter";
-  g.drawImage(cres, 0, 0, SPR, SPR);
+  g.drawImage(cres, 0, 0, S, S);
   g.globalCompositeOperation = "source-over";
   return c;
 }
