@@ -902,6 +902,47 @@ function conRim(src: CanvasImageSource): Off {
   return c;
 }
 
+/* LOS VERBOS DE COCINA — cada ingrediente llega con SU acción (el fideo mesero es el chef; el
+   pedido sigue siendo un tap: el teatro vive en la ENTREGA). El patrón de la investigación:
+   micro-evento de contacto + consecuencia persistente y específica. Todo event-driven (~1s por
+   entrega), cero costo de frame sostenido, gates de reduce. */
+type Verbo = "cortar" | "sizzle" | "espolvorear" | "verter" | "enroscar";
+const VERBO: Record<string, Verbo> = {
+  aguacate: "cortar",
+  tocineta: "cortar",
+  "papa-criolla": "sizzle",
+  "papa-francesa": "sizzle",
+  chicharron: "sizzle",
+  "chicharron-crocante": "sizzle",
+  "pollo-crispy": "sizzle",
+  nuggets: "sizzle",
+  "nuggets-pina": "sizzle",
+  mixta: "sizzle",
+  perejil: "espolvorear",
+  parmesano: "espolvorear",
+  maicitos: "espolvorear",
+  hogao: "verter",
+  bolonesa: "verter",
+  champinon: "verter",
+  spaghetti: "enroscar",
+};
+
+/** CRUDO pálido para el sizzle (Venba: la transformación crudo→dorado ES la magia; Overcooked:
+ *  estados discretos, no gradiente). Se hornea una vez; el swap ocurre al aterrizar. */
+function bakePale(src: CanvasImageSource): Off {
+  const nw = (src as HTMLImageElement).naturalWidth || (src as HTMLCanvasElement).width || SPR * Q;
+  const S = Math.max(SPR * Q, Math.min(1024, nw));
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const g = c.getContext("2d")!;
+  g.drawImage(src, 0, 0, S, S);
+  g.globalCompositeOperation = "source-atop";
+  g.fillStyle = "rgba(248,238,220,0.48)"; // velo crudo: pálido, sin dorar
+  g.fillRect(0, 0, S, S);
+  g.globalCompositeOperation = "source-over";
+  return c;
+}
+
 /** Cuánto brilla cada ingrediente (0-1): salsas/cremosos mojados, fritos medios, secos casi nada. */
 // Los HÚMEDOS suben (el hotspot del foil debe leerse); fritos/secos se quedan discretos.
 const WET: Record<string, number> = {
@@ -972,7 +1013,15 @@ type Vuelo = {
   sc: number; // escala actual (interpola de la carta al reposo — sin salto)
   scT: number; // escala objetivo (la de reposo según categoría)
   flash?: number; // 1 en el frame del impacto → destello aditivo brevísimo (decae en ~3 frames)
+  verbo?: Verbo; // el verbo de cocina del ingrediente (VERBO[id])
+  x0?: number; // punto de suelta del fideo (el chorro de VERTER nace aquí)
+  y0?: number;
+  corte?: boolean; // CORTAR ya disparó (el split ocurre una sola vez, a media caída)
+  mitad?: -1 | 1; // mitad izquierda/derecha tras el corte; +1 es solo VFX (se desvanece)
+  alpha?: number; // fade de la mitad VFX
 };
+type Hoja = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; ph: number; vph: number; life: number; c1: string; c2: string; w: number };
+type CorteFx = { x: number; y: number; ang: number; life: number };
 /** EL FIDEO MESERO — una hebra viva que trae/saca comida entre la carta y la caja.
  *  hx/hy = posición de la CABEZA gobernada por muelle (persigue al objetivo con lag → whip). */
 type Fideo = {
@@ -997,7 +1046,7 @@ type Fideo = {
 };
 /** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
  *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
-type PilaItem = { id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number };
+type PilaItem = { id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number; cook?: number };
 type Puff = { x: number; y: number; life: number; max: number; r: number; tipo: "vapor" | "polvo" };
 type Pop = { x: number; y: number; life: number; texto: string; gratis: boolean };
 type Chispa = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number };
@@ -1179,6 +1228,10 @@ export default function EmplataGame(props: {
     pops: [] as Pop[],
     chispas: [] as Chispa[],
     parts: [] as Part[], // partículas del color de la comida al aterrizar (Fruit Ninja)
+    hojas: [] as Hoja[], // ESPOLVOREAR: hojitas/virutas con flip fake-3D (confetti de Segijn)
+    cortesFx: [] as CorteFx[], // CORTAR: destello de hoja (streak horneado, 3-4 frames)
+    pale: new Map<string, CanvasImageSource>(), // variante CRUDA por id (sizzle: crudo→dorado)
+    streak: null as Off | null, // la hoja del cuchillo, horneada
     manchas: [] as Mancha[], // micro-manchas en el kraft del suelo (multiply)
     trail: [] as Trail[], // rastro dorado del pulgar al arrastrar la bandeja
     trayScroll: 0,
@@ -1260,6 +1313,7 @@ export default function EmplataGame(props: {
       m.set(ing.id, spr);
       col.set(ing.id, muestrearColor(spr));
       gz.set(ing.id, bakeGlaze(spr, ing.id));
+      if (VERBO[ing.id] === "sizzle") world.current.pale.set(ing.id, bakePale(spr));
     }
     // ASSETS DE COMIDA (IA plana en /public/food/{id}.webp) — carga DIFERIDA tras el procedural:
     // el procedural es el placeholder instantáneo (LCP intacto); al llegar el asset reemplaza el
@@ -1272,6 +1326,7 @@ export default function EmplataGame(props: {
         const rimmed = conRim(img); // el asset también entra con su contraluz horneado
         world.current.sprites.set(ing.id, rimmed);
         world.current.glaze.set(ing.id, bakeGlaze(rimmed, ing.id)); // re-hornea el foil con el asset real
+        if (VERBO[ing.id] === "sizzle") world.current.pale.set(ing.id, bakePale(rimmed));
         try {
           const c = document.createElement("canvas");
           c.width = 64;
@@ -1950,6 +2005,22 @@ export default function EmplataGame(props: {
       world.current.glowSoft = mk(bw * 1.7, [[0, "rgba(255,242,205,0.6)"], [1, "rgba(255,242,205,0)"]]);
       world.current.glowSpec = mk(bw * 1.1, [[0, "rgba(255,246,222,0.14)"], [1, "rgba(255,246,222,0)"]]);
       world.current.glowDot = mk(32, [[0, "rgba(255,236,190,0.9)"], [0.45, "rgba(255,210,130,0.35)"], [1, "rgba(255,210,130,0)"]]);
+      // LA HOJA del corte: streak blanco alargado con núcleo caliente (se dibuja rotado, lighter)
+      const sk = document.createElement("canvas");
+      sk.width = 96;
+      sk.height = 14;
+      const skg = sk.getContext("2d")!;
+      const lgk = skg.createLinearGradient(0, 0, 96, 0);
+      lgk.addColorStop(0, "rgba(255,255,255,0)");
+      lgk.addColorStop(0.35, "rgba(255,250,235,0.9)");
+      lgk.addColorStop(0.55, "rgba(255,255,255,1)");
+      lgk.addColorStop(0.75, "rgba(255,250,235,0.9)");
+      lgk.addColorStop(1, "rgba(255,255,255,0)");
+      skg.fillStyle = lgk;
+      skg.beginPath();
+      skg.ellipse(48, 7, 47, 4.5, 0, 0, TAU);
+      skg.fill();
+      world.current.streak = sk;
       const bc = document.createElement("canvas");
       bc.width = Math.max(2, Math.round(W / 4));
       bc.height = Math.max(2, Math.round(H / 4));
@@ -2195,7 +2266,7 @@ export default function EmplataGame(props: {
     };
 
     /** Aterrizaje: el item se queda DONDE la física lo dejó (x real del vuelo) + squash + precio. */
-    const aterrizar = (ing: Ingrediente, xScreen: number, energia = 1) => {
+    const aterrizar = (ing: Ingrediente, xScreen: number, energia = 1, v?: Vuelo) => {
       const wd = world.current;
       const { boxW, boxH, boxX, boxY } = geo();
       const cat = ing.categoria;
@@ -2221,6 +2292,15 @@ export default function EmplataGame(props: {
         if (vec) vec.land = Math.max(vec.land, 0.55);
       }
       nuevo.fy = nuevo.ty - 0.05; // cae el último tramo a su slot (micro-asentamiento)
+      // VERBOS con consecuencia al posarse:
+      if (v?.verbo === "sizzle") {
+        nuevo.cook = 0; // llega CRUDO; el dorado (swap + aceite + vapor) ocurre en la pila
+        s.ruido(0.3, 0.042, 4800); // la sartén
+        s.ruido(0.22, 0.028, 5600, 0.14);
+      } else if (v?.verbo === "enroscar" && cat === "base") {
+        // llega girando como en tenedor y se DESENROSCA ya posado (decay en el dibujo)
+        nuevo.rot = clamp(((v.rot % TAU) + TAU) % TAU > Math.PI ? (v.rot % TAU) - TAU : v.rot % TAU, -0.55, 0.55) || 0.4;
+      }
       const fx = nuevo.fxT;
       const ty = nuevo.ty;
       wd.boxSquash = 1;
@@ -3343,7 +3423,7 @@ export default function EmplataGame(props: {
             a.id.localeCompare(b.id),
         );
         for (const p of ordenada) {
-          const spr = wd.sprites.get(p.id);
+          let spr = wd.sprites.get(p.id);
           if (!spr) continue;
           p.fy += (p.ty - p.fy) * (1 - Math.pow(0.75, df)); // asentamiento vertical (dt-normalizado)
           p.fx += (p.fxT - p.fx) * (1 - Math.pow(0.75, df)); // FLUYE a su slot (la composición se recompone viva)
@@ -3351,6 +3431,27 @@ export default function EmplataGame(props: {
           const lx = p.fx * boxW;
           const ly = p.fy * boxH; // la CAMA también se asienta en la envolvente → es el corazón del montón
           const rp = p.r * boxW;
+          // 🔥 EL DORADO (sizzle): la pieza llega CRUDA y a los ~350ms se dora DE GOLPE (estado
+          // discreto, no gradiente — Overcooked/Venba) con aceite saltando de los bordes y vapor
+          if (p.cook !== undefined && p.cook < 1) {
+            p.cook += dtReal * 2.9;
+            const pale = wd.pale.get(p.id);
+            if (pale && p.cook < 1) spr = pale as Off;
+            if (p.cook >= 1 && !reduce) {
+              p.land = Math.max(p.land, 0.5); // el brinco del dorado
+              // aceite saltando: partículas en ESPACIO DE PANTALLA (la pila dibuja en local de caja)
+              const sxP = boxXE + lx;
+              const syP = boxY + entY + focoY + ly;
+              for (let k = 0; k < 7; k++) {
+                const a3 = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+                const sp3 = 1.2 + Math.random() * 2.2;
+                wd.parts.push({ x: sxP + (Math.random() - 0.5) * rp, y: syP - rp * 0.3, vx: Math.cos(a3) * sp3, vy: Math.sin(a3) * sp3, life: 0.8, r: 1 + Math.random() * 1.3, color: "#FFF3D8" });
+              }
+              wd.puffs.push({ x: sxP, y: syP - rp * 0.6, life: 1, max: 44, r: 5, tipo: "vapor" });
+            }
+          }
+          // 🍴 el nido se DESENROSCA: la rotación del vuelo decae a su reposo ya posado
+          if (cp === 0 && p.rot !== 0) p.rot *= Math.pow(0.9, df);
           if (cp === 0) {
             // CAMA: sombra ancha y plana que abraza las 16 losetas del lecho
             ctx.fillStyle = "rgba(40,22,8,0.34)";
@@ -3689,6 +3790,32 @@ export default function EmplataGame(props: {
           catV === "base"
             ? boxY - boxH * 0.1
             : boxY + moundY(clamp((v.x - boxX) / boxW, -FXLIM, FXLIM), 0.5) * boxH;
+        // ✂ EL CORTE — a media caída, la hoja cruza: hit-stop, destello, y el sprite se PARTE en
+        // dos mitades que se separan perpendiculares al corte antes de rotar divergentes (MGR:
+        // el interior vende el corte; Fruit Ninja: el jugo hereda la dirección). Una sola vez.
+        if (!reduce && v.verbo === "cortar" && !v.corte && v.mitad === undefined && v.vy > 0 && surfY - v.y < boxH * 0.42) {
+          v.corte = true;
+          const ang = -0.62; // la hoja baja en diagonal ↘ (coherente con la luz ↖)
+          wd.cortesFx.push({ x: v.x, y: v.y, ang, life: 1 });
+          wd.hitStop = Math.max(wd.hitStop, 0.035);
+          wd.trauma = Math.min(1, wd.trauma + 0.5);
+          s.tone(1250, 0.045, "square", 0.05);
+          s.ruido(0.05, 0.04, 3200);
+          // jugo direccional: sale perpendicular a la línea de corte, hacia ambos lados
+          const col = wd.colores.get(v.ing.id) ?? "#F2A516";
+          const nx = Math.cos(ang + Math.PI / 2);
+          const ny = Math.sin(ang + Math.PI / 2);
+          for (let k = 0; k < 8; k++) {
+            const dir = k % 2 === 0 ? 1 : -1;
+            const sp = 1.4 + Math.random() * 2.4;
+            wd.parts.push({ x: v.x, y: v.y, vx: nx * sp * dir + v.vx, vy: ny * sp * dir - 0.6, life: 1, r: 1.5 + Math.random() * 1.8, color: col });
+          }
+          // la mitad gemela (+1): solo VFX — se separa, rebota y se desvanece; el item real va en la −1
+          v.mitad = -1;
+          v.vx -= 0.9;
+          v.vr = -0.055;
+          wd.vuelos.push({ ...v, mitad: 1, vx: v.vx + 1.8, vr: 0.055, alpha: 1, flash: 0 });
+        }
         // sombra de caída: encoge y se oscurece al acercarse a la superficie (vende la caída)
         const alto = Math.max(0, surfY - v.y);
         if (v.vy > 0 && alto < boxH * 0.7 && catV !== "base") {
@@ -3718,24 +3845,109 @@ export default function EmplataGame(props: {
               v.flash = 1;
             }
           } else {
-            aterrizar(v.ing, v.x, clamp(v.vy / 14, 0, 1));
+            // la mitad GEMELA del corte es puro VFX: muere en un puff, sin duplicar el item
+            if (v.mitad === 1) {
+              if (!reduce)
+                for (let k = 0; k < 3; k++)
+                  wd.puffs.push({ x: v.x + (Math.random() - 0.5) * 10, y: v.y - 4, life: 0.7, max: 30, r: 4, tipo: "polvo" });
+              wd.vuelos.splice(i, 1);
+              continue;
+            }
+            // 🫗 VERTER remata en SALPICADURA + charco que se extiende (la mancha ya se desvanece sola)
+            if (v.verbo === "verter" && !reduce) {
+              const colV = wd.colores.get(v.ing.id) ?? "#C8321E";
+              for (let k = 0; k < 9; k++) {
+                const a2 = -Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+                const sp = 0.8 + Math.random() * 2;
+                wd.parts.push({ x: v.x, y: surfY, vx: Math.cos(a2) * sp, vy: Math.sin(a2) * sp, life: 1, r: 1.6 + Math.random() * 2.2, color: colV });
+              }
+              wd.manchas.push({ fx: clamp((v.x - boxX) / boxW, -0.35, 0.35), fy: -0.05, life: 1, r: radioDe("topping", 0.6) });
+            }
+            aterrizar(v.ing, v.x, clamp(v.vy / 14, 0, 1), v);
             wd.vuelos.splice(i, 1);
             continue;
           }
         }
         const spr = wd.sprites.get(v.ing.id);
-        if (spr) {
+        if (v.verbo === "espolvorear" && !reduce) {
+          // 🌿 EL PELLIZCO: sin sprite en vuelo — hojitas/virutas con flip fake-3D caen alrededor
+          // del centro de masa invisible (Konfetti de Segijn: caída + rotación + ancho 100→0→100)
+          if (!reduce && wd.hojas.length < 42) {
+            const c1 = wd.colores.get(v.ing.id) ?? "#7A8C4F";
+            const c2 = shadeC(c1, 0.35);
+            for (let k = 0; k < 2; k++) {
+              wd.hojas.push({
+                x: v.x + (Math.random() - 0.5) * 26,
+                y: v.y + (Math.random() - 0.5) * 10,
+                vx: (Math.random() - 0.5) * 0.8,
+                vy: 0.5 + Math.random() * 0.7,
+                rot: Math.random() * TAU,
+                vr: (Math.random() - 0.5) * 0.12,
+                ph: Math.random() * TAU,
+                vph: 0.14 + Math.random() * 0.12,
+                life: 1,
+                c1,
+                c2,
+                w: 3.5 + Math.random() * 3 * (boxW / BOXW_REF),
+              });
+            }
+          }
+        } else if (v.verbo === "verter" && !reduce) {
+          // 🫗 EL CHORRO: bezier grueso desde la boquilla (punto de suelta) hasta la cabeza del
+          // vertido — trazo oscuro + núcleo claro, con un pelo de comba (lee líquido, no palo)
+          const colV = wd.colores.get(v.ing.id) ?? "#C8321E";
+          const midX = (v.x0! + v.x) / 2 + Math.sin(wd.ts * 7) * 2.5;
+          const midY = (v.y0! + v.y) / 2;
+          const kw = boxW / BOXW_REF;
+          ctx.lineCap = "round";
+          ctx.strokeStyle = shadeC(colV, -0.22);
+          ctx.lineWidth = 7.5 * kw;
+          ctx.beginPath();
+          ctx.moveTo(v.x0!, v.y0!);
+          ctx.quadraticCurveTo(midX, midY, v.x, v.y);
+          ctx.stroke();
+          ctx.strokeStyle = shadeC(colV, 0.28);
+          ctx.lineWidth = 3.2 * kw;
+          ctx.beginPath();
+          ctx.moveTo(v.x0!, v.y0!);
+          ctx.quadraticCurveTo(midX, midY, v.x, v.y);
+          ctx.stroke();
+        } else if (spr) {
           ctx.save();
           ctx.translate(v.x, v.y);
           ctx.rotate(v.rot);
           const sz = SPR * (boxW / BOXW_REF) * v.sc; // el vuelo escala igual que el aterrizaje (o salta de tamaño)
-          ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
+          // 🔥 SIZZLE vuela CRUDO (pálido); el dorado llega en la sartén (al aterrizar)
+          const sprD = v.verbo === "sizzle" ? (wd.pale.get(v.ing.id) ?? spr) : spr;
+          if (v.mitad !== undefined) {
+            // ✂ media pieza: recorte de la fuente (drawImage 9 args) + el filo de PULPA en el
+            // borde del corte — el interior expuesto es lo que dice "esto se cortó de verdad"
+            const sw = (sprD as HTMLCanvasElement).width || SPR * Q;
+            const sh = (sprD as HTMLCanvasElement).height || SPR * Q;
+            if (v.mitad === 1 && v.alpha !== undefined) {
+              v.alpha = Math.max(0, v.alpha - 0.006 * df);
+              ctx.globalAlpha = v.alpha;
+            }
+            if (v.mitad === -1) ctx.drawImage(sprD, 0, 0, sw / 2, sh, -sz / 2, -sz / 2, sz / 2, sz);
+            else ctx.drawImage(sprD, sw / 2, 0, sw / 2, sh, 0, -sz / 2, sz / 2, sz);
+            const colP = shadeC(wd.colores.get(v.ing.id) ?? "#F2A516", 0.3);
+            ctx.strokeStyle = colP;
+            ctx.lineWidth = 2.4;
+            ctx.globalAlpha = (v.mitad === 1 && v.alpha !== undefined ? v.alpha : 1) * 0.85;
+            ctx.beginPath();
+            ctx.moveTo(0, -sz * 0.26);
+            ctx.lineTo(0, sz * 0.26);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          } else {
+            ctx.drawImage(sprD, -sz / 2, -sz / 2, sz, sz);
+          }
           // FLASH del impacto: el propio sprite re-dibujado aditivo = pop caliente de ~3 frames.
           // La intensidad la da el canal de trauma AL CUADRADO (golpe chico ≈ nada, grande revienta).
           if (v.flash && v.flash > 0.05) {
             ctx.globalCompositeOperation = "lighter";
             ctx.globalAlpha = v.flash * clamp(wd.trauma * wd.trauma * 1.5, 0, 1) * 0.75;
-            ctx.drawImage(spr, -sz / 2, -sz / 2, sz, sz);
+            ctx.drawImage(sprD, -sz / 2, -sz / 2, sz, sz);
             ctx.globalCompositeOperation = "source-over";
             ctx.globalAlpha = 1;
             v.flash *= Math.pow(0.5, df);
@@ -3768,6 +3980,59 @@ export default function EmplataGame(props: {
         ctx.beginPath();
         ctx.arc(pa.x, pa.y, rr * 0.45, 0, TAU);
         ctx.fill();
+      }
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+
+      // ===== 🌿 HOJITAS del espolvoreo — flip fake-3D: caída + rotación + ancho 100→0→100
+      // (Konfetti de Segijn); deriva senoidal; mueren al asentarse en la boca de la caja =====
+      for (let i = wd.hojas.length - 1; i >= 0; i--) {
+        const h = wd.hojas[i];
+        h.x += (h.vx + Math.sin(wd.ts * 3 + h.ph) * 0.35) * df;
+        h.y += h.vy * df;
+        h.vy += 0.045 * df; // gravedad de pluma
+        h.rot += h.vr * df;
+        h.ph += h.vph * df;
+        h.life -= 0.011 * df;
+        const suelo = boxY - boxH * 0.02;
+        if (h.life <= 0 || h.y > suelo) {
+          wd.hojas.splice(i, 1);
+          continue;
+        }
+        ctx.save();
+        ctx.translate(h.x, h.y);
+        ctx.rotate(h.rot);
+        ctx.scale(1, Math.max(0.12, Math.abs(Math.cos(h.ph)))); // el flip: ancho 100→0→100
+        ctx.globalAlpha = Math.min(1, h.life * 2.2);
+        ctx.fillStyle = h.c1;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, h.w, h.w * 0.52, 0, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = h.c2; // la media cara clara: lee volumen al voltear
+        ctx.beginPath();
+        ctx.ellipse(-h.w * 0.24, 0, h.w * 0.5, h.w * 0.44, 0, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+
+      // ===== ✂ DESTELLO de la hoja (streak horneado, lighter, 3-4 frames) =====
+      if (wd.cortesFx.length) ctx.globalCompositeOperation = "lighter";
+      for (let i = wd.cortesFx.length - 1; i >= 0; i--) {
+        const cf = wd.cortesFx[i];
+        cf.life -= 0.2 * df;
+        if (cf.life <= 0 || !wd.streak) {
+          wd.cortesFx.splice(i, 1);
+          continue;
+        }
+        const sk = wd.streak;
+        const lw = 96 * (boxW / BOXW_REF) * (1 + (1 - cf.life) * 0.5);
+        ctx.save();
+        ctx.translate(cf.x, cf.y);
+        ctx.rotate(cf.ang);
+        ctx.globalAlpha = cf.life;
+        ctx.drawImage(sk, -lw / 2, -lw * 0.07, lw, lw * 0.14);
+        ctx.restore();
       }
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
@@ -4208,18 +4473,28 @@ export default function EmplataGame(props: {
           } else {
             // suelta DISPERSO sobre la caja: cada strand emplata en un punto distinto (montón real)
             const catR = fd.ing.categoria;
+            const vb = VERBO[fd.ing.id];
+            const dropX = boxX + fd.off * 0.2 + fd.drop * boxW * 0.22;
             wd.vuelos.push({
               ing: fd.ing,
-              x: boxX + fd.off * 0.2 + fd.drop * boxW * 0.22,
+              x: dropX,
               y: mouthYBase,
-              vx: (Math.random() - 0.5) * 1.4,
-              vy: 1.6,
+              // ESPOLVOREAR cae en pluma; VERTER es un chorro guiado (sin deriva lateral)
+              vx: vb === "espolvorear" || vb === "verter" ? 0 : (Math.random() - 0.5) * 1.4,
+              vy: vb === "espolvorear" ? 0.7 : vb === "verter" ? 2.2 : 1.6,
               rot: (Math.random() - 0.5) * 0.4,
-              vr: (Math.random() - 0.5) * 0.1,
-              bounces: 0,
+              // ENROSCAR llega girando (se desenrosca al posarse)
+              vr: vb === "enroscar" ? 0.16 : (Math.random() - 0.5) * 0.1,
+              bounces: vb === "espolvorear" || vb === "verter" ? 1 : 0, // sin rebote: caen y se asientan
               sc: 0.68, // sale del rizo del fideo (≈ su tamaño colgando)
               scT: catR === "base" ? 1.58 : catR === "proteina" ? 0.73 : 0.53, // → reposo, sin salto
+              verbo: vb,
+              x0: dropX,
+              y0: mouthYBase - 4,
             });
+            // sonido de arranque del verbo (el de aterrizaje ya existe: s.caida con detune)
+            if (vb === "espolvorear") s.ruido(0.16, 0.022, 6200); // shaker seco
+            else if (vb === "verter") s.ruido(0.4, 0.032, 850); // el chorro grave
             wd.fideos.splice(i, 1);
             continue;
           }
