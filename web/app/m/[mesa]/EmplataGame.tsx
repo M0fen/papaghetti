@@ -1567,8 +1567,11 @@ export default function EmplataGame(props: {
       c.width = 48;
       c.height = 48;
       const g = c.getContext("2d")!;
+      // NÚCLEO CLARO (Ghibli/contraluz): denso al centro, cola suave — sobre el interior oscuro
+      // de la caja y con `lighter`, el vapor por fin SE VE sin subir el caudal a niebla
       const rad = g.createRadialGradient(24, 24, 0, 24, 24, 24);
-      rad.addColorStop(0, "rgba(255,250,240,0.9)");
+      rad.addColorStop(0, "rgba(255,252,244,1)");
+      rad.addColorStop(0.38, "rgba(255,250,240,0.5)");
       rad.addColorStop(1, "rgba(255,250,240,0)");
       g.fillStyle = rad;
       g.beginPath();
@@ -3758,17 +3761,32 @@ export default function EmplataGame(props: {
       // ===== vapor idle de la caja (más generoso cuando el plato está completo: "se ve rico") =====
       const completo =
         !!sel.current.baseId && sel.current.proteinaIds.length > 0 && sel.current.toppingIds.length > 0;
-      if (!reduce && !wd.folding && wd.pila.length > 0 && Math.random() < (completo ? 0.05 : 0.03) * df) {
-        wd.puffs.push({ x: boxX + (Math.random() - 0.5) * 26, y: boxY - boxH * 0.22, life: 1, max: 90, r: 5, tipo: "vapor" });
+      if (!reduce && !wd.folding && wd.pila.length > 0 && Math.random() < (completo ? 0.08 : 0.05) * df) {
+        wd.puffs.push({ x: boxX + (Math.random() - 0.5) * 30, y: boxY - boxH * 0.22, life: 1, max: 90, r: 6.5, tipo: "vapor" });
       }
-      // dot-sprite horneado (evita createRadialGradient POR PUFF POR FRAME)
+      // reduced-motion: el vapor NO desaparece — se CONGELA en fase fija (3 puffs deterministas
+      // que no avanzan). La señal "recién hecho" se conserva sin animación.
+      if (reduce && wd.pila.length === 0 && wd.puffs.length) wd.puffs.length = 0; // caja vacía: sin vapor congelado
+      if (reduce && wd.pila.length > 0 && !wd.folding && wd.puffs.length === 0) {
+        wd.puffs.push(
+          { x: boxX - 14, y: boxY - boxH * 0.22, life: 0.72, max: 90, r: 6.5, tipo: "vapor" },
+          { x: boxX + 3, y: boxY - boxH * 0.22, life: 0.5, max: 90, r: 6, tipo: "vapor" },
+          { x: boxX + 17, y: boxY - boxH * 0.22, life: 0.32, max: 90, r: 5.5, tipo: "vapor" },
+        );
+      }
+      // dot-sprite horneado (evita createRadialGradient POR PUFF POR FRAME). El plan pedía
+      // `lighter` aquí; MEDIDO con CPU ×4 costó +22ms de avg SOSTENIDOS (150 vs 128) porque el
+      // vapor idle está activo casi siempre. El NÚCLEO CLARO horneado en el dot ya hace visible
+      // el vapor sin blend → source-over y el presupuesto se queda en el clímax.
       const dot = wd.dotSprite!;
       for (let i = wd.puffs.length - 1; i >= 0; i--) {
         const p = wd.puffs[i];
-        p.life -= (1 / p.max) * df;
-        if (p.life <= 0) {
-          wd.puffs.splice(i, 1);
-          continue;
+        if (!reduce) {
+          p.life -= (1 / p.max) * df;
+          if (p.life <= 0) {
+            wd.puffs.splice(i, 1);
+            continue;
+          }
         }
         const yy = p.y - (1 - p.life) * 46;
         const rr = p.r * (1 + (1 - p.life) * 1.6);
@@ -3776,6 +3794,12 @@ export default function EmplataGame(props: {
         ctx.drawImage(dot, p.x - rr, yy - rr, rr * 2, rr * 2);
         ctx.globalAlpha = 1;
       }
+
+      /* HEAT HAZE: CONSTRUIDO Y REVERTIDO (build gráfico 2, paso 3). Las ~15 tiras de
+         self-drawImage doblaron el p95 con CPU ×4 (116.7 → 233.4ms): la semántica de snapshot
+         del spec copia el canvas COMPLETO en cada tira — el patrón exacto que castiga la cola.
+         Si algún día vuelve, tiene que ser leyendo de un offscreen intermedio (1 copia + 15
+         tiras del offscreen), no del canvas vivo. El vapor denso de arriba se queda. */
 
       // ===== BANDEJA (pestañas + cartas) — se desliza fuera al cerrar (foco en la caja) =====
       const enArma = faseRef.current === "arma";
