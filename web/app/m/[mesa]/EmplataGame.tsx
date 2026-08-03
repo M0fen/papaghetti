@@ -1847,6 +1847,30 @@ export default function EmplataGame(props: {
         }
         g.stroke();
       }
+      // DOF DE ESCENARIO (horneado, cero costo por frame): la banda de PARED pierde foco —
+      // lectura de "foto con lente" donde caja y comida cortan nítidas delante. El blur es
+      // downscale ÷7 + upscale bilineal (cero dependencias) y un fade destination-out lo
+      // devuelve a nítido al acercarse al mostrador (el CONTACTO pared/mesa no se toca).
+      {
+        const bw2 = Math.max(2, Math.round(W / 7));
+        const bh2 = Math.max(2, Math.round(woodY / 7));
+        const blurC = document.createElement("canvas");
+        blurC.width = bw2;
+        blurC.height = bh2;
+        blurC.getContext("2d")!.drawImage(c, 0, 0, W, woodY, 0, 0, bw2, bh2);
+        const fadeC = document.createElement("canvas");
+        fadeC.width = Math.max(2, Math.round(W));
+        fadeC.height = Math.max(2, Math.round(woodY));
+        const fg2 = fadeC.getContext("2d")!;
+        fg2.drawImage(blurC, 0, 0, bw2, bh2, 0, 0, fadeC.width, fadeC.height);
+        fg2.globalCompositeOperation = "destination-out";
+        const fd = fg2.createLinearGradient(0, woodY * 0.55, 0, woodY);
+        fd.addColorStop(0, "rgba(0,0,0,0)");
+        fd.addColorStop(1, "rgba(0,0,0,1)");
+        fg2.fillStyle = fd;
+        fg2.fillRect(0, 0, fadeC.width, fadeC.height);
+        g.drawImage(fadeC, 0, 0);
+      }
       // GRANO monocromo (dithering barato) → mata el banding en OLED. Horneado, 0/frame. (T5: tile 128px)
       const gn = 128;
       const nc = document.createElement("canvas");
