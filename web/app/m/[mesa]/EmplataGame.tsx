@@ -108,7 +108,7 @@ const nuevoCtrl = (): CtrlFideo => ({ x1: 0, v1x: 0, y1: 0, v1y: 0, x2: 0, v2x: 
    dispuestos por ángulo áureo. Estructura y forma, foto reproducible. Ver recomputeSlots().
    ========================================================================= */
 const YB = -0.05; // tapa de la CAMA (fracción de boxH; el nido se apoya aquí, cerca del suelo)
-const HM = 0.24; // altura del penacho: 0.24 (subido un pelo de 0.22, menos hundido); NO ≥0.27 o cruza el rim. Las guarniciones se APOYAN sobre
+const HM = 0.265; // altura del penacho: caja COLMADA (el dueño pidió más lleno); NO ≥0.27 o cruza el rim. Las guarniciones se APOYAN sobre
 // la cama (a 0.30 flotaban en una fila alta, con hueco oscuro entre el nido y ellas)
 const FXLIM = 0.37; // límite lateral: 0.30→0.37 abre los flancos (comida a ±95px vs pared ±108)
 const FXENV = 0.42; // soporte de la envolvente: la cúpula no colapsa a la altura del suelo antes del muro
@@ -2014,11 +2014,10 @@ export default function EmplataGame(props: {
       // repetidas del sprite —eso se veía a repetición—.
       for (const p of base) {
         p.fxT = 0;
-        p.ty = -0.075; // sube el nido al VOLUMEN MEDIO del montón (antes YB, plantado abajo):
-        // así su corona sube hasta donde flotaban las guarniciones y cierra el hueco ámbar
+        p.ty = -0.085; // sube el nido al VOLUMEN MEDIO-ALTO: corona visible, caja colmada
         p.depth = 0.55;
         p.rot = 0;
-        setR(p, 1.55); // CAMA (no crecer s: menos riesgo de rebasar el rim trasero)
+        setR(p, 1.58); // CAMA al límite del muro: 1.58×1.34 → semiancho ~101.6 < muro ~103
       }
       // RANK por IDENTIDAD: la posición dependía del orden de PULSACIÓN (quitar un topping
       // movía a otro hasta 123 px). Anclando todo al índice del catálogo, "misma receta,
@@ -2038,13 +2037,13 @@ export default function EmplataGame(props: {
         if (nP === 1) {
           fx = side * 0.18;
           depth = 0.4;
-          sc = 0.66;
+          sc = 0.73; // héroes más generosos (caja colmada)
           rot = side * 0.12;
         } else {
           const t = i / (nP - 1); // 0..1 a lo ancho
-          fx = (t - 0.5) * Math.min(0.42, 0.2 + nP * 0.05); // abanico cerrado: los héroes se rozan
+          fx = (t - 0.5) * Math.min(0.46, 0.22 + nP * 0.06); // abanico un pelo más abierto: cubre los flancos
           depth = 0.34 + (i % 2) * 0.16; // alterna cerca/lejos → escalonado, no fila plana
-          sc = 0.66 - Math.min(i, 4) * 0.03; // las primeras un pelo mayores (jerarquía)
+          sc = 0.73 - Math.min(i, 4) * 0.03; // las primeras un pelo mayores (jerarquía)
           rot = (i % 2 === 0 ? -1 : 1) * 0.12;
         }
         p.fxT = fx;
@@ -2083,7 +2082,7 @@ export default function EmplataGame(props: {
         p.depth = a[1];
         p.ty = moundY(p.fxT, p.depth);
         p.rot = (hash01(p.id + "r") - 0.5) * 0.26; // ±7.4° (era ±28.6°): no gira la luz horneada
-        setR(p, 0.42 + hash01(p.id + "sz") * 0.16); // tamaño variado (0.42-0.58): rompe la fila de piezas iguales
+        setR(p, 0.47 + hash01(p.id + "sz") * 0.16); // tamaño variado (0.47-0.63): generoso, rompe la fila de iguales
       }
       // 1-2 toppings: slots frontales equilibrados (no un flanco vacío). Recalcula ty en la envolvente.
       const DUO: Array<[number, number]> = [[-0.1, 0.34], [0.11, 0.7]]; // juntos e interpenetrados
@@ -2104,7 +2103,7 @@ export default function EmplataGame(props: {
       // colmada que rebosa. Hash-gated (determinista) y con tope duro (−0.073 = TY_SUELO+0.012)
       // para que el gradiente del labio no se lo coma.
       for (const p0 of tops) {
-        if (p0.depth < 0.3 && hash01(p0.id + "spill") < 0.5) {
+        if (p0.depth < 0.3 && hash01(p0.id + "spill") < 0.75) { // 0.5→0.75: rebosa más seguido
           p0.ty = Math.min(-0.073, p0.ty + 0.03);
         }
       }
@@ -2201,7 +2200,7 @@ export default function EmplataGame(props: {
       const { boxW, boxH, boxX, boxY } = geo();
       const cat = ing.categoria;
       if (cat === "base") wd.pila = wd.pila.filter((p) => find(p.id)?.categoria !== "base"); // solo la base reemplaza a la base
-      const sc = cat === "base" ? 1.55 : cat === "proteina" ? 0.66 : 0.48;
+      const sc = cat === "base" ? 1.58 : cat === "proteina" ? 0.73 : 0.53; // sincronizado con recomputeSlots
       const fxDrop = clamp((xScreen - boxX) / boxW, -FXLIM, FXLIM); // desde donde cayó → FLUYE a su slot
       wd.pila.push({ id: ing.id, fx: fxDrop, fxT: fxDrop, fy: YB - 0.05, ty: YB, rot: 0, s: sc, r: radioDe(cat, sc) / boxW, land: 1, depth: 0.5 });
       recomputeSlots(); // EL NIDO decide el lugar determinista por rol + índice
@@ -3391,7 +3390,7 @@ export default function EmplataGame(props: {
           // La base se ensancha un pelo para leerse como porción tendida, no como bola.
           // profundidad REAL: el frente ~1.08, el fondo ~0.78 (spread 38%, antes 12%)
           const sz = SPR * (boxW / BOXW_REF) * p.s * (cp === 0 ? 1.0 : 0.78 + 0.3 * (1 - (p.depth ?? 0.5)));
-          const wideX = cp === 0 ? 1.32 : 1; // la cama llena a lo ancho (semiancho ~98px < muro ~103)
+          const wideX = cp === 0 ? 1.34 : 1; // la cama llena a lo ancho (1.58×1.34: semiancho ~101.6 < muro ~103)
           const prof = clamp((-ly - boxH * 0.02) / (boxH * 0.28), 0, 1); // niebla cálida de profundidad
           ctx.save();
           ctx.scale((1 + sq) * wideX, 1 - sq); // squash ANTES del rotate: aplasta contra el SUELO
@@ -4219,7 +4218,7 @@ export default function EmplataGame(props: {
               vr: (Math.random() - 0.5) * 0.1,
               bounces: 0,
               sc: 0.68, // sale del rizo del fideo (≈ su tamaño colgando)
-              scT: catR === "base" ? 1.55 : catR === "proteina" ? 0.66 : 0.48, // → reposo, sin salto
+              scT: catR === "base" ? 1.58 : catR === "proteina" ? 0.73 : 0.53, // → reposo, sin salto
             });
             wd.fideos.splice(i, 1);
             continue;
