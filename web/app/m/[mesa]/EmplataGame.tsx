@@ -1197,6 +1197,11 @@ export default function EmplataGame(props: {
     glowSoft: null as Off | null, // glow ancho de la luz viva (soft-light), horneado por resize
     glowSpec: null as Off | null, // glow especular que barre la caja (screen), horneado por resize
     wallShadow: null as Off | null, // silueta difusa de la pila sobre la pared trasera (por recompute)
+    // BLOOM del sello: SOLO durante la ceremonia (~1.5s). bloomT corre con dtReal — el reloj
+    // REAL — porque el hit-stop del sello congela wd.ts y el bloom no debe congelarse con él.
+    bloomT: -1, // segundos desde el golpe del sello; -1 = inactivo
+    bloomC: null as Off | null, // capa brillante a ¼ de resolución (por resize)
+    glowDot: null as Off | null, // halo horneado para las chispas (disco radial cálido)
     dotSprite: null as Off | null, // partícula de vapor horneada (dot suave)
     kraftPat: null as CanvasPattern | null, // textura de cartón (fibra + corrugado)
     stamp: null as Off | null, // sello "recién hecho" horneado
@@ -1926,6 +1931,11 @@ export default function EmplataGame(props: {
       };
       world.current.glowSoft = mk(bw * 1.7, [[0, "rgba(255,242,205,0.6)"], [1, "rgba(255,242,205,0)"]]);
       world.current.glowSpec = mk(bw * 1.1, [[0, "rgba(255,246,222,0.14)"], [1, "rgba(255,246,222,0)"]]);
+      world.current.glowDot = mk(32, [[0, "rgba(255,236,190,0.9)"], [0.45, "rgba(255,210,130,0.35)"], [1, "rgba(255,210,130,0)"]]);
+      const bc = document.createElement("canvas");
+      bc.width = Math.max(2, Math.round(W / 4));
+      bc.height = Math.max(2, Math.round(H / 4));
+      world.current.bloomC = bc;
     };
 
     const resize = () => {
@@ -3486,6 +3496,7 @@ export default function EmplataGame(props: {
           wd.selloScaleV = 0;
           wd.selloRot = (Math.random() - 0.5) * 0.2;
           wd.hitStop = 0.09; // ← congela el tiempo del juego 90ms
+          wd.bloomT = 0; // arranca el BLOOM de la ceremonia (corre con dtReal, inmune al hit-stop)
           wd.boxSquash = 1.5;
           wd.ondas.push({ r: 0, life: 1 });
           for (let k = 0; k < 16; k++) {
@@ -4362,6 +4373,39 @@ export default function EmplataGame(props: {
         }
       }
 
+      // ===== BLOOM DEL SELLO — el único momento que se permite post caro (~90 frames). La capa
+      // brillante (halo por chispa + corazón en el lacre) se pinta a ¼ de resolución y se sube
+      // con bilineal + lighter: el ESCALADO es el blur (MDN imageSmoothing). Reloj = dtReal,
+      // no wd.ts: el hit-stop del propio sello congelaría su florecimiento.
+      if (wd.bloomT >= 0) {
+        wd.bloomT += dtReal;
+        if (wd.bloomT > 1.5 || reduce) {
+          if (wd.bloomT > 1.5) wd.bloomT = -1;
+        } else if (wd.bloomC && wd.glowDot) {
+          const env = Math.min(1, wd.bloomT * 7) * Math.pow(Math.max(0, 1 - wd.bloomT / 1.5), 1.5);
+          if (env > 0.02) {
+            const bc = wd.bloomC;
+            const bg2 = bc.getContext("2d")!;
+            bg2.clearRect(0, 0, bc.width, bc.height);
+            const k4 = bc.width / W;
+            const gd = wd.glowDot;
+            for (const ch of wd.chispas) {
+              const r4 = (10 + ch.life * 10) * k4 * 4;
+              bg2.drawImage(gd, ch.x * k4 - r4 / 2, ch.y * k4 - r4 / 2, r4, r4);
+            }
+            // corazón del lacre: un halo grande en el punto del golpe
+            const sx4 = boxXE * k4;
+            const sy4 = (boxY - boxH * 0.06 + entY + focoY) * k4;
+            const rs4 = boxW * 0.5 * k4;
+            bg2.drawImage(gd, sx4 - rs4 / 2, sy4 - rs4 / 2, rs4, rs4);
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = env * 0.8;
+            ctx.drawImage(bc, 0, 0, W, H);
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = 1;
+          }
+        }
+      }
       // ===== LUZ VIVA: el brillo cálido sigue al tilt — que con la cascada SIEMPRE tiene valor
       // (sensor, puntero o autopan). Glows HORNEADOS (cero alloc/frame) y RECORTADOS al rect de
       // la caja: antes eran 2 fills full-screen; ahora ~2 draws sobre <40% de pantalla. El alpha
