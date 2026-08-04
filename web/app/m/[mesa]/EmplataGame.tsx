@@ -42,30 +42,24 @@ const easeOutBack = (t: number) => {
 const bez2 = (a: number, b: number, c: number, t: number) =>
   (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
-/* HOGARES de la mascota: de dónde sale el fideo. Lados + POR ENCIMA de la caja. Tras cada
-   agarre se reubica a otro al azar, así el siguiente agarre nace en un lugar distinto.
-   axf/ayf = offset del ancla (fracción de boxW/boxH desde la base de la caja); up = cuánto se
-   asoma; io = hacia dónde queda el interior de la caja. */
-/* PROTAGONISTA: con cuerpo 12px, gorro y pañuelo, el tallo vuelve a crecer (0.52→0.6) sin leer
-   como palo — la relación queda ~9:1 y la toque corona la silueta. */
-/* ESCALA DE PROTAGONISTA: el estándar de los juegos reales (Cooking Mama, GPGP) es que el
-   personaje ocupe 15-30% de pantalla — a 16px de cabeza estaba un orden de magnitud por
-   debajo. `up` sube ~55% para que asome CABEZA + PECHO, no medio ojo tras el labio. */
-const HOMES = [
-  { axf: -0.42, ayf: -0.3, up: 0.8, io: 1 }, // costado izquierdo
-  { axf: 0.42, ayf: -0.3, up: 0.8, io: -1 }, // costado derecho
-  { axf: 0.0, ayf: -0.52, up: 0.62, io: 0 }, // asoma por ARRIBA (centro)
-  { axf: -0.24, ayf: -0.48, up: 0.7, io: 1 }, // arriba-izquierda
-  { axf: 0.24, ayf: -0.48, up: 0.7, io: -1 }, // arriba-derecha
-];
+/* (Los HOGARES múltiples tras la caja murieron con la Fase 1: el chef vive en SU TARIMA
+   delante-lateral — ver geo().tarimaX/Y — y las entregas salen de ahí vía wd.tarF.) */
 /* Escala del CUERPO del chef en reposo (los personajes de formas simples aguantan ser
    grandes — Kirby/Rayman; el viewport no tiene scroll ni salto que lo impida). */
 const MASC_S = 1.38;
-const otroHome = (cur: number) => {
-  let n = Math.floor(Math.random() * HOMES.length);
-  if (n === cur) n = (n + 1) % HOMES.length;
-  return n;
-};
+
+/* LUZ POR HORA (el sistema de Alto's Adventure, reducido a un lerp de paletas): el menú del
+   almuerzo no se ve como el de la cena. La paleta se decide al CARGAR (una sesión de menú
+   dura minutos) y se hornea/aplica — cero costo por frame. El cielo vive en la VENTANA. */
+const HORA = typeof window === "undefined" ? 12 : new Date().getHours();
+const PAL =
+  HORA >= 6 && HORA < 11
+    ? { cieloA: "#BFE0F0", cieloB: "#F0F4DC", lampGlow: 0.1 } // mañana fresca
+    : HORA >= 11 && HORA < 16
+      ? { cieloA: "#A6D4EE", cieloB: "#F4EFD6", lampGlow: 0.12 } // mediodía
+      : HORA >= 16 && HORA < 19
+        ? { cieloA: "#E8A85C", cieloB: "#F6DFA4", lampGlow: 0.22 } // hora dorada
+        : { cieloA: "#2C3852", cieloB: "#514A6E", lampGlow: 0.36 }; // noche: la lámpara manda
 
 /* Muelle amortiguado 1-D (integrador semi-implícito). Da anticipación/overshoot/follow-through.
    Presets típicos: crítico k=170 c=26 · subamortiguado (juguetón) k=180 c=12 · golpe k=320 c=22. */
@@ -1268,6 +1262,16 @@ export default function EmplataGame(props: {
     lastAct: 0,
     pressed: "",
     bg: null as Off | null, // fondo horneado (crema+luz+mostrador+grano) por resize
+    // ===== LA ESCENA VIVA (Fase 1): ventana al mundo + props con biografía =====
+    venta: { x: 0, y: 0, w: 0, h: 0 }, // rect de la VENTANA (lo fija bakeBg; el cielo/siluetas van vivos)
+    tarF: { axf: 0.55, ayf: 0.36 }, // la TARIMA en fracciones de caja (el frame la publica; las entregas salen de ahí)
+    bocadoTxt: "", // GLOBO de diálogo del chef (Hearthstone: retrato+globo = personaje sin cuerpo)
+    bocadoT0: -9999, // wd.ts del último globo (ventana de 2.8s)
+    introHecho: false, // la ENTRADA TEATRAL ya saludó
+    hablo1: false, // ya celebró el primer ingrediente
+    ventFrame: null as Off | null, // marco de la ventana horneado (se dibuja SOBRE el cielo)
+    lamp: null as Off | null, // lámpara colgante horneada (balancea ±0.5° viva)
+    lampX: 0, // ancla del cable (x); el hombro de rotación es (lampX, 0)
     vig: null as Off | null, // viñeta + velo cálido cacheados por resize
     glowSoft: null as Off | null, // glow ancho de la luz viva (soft-light), horneado por resize
     glowSpec: null as Off | null, // glow especular que barre la caja (screen), horneado por resize
@@ -1370,7 +1374,8 @@ export default function EmplataGame(props: {
       if (navigator.vibrate) navigator.vibrate(10);
       const wd = world.current;
       const m = wd.masc;
-      const h = HOMES[m.home];
+      // el fideo mesero SALE DE LA TARIMA (el puesto fijo del chef): continuidad perfecta
+      const h = wd.tarF;
       wd.fideos.push({
         ing,
         tx: cx,
@@ -1385,8 +1390,6 @@ export default function EmplataGame(props: {
         haxf: h.axf,
         hayf: h.ayf,
       });
-      // reubica la mascota → el SIGUIENTE agarre nacerá en otro lugar (lado distinto o por arriba)
-      m.home = otroHome(m.home);
       m.modeT = wd.t;
     },
     [s],
@@ -1398,7 +1401,9 @@ export default function EmplataGame(props: {
     (ing: Ingrediente, cx: number, cy: number) => {
       const wd = world.current;
       const mm = wd.masc;
-      const hh = HOMES[mm.home];
+      const hh = wd.tarF; // desde la tarima, como todo lo que hace el chef
+      wd.bocadoTxt = "Coraggio..."; // decepción cómica de juez (quitar duele)
+      wd.bocadoT0 = wd.ts;
       wd.pila = wd.pila.filter((p) => p.id !== ing.id);
       wd.resettle = true; // el nido se recompone y los demás fluyen al hueco
       wd.fideos.push({
@@ -1415,7 +1420,6 @@ export default function EmplataGame(props: {
         haxf: hh.axf,
         hayf: hh.ayf,
       });
-      mm.home = otroHome(mm.home);
       mm.modeT = wd.t;
       s.ruido(0.05, 0.04, 1400);
     },
@@ -1609,7 +1613,12 @@ export default function EmplataGame(props: {
          relaciones de aspecto extremas. */
       const baseY = boxY + boxH * 0.39;
       const woodY = clamp(baseY - boxH * 0.12, H * 0.3, H * 0.46);
-      return { U, boxW, boxH, boxX, boxY, baseY, woodY, trayY, cardY, cardW, cardH };
+      /* LA TARIMA DEL CHEF (Fase 1, staging Papa's/Peggle): su puesto FIJO y persistente,
+         delante-lateral — él solapa la esquina frontal de la caja, nunca al revés. En móvil
+         a la derecha (la nota de degustación vive a la izquierda); en ancho igual. */
+      const tarimaX = boxX + boxW * (ancho ? 0.58 : 0.5) + (ancho ? 0 : 8);
+      const tarimaY = baseY + boxH * (ancho ? 0.18 : 0.3);
+      return { U, boxW, boxH, boxX, boxY, baseY, woodY, trayY, cardY, cardW, cardH, tarimaX, tarimaY };
     };
 
     /**
@@ -1966,6 +1975,250 @@ export default function EmplataGame(props: {
         fg2.fillStyle = fd;
         fg2.fillRect(0, 0, fadeC.width, fadeC.height);
         g.drawImage(fadeC, 0, 0);
+      }
+      // ===== ESCENOGRAFÍA (Fase 1 "vida"): props de BORDE con biografía Papaghetti, horneados
+      // TRAS el DOF (nítidos pero sobrios — plano medio estilo Coffee Talk). Regla de la
+      // investigación: props en los bordes, más apagados que la caja; la luz apunta al centro.
+      {
+        const uB = clamp(Math.min(W / 390, H / 700), 1, 2.2);
+        const anchoB = W >= 820;
+        // --- ZÓCALO de azulejos: rompe el "todo crema" y gira la pared hacia la mesa ---
+        const zh = 20 * uB;
+        g.fillStyle = "rgba(196,160,110,0.30)";
+        g.fillRect(0, woodY - zh, W, zh);
+        g.strokeStyle = "rgba(120,84,44,0.22)";
+        g.lineWidth = 1;
+        for (let zx = 0; zx <= W + zh; zx += zh) {
+          g.beginPath();
+          g.moveTo(zx, woodY - zh);
+          g.lineTo(zx, woodY);
+          g.stroke();
+        }
+        g.beginPath();
+        g.moveTo(0, woodY - zh + 0.5);
+        g.lineTo(W, woodY - zh + 0.5);
+        g.stroke();
+        // --- LA VENTANA al mundo (el marco va a un sprite aparte: el CIELO y las siluetas
+        // se pintan VIVOS por frame y el marco cae encima) ---
+        const vw = anchoB ? 104 * uB : 104;
+        const vh = vw * 0.94;
+        const vx = anchoB ? W * 0.085 : 18;
+        const vy = anchoB ? H * 0.085 : 66;
+        world.current.venta = { x: vx, y: vy, w: vw, h: vh };
+        {
+          const vf = document.createElement("canvas");
+          vf.width = Math.ceil(vw + 16);
+          vf.height = Math.ceil(vh + 24);
+          const fgv = vf.getContext("2d")!;
+          fgv.translate(8, 8);
+          // sombra interior del hueco (el cielo queda "detrás del vidrio")
+          fgv.strokeStyle = "rgba(60,38,16,0.35)";
+          fgv.lineWidth = 3;
+          fgv.strokeRect(1.5, 1.5, vw - 3, vh - 3);
+          // marco de madera kraft
+          fgv.strokeStyle = "#B08A54";
+          fgv.lineWidth = 7;
+          fgv.strokeRect(-2.5, -2.5, vw + 5, vh + 5);
+          fgv.strokeStyle = "rgba(255,236,200,0.5)"; // filo iluminado ↖
+          fgv.lineWidth = 1.4;
+          fgv.strokeRect(-5.6, -5.6, vw + 11.2, 1);
+          // travesaños (cruz)
+          fgv.strokeStyle = "#A67E48";
+          fgv.lineWidth = 4;
+          fgv.beginPath();
+          fgv.moveTo(vw / 2, 0);
+          fgv.lineTo(vw / 2, vh);
+          fgv.moveTo(0, vh * 0.46);
+          fgv.lineTo(vw, vh * 0.46);
+          fgv.stroke();
+          // alféizar
+          fgv.fillStyle = "#9C7440";
+          fgv.fillRect(-7, vh + 2, vw + 14, 7);
+          fgv.fillStyle = "rgba(255,236,200,0.3)";
+          fgv.fillRect(-7, vh + 2, vw + 14, 1.6);
+          world.current.ventFrame = vf;
+        }
+        g.fillStyle = "rgba(90,60,30,0.10)"; // sombra de la ventana sobre la pared
+        g.fillRect(vx + 3, vy + vh + 9, vw + 6, 5);
+        // --- REPISA derecha con biografía: "Salsa de la Nonna", parmesano, aceite, albahaca ---
+        const shW = 116 * (anchoB ? uB : 1);
+        const shX2 = W - shW - 14;
+        const shY2 = anchoB ? H * 0.16 : 118;
+        const su = anchoB ? uB : 1; // escala de los objetos de la repisa
+        // tabla + soportes
+        g.fillStyle = "#8A6234";
+        g.fillRect(shX2, shY2, shW, 7 * su);
+        g.fillStyle = "rgba(255,236,200,0.35)";
+        g.fillRect(shX2, shY2, shW, 1.6);
+        g.fillStyle = "#75512A";
+        g.beginPath();
+        g.moveTo(shX2 + 10 * su, shY2 + 7 * su);
+        g.lineTo(shX2 + 22 * su, shY2 + 7 * su);
+        g.lineTo(shX2 + 10 * su, shY2 + 20 * su);
+        g.closePath();
+        g.fill();
+        g.beginPath();
+        g.moveTo(shX2 + shW - 10 * su, shY2 + 7 * su);
+        g.lineTo(shX2 + shW - 22 * su, shY2 + 7 * su);
+        g.lineTo(shX2 + shW - 10 * su, shY2 + 20 * su);
+        g.closePath();
+        g.fill();
+        // frasco "Salsa de la Nonna" (rojo, tapa kraft, etiqueta crema con garabato)
+        const jx = shX2 + 8 * su;
+        const jy = shY2 - 26 * su;
+        g.fillStyle = "#B03A24";
+        g.beginPath();
+        g.roundRect(jx, jy + 6 * su, 20 * su, 20 * su, 3 * su);
+        g.fill();
+        g.fillStyle = "#C9A55E";
+        g.beginPath();
+        g.roundRect(jx + 2 * su, jy, 16 * su, 7 * su, 2 * su);
+        g.fill();
+        g.fillStyle = "rgba(248,238,216,0.92)";
+        g.fillRect(jx + 3 * su, jy + 12 * su, 14 * su, 8 * su);
+        g.strokeStyle = "rgba(90,50,30,0.6)";
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(jx + 5 * su, jy + 15 * su);
+        g.lineTo(jx + 15 * su, jy + 15 * su);
+        g.moveTo(jx + 5 * su, jy + 17.5 * su);
+        g.lineTo(jx + 12 * su, jy + 17.5 * su);
+        g.stroke();
+        // frasco de parmesano (crema, tapa metálica)
+        const px2 = jx + 26 * su;
+        g.fillStyle = "#EFE3C2";
+        g.beginPath();
+        g.roundRect(px2, jy + 9 * su, 16 * su, 17 * su, 3 * su);
+        g.fill();
+        g.fillStyle = "#9FA8AE";
+        g.beginPath();
+        g.roundRect(px2 + 1.5 * su, jy + 4 * su, 13 * su, 6 * su, 2 * su);
+        g.fill();
+        // botella de aceite (alta, ámbar)
+        const ox2 = px2 + 22 * su;
+        g.fillStyle = "rgba(190,140,40,0.9)";
+        g.beginPath();
+        g.roundRect(ox2, jy - 4 * su, 10 * su, 30 * su, 3 * su);
+        g.fill();
+        g.fillStyle = "#6B4A20";
+        g.fillRect(ox2 + 3 * su, jy - 10 * su, 4 * su, 7 * su);
+        g.fillStyle = "rgba(255,244,210,0.45)"; // brillo del vidrio
+        g.fillRect(ox2 + 2 * su, jy - 2 * su, 2 * su, 24 * su);
+        // albahaca en lata de tomates (doble narrativa)
+        const bx2 = ox2 + 16 * su;
+        g.fillStyle = "#C24A30";
+        g.fillRect(bx2, jy + 12 * su, 16 * su, 14 * su);
+        g.fillStyle = "rgba(248,238,216,0.9)";
+        g.fillRect(bx2, jy + 16 * su, 16 * su, 6 * su);
+        g.fillStyle = "#3E7E4A";
+        for (const [lx2, ly2, lr] of [[4, 6, 5.5], [10, 2, 6], [13, 8, 5]] as const) {
+          g.beginPath();
+          g.ellipse(bx2 + lx2 * su, jy + ly2 * su, lr * su, lr * 0.62 * su, -0.5, 0, TAU);
+          g.fill();
+        }
+        g.fillStyle = "#57A063";
+        g.beginPath();
+        g.ellipse(bx2 + 7 * su, jy + 3 * su, 4.5 * su, 3 * su, 0.4, 0, TAU);
+        g.fill();
+        // --- PIZARRA "OGGI" (solo desktop: en móvil la pared ya está vestida) ---
+        if (anchoB) {
+          const pw2 = 96 * uB * 0.9;
+          const ph2 = 120 * uB * 0.9;
+          const pxx = W * 0.815;
+          const pyy = H * 0.3;
+          g.strokeStyle = "rgba(90,60,30,0.5)"; // cuerda al clavo
+          g.lineWidth = 1.4;
+          g.beginPath();
+          g.moveTo(pxx + pw2 * 0.5, pyy - 16);
+          g.lineTo(pxx + pw2 * 0.18, pyy + 4);
+          g.moveTo(pxx + pw2 * 0.5, pyy - 16);
+          g.lineTo(pxx + pw2 * 0.82, pyy + 4);
+          g.stroke();
+          g.fillStyle = "#8A6234"; // marco
+          g.beginPath();
+          g.roundRect(pxx, pyy, pw2, ph2, 6);
+          g.fill();
+          g.fillStyle = "#2E2A24"; // pizarra
+          g.beginPath();
+          g.roundRect(pxx + 6, pyy + 6, pw2 - 12, ph2 - 12, 4);
+          g.fill();
+          g.fillStyle = "rgba(246,240,224,0.9)";
+          g.font = `800 ${Math.round(15 * uB * 0.9)}px system-ui, sans-serif`;
+          g.textAlign = "center";
+          g.fillText("OGGI", pxx + pw2 / 2, pyy + 30 * uB * 0.75);
+          g.strokeStyle = "rgba(246,240,224,0.55)"; // renglones de tiza
+          g.lineWidth = 2;
+          g.beginPath();
+          g.moveTo(pxx + 16, pyy + ph2 * 0.48);
+          g.lineTo(pxx + pw2 - 16, pyy + ph2 * 0.48);
+          g.moveTo(pxx + 16, pyy + ph2 * 0.62);
+          g.lineTo(pxx + pw2 - 24, pyy + ph2 * 0.62);
+          g.stroke();
+          g.fillStyle = "#E8B62A"; // estrellita de la casa
+          g.font = `800 ${Math.round(13 * uB)}px system-ui, sans-serif`;
+          g.fillText("★", pxx + pw2 / 2, pyy + ph2 * 0.84);
+        }
+        // --- HAZ de luz de la ventana hacia la caja (asienta el polvo vivo del frame) ---
+        const hz = g.createLinearGradient(vx + vw, vy + vh * 0.3, W * 0.5, woodY);
+        hz.addColorStop(0, "rgba(255,242,205,0.10)");
+        hz.addColorStop(1, "rgba(255,242,205,0)");
+        g.fillStyle = hz;
+        g.beginPath();
+        g.moveTo(vx + vw * 0.35, vy + vh * 0.15);
+        g.lineTo(vx + vw, vy + vh * 0.55);
+        g.lineTo(W * 0.62, woodY);
+        g.lineTo(W * 0.3, woodY);
+        g.closePath();
+        g.fill();
+        // --- LÁMPARA colgante (sprite aparte: balancea ±0.5° viva) ---
+        const lampW = 56 * su;
+        const lampH = Math.round((anchoB ? H * 0.13 : 92) + 30 * su);
+        const lc = document.createElement("canvas");
+        lc.width = Math.ceil(lampW * 2.6); // margen para el GLOW nocturno
+        lc.height = lampH;
+        const lg = lc.getContext("2d")!;
+        const lcx = lc.width / 2;
+        const cableH = lampH - 30 * su;
+        lg.strokeStyle = "#4A3218";
+        lg.lineWidth = 2.2;
+        lg.beginPath();
+        lg.moveTo(lcx, 0);
+        lg.lineTo(lcx, cableH);
+        lg.stroke();
+        // glow del bombillo (fuerza por hora: de día casi nada, de noche manda)
+        const lgl = lg.createRadialGradient(lcx, cableH + 16 * su, 2, lcx, cableH + 16 * su, lampW * 1.2);
+        lgl.addColorStop(0, `rgba(255,214,140,${PAL.lampGlow})`);
+        lgl.addColorStop(1, "rgba(255,214,140,0)");
+        lg.fillStyle = lgl;
+        lg.fillRect(0, 0, lc.width, lc.height);
+        // pantalla trapecio
+        lg.fillStyle = "#7A4A22";
+        lg.beginPath();
+        lg.moveTo(lcx - 6 * su, cableH);
+        lg.lineTo(lcx + 6 * su, cableH);
+        lg.lineTo(lcx + 17 * su, cableH + 14 * su);
+        lg.lineTo(lcx - 17 * su, cableH + 14 * su);
+        lg.closePath();
+        lg.fill();
+        lg.fillStyle = "rgba(255,236,200,0.35)";
+        lg.beginPath();
+        lg.moveTo(lcx - 6 * su, cableH);
+        lg.lineTo(lcx - 3 * su, cableH);
+        lg.lineTo(lcx - 12 * su, cableH + 14 * su);
+        lg.lineTo(lcx - 17 * su, cableH + 14 * su);
+        lg.closePath();
+        lg.fill();
+        // bombillo cálido
+        lg.fillStyle = "#FFD98C";
+        lg.beginPath();
+        lg.arc(lcx, cableH + 17 * su, 5.5 * su, 0, TAU);
+        lg.fill();
+        lg.fillStyle = "rgba(255,255,240,0.85)";
+        lg.beginPath();
+        lg.arc(lcx - 1.5 * su, cableH + 15.5 * su, 2 * su, 0, TAU);
+        lg.fill();
+        world.current.lamp = lc;
+        world.current.lampX = anchoB ? W * 0.63 : W * 0.55; // separada de la repisa, sobre la caja
       }
       // GRANO monocromo (dithering barato) → mata el banding en OLED. Horneado, 0/frame. (T5: tile 128px)
       const gn = 128;
@@ -2428,6 +2681,18 @@ export default function EmplataGame(props: {
       // el FIDEO reacciona: modo de gesto temático (crunch-nod / sniff / bounce / bow)
       wd.reactMode = esPrem ? 11 : rasgo === "cro" ? 8 : rasgo === "fre" ? 9 : 10;
       wd.reactT = wd.t;
+      // EL CHEF-JUEZ habla (Cooking Mama: evaluar con emoción es la gamificación más barata)
+      if (!wd.hablo1) {
+        wd.hablo1 = true;
+        wd.bocadoTxt = "¡Bravissimo!";
+        wd.bocadoT0 = wd.ts;
+      } else if (esPrem) {
+        wd.bocadoTxt = "¡Mamma mia!";
+        wd.bocadoT0 = wd.ts;
+      } else if (wd.combo >= 3) {
+        wd.bocadoTxt = "¡Che meraviglia!";
+        wd.bocadoT0 = wd.ts;
+      }
     };
 
     // ---------- input: tap vs drag de bandeja ----------
@@ -2951,17 +3216,36 @@ export default function EmplataGame(props: {
       ctx.fill();
       ctx.fillStyle = "rgba(120,95,60,0.25)"; // sombra de contacto del gorro sobre la frente
       ctx.fillRect(-5.2, -5.0, 10.4, 0.9);
-      // el globo de la toque (tres nubes)
-      ctx.fillStyle = "#FFFDF6";
-      ctx.beginPath();
-      ctx.arc(-3.4, -10.2, 3.4, 0, TAU);
-      ctx.arc(0, -12, 4.1, 0, TAU);
-      ctx.arc(3.4, -10.2, 3.4, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = "rgba(200,180,140,0.28)"; // pliegue del globo contra la banda
-      ctx.beginPath();
-      ctx.ellipse(0, -8.9, 4.6, 1.1, 0, 0, TAU);
-      ctx.fill();
+      if (sleepy > 0.9) {
+        // GORRO DE DORMIR (Neko Atsume: el sueño es contenido) — cono caído + pompón rojo
+        ctx.fillStyle = "#EFE6CE";
+        ctx.beginPath();
+        ctx.moveTo(-5, -7.8);
+        ctx.quadraticCurveTo(-2.5, -15, 6.2, -12.8);
+        ctx.quadraticCurveTo(7.6, -9.8, 4.8, -7.8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "rgba(200,180,140,0.3)";
+        ctx.beginPath();
+        ctx.ellipse(-0.2, -8.4, 4.4, 1, 0.06, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = "#C8321E"; // pompón
+        ctx.beginPath();
+        ctx.arc(6.9, -12.9, 2, 0, TAU);
+        ctx.fill();
+      } else {
+        // el globo de la toque (tres nubes)
+        ctx.fillStyle = "#FFFDF6";
+        ctx.beginPath();
+        ctx.arc(-3.4, -10.2, 3.4, 0, TAU);
+        ctx.arc(0, -12, 4.1, 0, TAU);
+        ctx.arc(3.4, -10.2, 3.4, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = "rgba(200,180,140,0.28)"; // pliegue del globo contra la banda
+        ctx.beginPath();
+        ctx.ellipse(0, -8.9, 4.6, 1.1, 0, 0, TAU);
+        ctx.fill();
+      }
       // pañuelo rojo de chef: NUDO bajo el mentón, la punta cuelga con la GRAVEDAD (además
       // tapa la costura cabeza-cuerpo, que antes quedaba a la vista)
       ctx.fillStyle = "#C8321E";
@@ -3115,7 +3399,9 @@ export default function EmplataGame(props: {
       wd.tiltX += (tiltTX - wd.tiltX) * (1 - Math.pow(0.9, df));
       wd.tiltY += (tiltTY - wd.tiltY) * (1 - Math.pow(0.9, df));
       wd.trauma = Math.max(0, wd.trauma - 1.8 * dtReal); // el trauma decae LINEAL (~0.55s de 1→0)
-      const { U, boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH } = geo();
+      const { U, boxW, boxH, boxX, boxY, trayY, cardY, cardW, cardH, tarimaX, tarimaY } = geo();
+      wd.tarF.axf = (tarimaX - boxX) / boxW; // publica la tarima para las entregas (callbacks)
+      wd.tarF.ayf = (tarimaY - 2 - (boxY + boxH * 0.32)) / boxH;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       // sacudida de escena (crocante) — decae; se suma a la caja y la mascota (no al fondo)
       wd.shake *= Math.pow(0.72, df);
@@ -3135,6 +3421,172 @@ export default function EmplataGame(props: {
       else {
         ctx.fillStyle = "#F6E7CB";
         ctx.fillRect(0, 0, W, H);
+      }
+      // ===== LA VENTANA VIVA (Coffee Talk): cielo por hora + siluetas que cruzan =====
+      const vv = wd.venta;
+      if (vv.w > 0) {
+        const skg = ctx.createLinearGradient(0, vv.y, 0, vv.y + vv.h);
+        skg.addColorStop(0, PAL.cieloA);
+        skg.addColorStop(1, PAL.cieloB);
+        ctx.fillStyle = skg;
+        ctx.fillRect(vv.x, vv.y, vv.w, vv.h);
+        // colina lejana + antena (que el vidrio dé a ALGÚN lado)
+        ctx.fillStyle = "rgba(70,54,40,0.28)";
+        ctx.beginPath();
+        ctx.moveTo(vv.x, vv.y + vv.h);
+        ctx.quadraticCurveTo(vv.x + vv.w * 0.35, vv.y + vv.h * 0.68, vv.x + vv.w, vv.y + vv.h * 0.86);
+        ctx.lineTo(vv.x + vv.w, vv.y + vv.h);
+        ctx.closePath();
+        ctx.fill();
+        // SILUETA cruzando cada ~31s (determinista por ciclo; entra y sale por los bordes,
+        // lenta — la regla de cadencia de Animal Crossing)
+        if (!reduce) {
+          const CICLO = 31;
+          const ci = Math.floor(wd.ts / CICLO);
+          const phS = (wd.ts - ci * CICLO) / 4.6;
+          if (phS < 1 && phS > 0 && hash01(`sil|${ci}`) < 0.85) {
+            const tipo = Math.floor(hash01(`tipo|${ci}`) * 3);
+            const dirS = hash01(`dir|${ci}`) < 0.5 ? 1 : -1;
+            const sx0 = vv.x + (dirS > 0 ? phS : 1 - phS) * vv.w;
+            const syb = vv.y + vv.h * 0.8;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(vv.x, vv.y, vv.w, vv.h);
+            ctx.clip();
+            ctx.fillStyle = "rgba(56,42,30,0.4)";
+            if (tipo === 0) {
+              // vespa: cuerpo + ruedas + repartidor con caja
+              ctx.beginPath();
+              ctx.ellipse(sx0, syb - 7, 11, 5, 0, 0, TAU);
+              ctx.arc(sx0 - 7 * dirS, syb, 3.6, 0, TAU);
+              ctx.arc(sx0 + 8 * dirS, syb, 3.6, 0, TAU);
+              ctx.arc(sx0 - 2 * dirS, syb - 15, 4, 0, TAU);
+              ctx.fill();
+              ctx.fillRect(sx0 - 10 * dirS - 3, syb - 16, 6, 5); // la cajita atrás
+            } else if (tipo === 1) {
+              // perro callejero trotando
+              ctx.beginPath();
+              ctx.ellipse(sx0, syb - 4, 8, 3.6, 0, 0, TAU);
+              ctx.arc(sx0 + 8 * dirS, syb - 6.5, 2.8, 0, TAU);
+              ctx.fill();
+              ctx.fillRect(sx0 - 5, syb - 2, 1.6, 4.5);
+              ctx.fillRect(sx0 + 4, syb - 2, 1.6, 4.5);
+              // cola feliz
+              ctx.beginPath();
+              ctx.moveTo(sx0 - 8 * dirS, syb - 6);
+              ctx.lineTo(sx0 - 11 * dirS, syb - 10 + Math.sin(wd.ts * 9) * 1.6);
+              ctx.lineWidth = 1.6;
+              ctx.strokeStyle = "rgba(56,42,30,0.4)";
+              ctx.stroke();
+            } else {
+              // señora con bolsa de mercado
+              ctx.beginPath();
+              ctx.ellipse(sx0, syb - 8, 4.4, 7.5, 0, 0, TAU);
+              ctx.arc(sx0, syb - 18, 3.2, 0, TAU);
+              ctx.fill();
+              ctx.fillRect(sx0 + 5 * dirS - 2, syb - 7, 4.5, 5.5);
+            }
+            ctx.restore();
+          }
+        }
+        if (wd.ventFrame) ctx.drawImage(wd.ventFrame, vv.x - 8, vv.y - 8);
+      }
+      // ===== BANDERINES Italia+Colombia ondeando (seno 7s, amplitud 2.5px — bajo el umbral
+      // periférico; en reduce-motion quedan quietos en fase fija) =====
+      {
+        const by0 = 34 * U; // bajo el header DOM, sobre la ventana
+        const by1 = 58 * U;
+        ctx.strokeStyle = "rgba(90,60,30,0.55)";
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(-6, by0);
+        ctx.quadraticCurveTo(W * 0.5, by1 + 14 * U, W + 6, by0 * 1.3);
+        ctx.stroke();
+        const BCOL = ["#3E8E5A", "#F2E7CE", "#C8321E", "#E8B62A", "#2C5F8A", "#C8321E"];
+        for (let bi = 0; bi < 9; bi++) {
+          const tB = (bi + 0.5) / 9;
+          const mtB = 1 - tB;
+          const bxp = mtB * mtB * -6 + 2 * mtB * tB * (W * 0.5) + tB * tB * (W + 6);
+          const byp = mtB * mtB * by0 + 2 * mtB * tB * (by1 + 14 * U) + tB * tB * by0 * 1.3;
+          const wv = reduce ? 0 : Math.sin((TAU * wd.ts) / 7 + bi * 1.1) * 2.5;
+          ctx.fillStyle = BCOL[bi % 6];
+          ctx.beginPath();
+          ctx.moveTo(bxp - 7 * U, byp);
+          ctx.lineTo(bxp + 7 * U, byp);
+          ctx.lineTo(bxp + wv * 0.4, byp + 15 * U + wv);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+      // ===== PIRÁMIDE DE EVENTOS (cadencia Animal Crossing): cada ~3.5 min pasa ALGO
+      // grande — un gato se sienta en la ventana o la lámpara parpadea. Y cada ~5 min,
+      // el SECRETO que jamás se anuncia: una hormiguita cruza el zócalo. =====
+      let lampFlick = 1;
+      if (!reduce) {
+        const EV = 208;
+        const ei = Math.floor(wd.ts / EV);
+        const evT = wd.ts - ei * EV;
+        if (ei > 0 && evT < 9) {
+          if (hash01(`ev|${ei}`) < 0.55 && vv.w > 0) {
+            // GATO en la ventana: se sienta, la cola ondea, y se va
+            const aG = Math.min(1, evT * 2) * Math.min(1, (9 - evT) * 2);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(vv.x, vv.y, vv.w, vv.h);
+            ctx.clip();
+            ctx.globalAlpha = aG;
+            ctx.fillStyle = "rgba(50,38,28,0.55)";
+            const gx = vv.x + vv.w * (hash01(`gx|${ei}`) < 0.5 ? 0.26 : 0.72);
+            const gy = vv.y + vv.h * 0.8;
+            ctx.beginPath();
+            ctx.ellipse(gx, gy - 7, 7.5, 8.5, 0, 0, TAU); // cuerpo sentado
+            ctx.arc(gx, gy - 17, 4.6, 0, TAU); // cabeza
+            ctx.fill();
+            ctx.beginPath(); // orejas
+            ctx.moveTo(gx - 4.2, gy - 19.5);
+            ctx.lineTo(gx - 2.4, gy - 24);
+            ctx.lineTo(gx - 0.6, gy - 20.5);
+            ctx.moveTo(gx + 4.2, gy - 19.5);
+            ctx.lineTo(gx + 2.4, gy - 24);
+            ctx.lineTo(gx + 0.6, gy - 20.5);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(50,38,28,0.55)"; // la cola ondea
+            ctx.lineWidth = 2.2;
+            ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(gx + 6, gy - 2);
+            ctx.quadraticCurveTo(gx + 13, gy - 6 + Math.sin(wd.ts * 1.8) * 2.5, gx + 11, gy - 13 + Math.sin(wd.ts * 1.4) * 2);
+            ctx.stroke();
+            ctx.restore();
+          } else if (evT < 0.9) {
+            // parpadeo de lámpara (0.9s de titileo)
+            lampFlick = 0.55 + 0.45 * Math.abs(Math.sin(wd.ts * 26));
+          }
+        }
+        // EL SECRETO: la hormiguita del zócalo (~5 min; nunca se anuncia)
+        const HG = 301;
+        const hi2 = Math.floor(wd.ts / HG);
+        const hgT = wd.ts - hi2 * HG;
+        if (hi2 > 0 && hgT < 11) {
+          const hDir = hash01(`hg|${hi2}`) < 0.5 ? 1 : -1;
+          const hx2 = hDir > 0 ? (hgT / 11) * W : W - (hgT / 11) * W;
+          const hy2 = geo().woodY - 3 - Math.abs(Math.sin(hgT * 14)) * 0.8; // trotecito
+          ctx.fillStyle = "rgba(40,26,14,0.6)";
+          ctx.beginPath();
+          ctx.arc(hx2, hy2, 1.1, 0, TAU);
+          ctx.arc(hx2 - hDir * 2, hy2 + 0.3, 0.85, 0, TAU);
+          ctx.fill();
+        }
+      }
+      // lámpara colgante: balanceo casi imperceptible (±0.5°, 8.3s) + parpadeo de evento
+      if (wd.lamp) {
+        ctx.save();
+        ctx.globalAlpha = lampFlick;
+        ctx.translate(wd.lampX, 0);
+        ctx.rotate(reduce ? 0 : Math.sin((TAU * wd.ts) / 8.3) * 0.0095);
+        ctx.drawImage(wd.lamp, -wd.lamp.width / 2, 0);
+        ctx.restore();
+        ctx.globalAlpha = 1;
       }
       // motas de polvo flotando en el haz de luz (única capa viva del fondo)
       if (!reduce) {
@@ -3231,25 +3683,63 @@ export default function EmplataGame(props: {
         ctx.restore();
       }
 
-      // ===== LA MASCOTA — el fideo SIEMPRE presente. Vive a un lado de la caja (hogar fijo) y
-      // se mueve CONSTANTEMENTE por 8 modos aleatorios. Se dibuja ANTES de la caja → SALE DE
-      // DETRÁS (la caja ocluye su base). Solo se oculta durante una acción o el plegado.
-      if (faseRef.current === "arma" && wd.fideos.length === 0 && wd.vuelos.length === 0 && !wd.folding) {
+      // ===== EL CHEF EN SU TARIMA (Fase 1, "upstage blocking" resuelto): puesto FIJO
+      // delante-lateral. Se define aquí (todas sus variables ya existen) pero se INVOCA
+      // DESPUÉS de la caja → él solapa a la caja, nunca al revés. La tarima persiste
+      // incluso cuando el chef sale a repartir (los anclas no desaparecen).
+      const dibujaChef = () => {
+      if (faseRef.current !== "arma" || wd.folding) return;
+      {
+        // la TARIMA (cajón de madera): SIEMPRE visible en arma — el hogar no parpadea
+        const twd = 46 * MASC_S;
+        const thg = 26 * MASC_S;
+        const txp = tarimaX + shX;
+        const typ = tarimaY + shY;
+        ctx.fillStyle = "rgba(30,16,6,0.3)"; // sombra de contacto en la mesa
+        ctx.beginPath();
+        ctx.ellipse(txp, typ + thg, twd * 0.62, 5, 0, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = "#7A5228"; // cuerpo del cajón
+        ctx.beginPath();
+        ctx.roundRect(txp - twd / 2, typ, twd, thg, 3);
+        ctx.fill();
+        ctx.fillStyle = "rgba(30,16,6,0.28)"; // ranuras de listones
+        ctx.fillRect(txp - twd / 2 + 5, typ + 7, twd - 10, 2.2);
+        ctx.fillRect(txp - twd / 2 + 5, typ + 15, twd - 10, 2.2);
+        ctx.fillStyle = "#94683A"; // tapa superior iluminada
+        ctx.beginPath();
+        ctx.roundRect(txp - twd / 2 - 2.5, typ - 4.5, twd + 5, 7, 2.5);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,236,200,0.35)";
+        ctx.fillRect(txp - twd / 2 - 2.5, typ - 4.5, twd + 5, 1.6);
+      }
+      if (wd.fideos.length === 0 && wd.vuelos.length === 0 && wd.t > 76) {
         const m = wd.masc;
-        const mby = boxY + boxH * 0.32 + entY + focoY; // base de la caja en pantalla
-        const h = HOMES[m.home];
-        const ax = boxX + h.axf * boxW + shX; // hogar actual (lado o por encima de la caja)
-        const ay = mby + h.ayf * boxH + shY;
-        /* CLAMP en px: `up` escalaba con boxH y en desktop (caja ~2×) el chef se estiraba a
-           palo GIGANTE de medio metro. El personaje tiene UNA talla; la caja no lo estira. */
-        const up = Math.min(boxH * h.up, 168);
+        const ax = tarimaX + shX; // el chef vive SOBRE su tarima
+        const ay = tarimaY + shY - 2;
+        const up = Math.min(boxH * 0.75, 168); // talla fija de personaje (la caja no lo estira)
         if (!m.init) {
+          // ENTRADA TEATRAL (Peggle/Mario 64): aparece EN la boca de la caja recién abierta
+          // y el muelle lo lleva de un salto a su tarima — luego saluda y se presenta
           m.init = true;
-          m.hx = ax;
-          m.hy = ay - up * 0.6;
-          m.h1x = m.h2x = ax;
+          m.hx = boxX + shX;
+          m.hy = boxY - boxH * 0.06;
+          m.hvy = -180; // impulso del salto
+          m.sq = 0.5;
+          m.h1x = m.h2x = m.hx;
           m.h1y = m.h2y = m.hy + 20;
+          m.mode = 4; // aterriza saludando
           m.modeT = wd.t;
+          m.dur = 110;
+          s.tone(620, 0.1, "triangle", 0.05, 1240); // ¡allá va!
+        }
+        // el saludo de bienvenida, una sola vez, cuando ya aterrizó
+        if (!wd.introHecho && wd.t > 132) {
+          wd.introHecho = true;
+          wd.bocadoTxt = "¡Benvenuto a Papaghetti!";
+          wd.bocadoT0 = wd.ts;
+          s.tone(784, 0.08, "triangle", 0.05);
+          s.tone(1046, 0.1, "triangle", 0.045, undefined, 0.07);
         }
         // REACCIÓN por sabor: al aterrizar un ingrediente, el fideo hace un gesto temático
         const react = wd.reactMode >= 0 && wd.t - wd.reactT < 48;
@@ -3262,9 +3752,11 @@ export default function EmplataGame(props: {
           m.modeT = wd.t;
           m.dur = 900;
         } else if (!react && inact > 40 && m.mode === 14 && wd.t - m.modeT > 500) {
-          m.mode = 15; // cuarta pared: "¿emplatamos?"
+          m.mode = 15; // cuarta pared: despierta, mira a cámara y PREGUNTA
           m.modeT = wd.t;
           m.dur = 120;
+          wd.bocadoTxt = "¿Emplatamos?";
+          wd.bocadoT0 = wd.ts;
         } else if (wd.t - m.modeT > m.dur && !react && wd.ts - m.caressAt > 0.4) {
           // (mientras lo ACARICIAN no se muda ni cambia de gesto: se queda a gusto — Nintendogs)
           let nm = Math.floor(Math.random() * 9); // 0-7 clásicos + CATA de la cuchara
@@ -3275,11 +3767,11 @@ export default function EmplataGame(props: {
           // SERENIDAD: gestos más largos y menos mudanzas — un maestro no se agita; antes
           // cambiaba de ánimo cada ~1.5s y leía como frenético ("se enloquece")
           m.dur = nm === 12 ? 82 + Math.random() * 20 : 95 + Math.random() * 150; // ~1.6-4s por modo
-          if (Math.random() < 0.16) m.home = otroHome(m.home); // se muda de vez en cuando
+          // (ya no se muda: su tarima es SU puesto — los anclas no desaparecen)
         }
         const em = react ? wd.reactMode : m.mode;
         const age = react ? wd.t - wd.reactT : wd.t - m.modeT;
-        const io = h.io; // hacia la caja
+        const io = tarimaX > boxX ? -1 : 1; // hacia la caja
         let tx = ax;
         let ty = ay - up;
         let pupil = 0.4;
@@ -3322,10 +3814,10 @@ export default function EmplataGame(props: {
               ty = ay - up * 1.02;
               pupil = 0.45;
               break;
-            case 7: // esconderse tras la caja y reasomar
-              ty = ay - up * (age < m.dur * 0.45 ? 0.1 : 0.95);
-              tx = ax;
-              pupil = 0.4;
+            case 7: // inspeccionar su caja de cerca (el maestro revisa el emplatado)
+              tx = ax + io * boxW * 0.2;
+              ty = ay - up * (0.62 + 0.04 * Math.sin(age * 0.09));
+              pupil = 1.25;
               break;
             // ---- gestos de REACCIÓN por sabor ----
             case 8: // crocante: asiente con fuerza (crunch-nod)
@@ -3426,7 +3918,7 @@ export default function EmplataGame(props: {
         // donde el cuerpo YA no estaba. Ahora viven en el marco {bu (eje cabeza→base), pu
         // (perpendicular)}: se inclinan CON él. Pose por defecto = manos entrelazadas al
         // frente del pecho — la postura del maître, la señal "profesional" más barata.
-        const lat = io === 0 ? 1 : io;
+        const lat = io; // en la tarima siempre hay un "lado hacia la caja"
         /* El "pecho" NO es un punto de la cuerda cabeza→base: el cuerpo es una CURVA, y al
            doblarse el punto de la cuerda queda en el aire (manos huérfanas flotando). Se usa
            el punto REAL del spline del último dibujo (fx0/fy0 quedan poblados del frame
@@ -3610,7 +4102,71 @@ export default function EmplataGame(props: {
           }
           ctx.globalAlpha = 1;
         }
+        // DORMIR EN ESCENA (Neko Atsume: el sueño es contenido): manta-servilleta a
+        // cuadros sobre el cuerpo y burbuja de moco que respira
+        if (em === 14) {
+          const mtx = (ax + m.hx) / 2;
+          const mty = (ay + m.hy) / 2 + 8;
+          ctx.save();
+          ctx.translate(mtx, mty);
+          ctx.rotate(Math.atan2(ay - m.hy, ax - m.hx) - Math.PI / 2 + 0.06);
+          ctx.fillStyle = "rgba(238,224,196,0.94)"; // servilleta
+          ctx.beginPath();
+          ctx.roundRect(-15 * MS, -16 * MS, 30 * MS, 30 * MS, 4 * MS);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(200,50,30,0.4)"; // cuadros de trattoria
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          for (let gq = -1; gq <= 1; gq++) {
+            ctx.moveTo(gq * 9 * MS, -16 * MS);
+            ctx.lineTo(gq * 9 * MS, 14 * MS);
+            ctx.moveTo(-15 * MS, gq * 9 * MS);
+            ctx.lineTo(15 * MS, gq * 9 * MS);
+          }
+          ctx.stroke();
+          ctx.restore();
+          // burbuja de moco (infla y desinfla con la respiración)
+          const bre = 0.5 + 0.5 * Math.sin(TAU * 0.26 * wd.ts + 5);
+          ctx.fillStyle = "rgba(210,232,240,0.75)";
+          ctx.beginPath();
+          ctx.arc(m.hx - io * 8 * MS, m.hy + 5 * MS, (2.2 + bre * 2.6) * MS, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = "rgba(255,255,255,0.8)";
+          ctx.beginPath();
+          ctx.arc(m.hx - io * 8 * MS - 1.4, m.hy + 4 * MS, 1 * MS, 0, TAU);
+          ctx.fill();
+        }
+        // ===== GLOBO DE DIÁLOGO (Hearthstone): papel crema, cola a la cabeza, 2.8s =====
+        if (wd.ts - wd.bocadoT0 < 2.8 && wd.bocadoTxt) {
+          const bt = wd.ts - wd.bocadoT0;
+          const aB = Math.min(1, bt * 6) * Math.min(1, (2.8 - bt) * 3);
+          ctx.font = fontD(12.5, 800);
+          const twB = ctx.measureText(wd.bocadoTxt).width;
+          const bwB = twB + 20;
+          const bxB = clamp(m.hx - io * 14, bwB / 2 + 6, W - bwB / 2 - 6);
+          const byB = m.hy - 46 * MS;
+          ctx.globalAlpha = aB;
+          ctx.fillStyle = "#FFFDF4";
+          ctx.beginPath();
+          ctx.roundRect(bxB - bwB / 2, byB - 14, bwB, 28, 14);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(90,60,30,0.5)";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+          ctx.beginPath(); // colita hacia la cabeza
+          ctx.moveTo(bxB - 5, byB + 13);
+          ctx.lineTo(m.hx, m.hy - 17 * MS);
+          ctx.lineTo(bxB + 9, byB + 12);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#4A2E14";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(wd.bocadoTxt, bxB, byB + 0.5);
+          ctx.globalAlpha = 1;
+        }
       }
+      };
 
       ctx.save();
       ctx.translate(boxXE + shX, boxY + boxH * 0.32 + entY + focoY + shY);
@@ -5069,8 +5625,12 @@ export default function EmplataGame(props: {
         }
       }
 
-      // ===== EL FIDEO MESERO — sale DESDE LA MASCOTA (su posición actual, su hogar), no del
-      // centro de la caja: se estira desde donde estaba, agarra la carta y vuelve a emplatar. =====
+      // EL CHEF, POR DELANTE DE LA CAJA Y DE LA UI (z-order de protagonista): definido
+      // arriba (sus variables nacen antes), invocado aquí — él ocluye, nunca es ocluido
+      dibujaChef();
+
+      // ===== EL FIDEO MESERO — sale DESDE LA TARIMA (el puesto del chef), agarra la carta
+      // y vuelve a emplatar: continuidad perfecta chef→mesero. =====
       const mby2 = boxY + boxH * 0.32 + entY + focoY;
       const mouthYBase = boxY - boxH * 0.34; // punto de SOLTADO: encima de la caja (el item cae dentro)
       for (let i = wd.fideos.length - 1; i >= 0; i--) {
