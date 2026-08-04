@@ -56,7 +56,7 @@ export default function LogoMedia({
           muted
           loop
           playsInline
-          preload="metadata"
+          preload="none"
           poster="/logo-poster.jpg"
           aria-label="Papaghetti"
         >

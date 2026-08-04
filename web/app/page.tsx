@@ -16,8 +16,11 @@ import StickyPedir from "@/components/StickyPedir";
 import { DividerHebra } from "@/components/Hebra";
 import { getCatalog } from "@/lib/catalog";
 
-// Lee del "cerebro" en cada request → los cambios del admin se reflegan en vivo.
-export const dynamic = "force-dynamic";
+/* ESTÁTICO + revalidación on-demand (auditoría de optimización): force-dynamic cobraba
+   ~700ms de TTFB por visita (función por request, cold starts de hasta 2.5s en Hobby)
+   para leer un catálogo que solo cambia cuando NUESTRO admin guarda — y `reflejar()`
+   en app/admin/actions.ts ya llama revalidatePath("/") en cada mutación. El landing
+   ahora se sirve del CDN (TTFB 20-80ms) y se regenera al editar el admin. */
 
 function Divider({ color }: { color?: "oro" | "pomodoro" }) {
   return (

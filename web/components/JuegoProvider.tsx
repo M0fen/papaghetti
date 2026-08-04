@@ -10,10 +10,21 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import type { Ajustes, Ingrediente } from "@/lib/menu";
 import { TOPPINGS_INCLUIDOS } from "@/lib/menu";
-import EmplataGame from "@/app/m/[mesa]/EmplataGame";
-import "@/app/m/[mesa]/emplata.css";
+
+/* PEREZOSO (auditoría): el juego NO viaja en el JS inicial del landing — su chunk
+   (juego + CSS) se descarga al abrir. ssr:false: es Canvas puro, no tiene HTML útil. */
+const EmplataGame = dynamic(() => import("./JuegoCanvas"), {
+  ssr: false,
+  loading: () => (
+    <div className="enreda-cargando" role="status" aria-label="Preparando la cocina">
+      <span className="enreda-cargando__hebra" aria-hidden />
+      Calentando la olla…
+    </div>
+  ),
+});
 
 export interface Precarga {
   baseId: string;

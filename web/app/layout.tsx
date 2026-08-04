@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Manrope } from "next/font/google";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 /* Display: FRAUNCES variable (ejes SOFT/WONK/opsz) — diseñada sobre Windsor/Cooper,
@@ -14,11 +15,11 @@ const display = Fraunces({
   display: "swap",
 });
 
-// Cuerpo/UI: Manrope (stand-in libre de Satoshi/General Sans)
+/* Cuerpo/UI: Manrope VARIABLE — un solo woff2 (~40KB) en vez de 5 instancias
+   estáticas (~70KB). Mismos pesos disponibles (200-800), menos critical path. */
 const body = Manrope({
   variable: "--font-body",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
   display: "swap",
 });
 
@@ -62,7 +63,12 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es-CO" className={`${display.variable} ${body.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* RUM real de clientes (gratis en Hobby, 10K puntos/mes): LCP/INP de campo
+            en los teléfonos colombianos de verdad — la brújula de toda optimización */}
+        <SpeedInsights />
+      </body>
     </html>
   );
 }
