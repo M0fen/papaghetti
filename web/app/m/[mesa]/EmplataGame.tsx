@@ -28,6 +28,7 @@ import {
   type TipoServicio,
 } from "@/lib/menu";
 import { calcularTotales, faltaParaMinimo } from "@/lib/precios";
+import { creaPostFx } from "./postfx";
 import { EJES, perfilDe, rasgoDominante, saborDe, tituloAntojo, type Sabor } from "@/lib/sabor";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { useSonido } from "./sonido";
@@ -2143,20 +2144,181 @@ export default function EmplataGame(props: {
           g.roundRect(pxx + 6, pyy + 6, pw2 - 12, ph2 - 12, 4);
           g.fill();
           g.fillStyle = "rgba(246,240,224,0.9)";
-          g.font = `800 ${Math.round(15 * uB * 0.9)}px system-ui, sans-serif`;
+          g.font = `800 ${Math.round(14 * uB * 0.9)}px system-ui, sans-serif`;
           g.textAlign = "center";
-          g.fillText("OGGI", pxx + pw2 / 2, pyy + 30 * uB * 0.75);
-          g.strokeStyle = "rgba(246,240,224,0.55)"; // renglones de tiza
+          g.fillText("HOY", pxx + pw2 / 2, pyy + 28 * uB * 0.75);
+          g.font = `800 ${Math.round(9.5 * uB * 0.9)}px system-ui, sans-serif`;
+          g.fillStyle = "rgba(246,240,224,0.8)"; // el concepto de la casa, en tiza
+          g.fillText("PAPA & PASTA", pxx + pw2 / 2, pyy + ph2 * 0.52);
+          g.strokeStyle = "rgba(246,240,224,0.5)";
           g.lineWidth = 2;
           g.beginPath();
-          g.moveTo(pxx + 16, pyy + ph2 * 0.48);
-          g.lineTo(pxx + pw2 - 16, pyy + ph2 * 0.48);
-          g.moveTo(pxx + 16, pyy + ph2 * 0.62);
-          g.lineTo(pxx + pw2 - 24, pyy + ph2 * 0.62);
+          g.moveTo(pxx + 18, pyy + ph2 * 0.66);
+          g.lineTo(pxx + pw2 - 18, pyy + ph2 * 0.66);
           g.stroke();
           g.fillStyle = "#E8B62A"; // estrellita de la casa
           g.font = `800 ${Math.round(13 * uB)}px system-ui, sans-serif`;
           g.fillText("★", pxx + pw2 / 2, pyy + ph2 * 0.84);
+        }
+        // --- RELOJ de pared marcando la HORA REAL (cierra el lazo con la luz horaria) ---
+        {
+          const rcx = anchoB ? W * 0.45 : 168;
+          const rcy = anchoB ? H * 0.09 : 88;
+          const rr = (anchoB ? 17 : 15) * su;
+          g.fillStyle = "#F4ECD8";
+          g.beginPath();
+          g.arc(rcx, rcy, rr, 0, TAU);
+          g.fill();
+          g.strokeStyle = "#8A6234";
+          g.lineWidth = 3;
+          g.stroke();
+          g.strokeStyle = "rgba(90,60,30,0.8)";
+          g.lineWidth = 1.8;
+          g.lineCap = "round";
+          const mins = typeof window === "undefined" ? 0 : new Date().getMinutes();
+          const aH = ((HORA % 12) + mins / 60) * (TAU / 12) - Math.PI / 2;
+          const aM = mins * (TAU / 60) - Math.PI / 2;
+          g.beginPath();
+          g.moveTo(rcx, rcy);
+          g.lineTo(rcx + Math.cos(aH) * rr * 0.48, rcy + Math.sin(aH) * rr * 0.48);
+          g.moveTo(rcx, rcy);
+          g.lineTo(rcx + Math.cos(aM) * rr * 0.74, rcy + Math.sin(aM) * rr * 0.74);
+          g.stroke();
+          g.fillStyle = "#C8321E";
+          g.beginPath();
+          g.arc(rcx, rcy, 1.8, 0, TAU);
+          g.fill();
+        }
+        // --- PIZARRA "HOY · PAPA & PASTA" también en MÓVIL: apoyada en la mesa, a la
+        // izquierda de la caja (el concepto de la casa siempre a la vista) ---
+        if (!anchoB) {
+          const pw3 = 60;
+          const ph3 = 78;
+          const px3 = 12;
+          const py3 = woodY + 12;
+          g.save();
+          g.translate(px3 + pw3 / 2, py3 + ph3 / 2);
+          g.rotate(-0.05);
+          g.fillStyle = "rgba(20,10,4,0.35)"; // sombra apoyada
+          g.fillRect(-pw3 / 2 + 3, ph3 / 2 - 2, pw3 - 2, 4);
+          g.fillStyle = "#8A6234";
+          g.beginPath();
+          g.roundRect(-pw3 / 2, -ph3 / 2, pw3, ph3, 5);
+          g.fill();
+          g.fillStyle = "#2E2A24";
+          g.beginPath();
+          g.roundRect(-pw3 / 2 + 5, -ph3 / 2 + 5, pw3 - 10, ph3 - 10, 3);
+          g.fill();
+          g.fillStyle = "rgba(246,240,224,0.92)";
+          g.font = "800 13px system-ui, sans-serif";
+          g.textAlign = "center";
+          g.fillText("HOY", 0, -ph3 * 0.16);
+          g.font = "800 7.5px system-ui, sans-serif";
+          g.fillStyle = "rgba(246,240,224,0.8)";
+          g.fillText("PAPA &", 0, ph3 * 0.06);
+          g.fillText("PASTA", 0, ph3 * 0.2);
+          g.fillStyle = "#E8B62A";
+          g.font = "800 10px system-ui, sans-serif";
+          g.fillText("★", 0, ph3 * 0.36);
+          g.restore();
+        }
+        // --- Props de concepto SOLO desktop (hay pared de sobra) ---
+        if (anchoB) {
+          // RETRATO DEL FUNDADOR: el mismo chef-fideo, enmarcado en dorado (bajo la ventana)
+          const fw3 = 58 * su;
+          const fh3 = 70 * su;
+          const fx3 = vx + vw * 0.18;
+          const fy3 = vy + vh + 34 * su;
+          g.fillStyle = "#B08A54";
+          g.beginPath();
+          g.roundRect(fx3 - 5, fy3 - 5, fw3 + 10, fh3 + 10, 4);
+          g.fill();
+          g.strokeStyle = "#E8B62A";
+          g.lineWidth = 2;
+          g.strokeRect(fx3 - 2, fy3 - 2, fw3 + 4, fh3 + 4);
+          g.fillStyle = "#EFE3C6"; // fondo del retrato
+          g.fillRect(fx3, fy3, fw3, fh3);
+          // el fundador: cuerpo-fideo con toque (versión sello)
+          g.strokeStyle = "#D9922B";
+          g.lineWidth = 7 * su;
+          g.lineCap = "round";
+          g.beginPath();
+          g.moveTo(fx3 + fw3 / 2, fy3 + fh3 * 0.9);
+          g.quadraticCurveTo(fx3 + fw3 * 0.42, fy3 + fh3 * 0.6, fx3 + fw3 / 2, fy3 + fh3 * 0.42);
+          g.stroke();
+          g.fillStyle = "#EEAE3C";
+          g.beginPath();
+          g.ellipse(fx3 + fw3 / 2, fy3 + fh3 * 0.36, 7 * su, 8.5 * su, 0, 0, TAU);
+          g.fill();
+          g.fillStyle = "#2A1608"; // ojitos del cuadro
+          g.beginPath();
+          g.arc(fx3 + fw3 / 2 - 2.6 * su, fy3 + fh3 * 0.34, 1.4 * su, 0, TAU);
+          g.arc(fx3 + fw3 / 2 + 2.6 * su, fy3 + fh3 * 0.34, 1.4 * su, 0, TAU);
+          g.fill();
+          g.fillStyle = "#FFFDF6"; // su toque
+          g.beginPath();
+          g.arc(fx3 + fw3 / 2 - 3 * su, fy3 + fh3 * 0.22, 3 * su, 0, TAU);
+          g.arc(fx3 + fw3 / 2, fy3 + fh3 * 0.18, 3.6 * su, 0, TAU);
+          g.arc(fx3 + fw3 / 2 + 3 * su, fy3 + fh3 * 0.22, 3 * su, 0, TAU);
+          g.fill();
+          g.fillStyle = "rgba(90,60,30,0.7)"; // placa "IL FONDATORE"
+          g.font = `700 ${Math.round(6.5 * su)}px system-ui, sans-serif`;
+          g.textAlign = "center";
+          g.fillText("IL FONDATORE", fx3 + fw3 / 2, fy3 + fh3 - 4 * su);
+          // VARAS DE PASTA SECÁNDOSE (entre la ventana y la caja): el oficio a la vista
+          const vpX = W * 0.255;
+          const vpY = H * 0.075;
+          const vpW = 110 * su;
+          g.strokeStyle = "#8A6234";
+          g.lineWidth = 3.5;
+          g.beginPath();
+          g.moveTo(vpX, vpY);
+          g.lineTo(vpX + vpW, vpY);
+          g.stroke();
+          g.strokeStyle = "#E8C46A";
+          g.lineWidth = 2.2;
+          for (let sp2 = 0; sp2 < 6; sp2++) {
+            const sx3 = vpX + 10 + sp2 * ((vpW - 20) / 5);
+            const sl = (26 + ((sp2 * 37) % 14)) * su;
+            g.beginPath();
+            g.moveTo(sx3, vpY + 2);
+            g.quadraticCurveTo(sx3 + 3, vpY + sl * 0.6, sx3 + 1, vpY + sl);
+            g.stroke();
+          }
+          // COSTAL DE PAPA CRIOLLA apoyado en la mesa (esquina izquierda)
+          const cx3 = W * 0.06;
+          const cy3 = woodY + 26;
+          g.fillStyle = "rgba(20,10,4,0.3)";
+          g.beginPath();
+          g.ellipse(cx3 + 30 * su, cy3 + 55 * su, 34 * su, 7, 0, 0, TAU);
+          g.fill();
+          g.fillStyle = "#C9A55E"; // yute
+          g.beginPath();
+          g.moveTo(cx3, cy3 + 55 * su);
+          g.quadraticCurveTo(cx3 - 4, cy3 + 8 * su, cx3 + 12 * su, cy3 + 2 * su);
+          g.quadraticCurveTo(cx3 + 30 * su, cy3 - 8 * su, cx3 + 48 * su, cy3 + 2 * su);
+          g.quadraticCurveTo(cx3 + 64 * su, cy3 + 8 * su, cx3 + 60 * su, cy3 + 55 * su);
+          g.closePath();
+          g.fill();
+          g.strokeStyle = "rgba(120,84,44,0.5)"; // trama del yute
+          g.lineWidth = 1;
+          for (let yj = 1; yj < 5; yj++) {
+            g.beginPath();
+            g.moveTo(cx3 + 2, cy3 + 8 * su + yj * 9 * su);
+            g.lineTo(cx3 + 58 * su, cy3 + 8 * su + yj * 9 * su);
+            g.stroke();
+          }
+          g.fillStyle = "rgba(90,50,20,0.85)";
+          g.font = `800 ${Math.round(8 * su)}px system-ui, sans-serif`;
+          g.fillText("PAPA", cx3 + 30 * su, cy3 + 24 * su);
+          g.fillText("CRIOLLA", cx3 + 30 * su, cy3 + 34 * su);
+          // criollas asomando por la boca del costal
+          g.fillStyle = "#E8A62A";
+          for (const [ox3, oy3, or3] of [[16, 0, 6], [30, -4, 7], [44, 0, 6]] as const) {
+            g.beginPath();
+            g.arc(cx3 + ox3 * su, cy3 + oy3 * su, or3 * su, 0, TAU);
+            g.fill();
+          }
         }
         // --- HAZ de luz de la ventana hacia la caja (asienta el polvo vivo del frame) ---
         const hz = g.createLinearGradient(vx + vw, vy + vh * 0.3, W * 0.5, woodY);
@@ -3687,9 +3849,13 @@ export default function EmplataGame(props: {
       // delante-lateral. Se define aquí (todas sus variables ya existen) pero se INVOCA
       // DESPUÉS de la caja → él solapa a la caja, nunca al revés. La tarima persiste
       // incluso cuando el chef sale a repartir (los anclas no desaparecen).
-      const dibujaChef = () => {
+      // DOS CAPAS: dormido se esconde DETRÁS de la caja (invocación temprana); despierto
+      // trabaja DELANTE (invocación tardía). Solo una capa ejecuta por frame.
+      const dibujaChef = (capa: "detras" | "delante") => {
       if (faseRef.current !== "arma" || wd.folding) return;
-      {
+      const mMode = wd.masc.mode;
+      const capaChef = mMode === 14 || mMode === 15 ? "detras" : "delante";
+      if (capa === "delante") {
         // la TARIMA (cajón de madera): SIEMPRE visible en arma — el hogar no parpadea
         const twd = 46 * MASC_S;
         const thg = 26 * MASC_S;
@@ -3713,10 +3879,13 @@ export default function EmplataGame(props: {
         ctx.fillStyle = "rgba(255,236,200,0.35)";
         ctx.fillRect(txp - twd / 2 - 2.5, typ - 4.5, twd + 5, 1.6);
       }
-      if (wd.fideos.length === 0 && wd.vuelos.length === 0 && wd.t > 76) {
+      if (wd.fideos.length === 0 && wd.vuelos.length === 0 && wd.t > 76 && capa === capaChef) {
         const m = wd.masc;
-        const ax = tarimaX + shX; // el chef vive SOBRE su tarima
-        const ay = tarimaY + shY - 2;
+        const dormido = capaChef === "detras";
+        // despierto: SU tarima (delante). Dormido: se recuesta DETRÁS de la caja (solo el
+        // gorro y las zzz asoman) y al despertar salta de vuelta a su puesto de trabajo.
+        const ax = (dormido ? boxX + boxW * 0.34 : tarimaX) + shX;
+        const ay = (dormido ? boxY + boxH * 0.02 + entY + focoY : tarimaY - 2) + shY;
         const up = Math.min(boxH * 0.75, 168); // talla fija de personaje (la caja no lo estira)
         if (!m.init) {
           // ENTRADA TEATRAL (Peggle/Mario 64): aparece EN la boca de la caja recién abierta
@@ -4167,6 +4336,8 @@ export default function EmplataGame(props: {
         }
       }
       };
+      // CAPA TRASERA: solo cuando duerme/cuarta-pared — se esconde tras la caja
+      dibujaChef("detras");
 
       ctx.save();
       ctx.translate(boxXE + shX, boxY + boxH * 0.32 + entY + focoY + shY);
@@ -5627,7 +5798,7 @@ export default function EmplataGame(props: {
 
       // EL CHEF, POR DELANTE DE LA CAJA Y DE LA UI (z-order de protagonista): definido
       // arriba (sus variables nacen antes), invocado aquí — él ocluye, nunca es ocluido
-      dibujaChef();
+      dibujaChef("delante");
 
       // ===== EL FIDEO MESERO — sale DESDE LA TARIMA (el puesto del chef), agarra la carta
       // y vuelve a emplatar: continuidad perfecta chef→mesero. =====
@@ -5867,12 +6038,34 @@ export default function EmplataGame(props: {
         ctx.drawImage(wd.vig, 0, 0, W, H);
         ctx.globalCompositeOperation = "source-over";
       }
+      // ===== FASE 3: pase cinematográfico WebGL (bloom¼ + cromática + grano) con
+      // KILL-SWITCH: si el frame real sostenido pasa de presupuesto, el pase se apaga
+      // solo y esta pantalla vuelve al canvas directo. Cero riesgo en gama media.
+      if (post) {
+        // reloj PROPIO sin capar (dtReal se capa a 33ms para la física → jamás cruzaría
+        // el umbral y el kill-switch sería decorativo)
+        const rawMs = postLast > 0 ? now - postLast : 16;
+        postLast = now;
+        post.frame(now);
+        postEma = postEma * 0.94 + rawMs * 0.06;
+        if (postEma > 40 && wd.t > 240) {
+          post.off(); // gama media sostenida bajo 25fps: fuera el pase, el juego manda
+          post = null;
+        }
+      }
     };
+    // el pase se crea tras el primer layout (necesita el canvas ya medido); si WebGL no
+    // está disponible, devuelve null y el juego sigue EXACTO como antes
+    let post: ReturnType<typeof creaPostFx> = null;
+    let postEma = 16;
+    let postLast = 0;
+    post = creaPostFx(canvas, !reduce);
     raf = requestAnimationFrame(frame);
 
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      post?.dispose();
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
