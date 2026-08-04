@@ -41,6 +41,18 @@ export default function Motion() {
           scrollTrigger: { trigger: ".hero", start: "top top", end: "bottom top", scrub: 0.5 },
         });
       }
+      // 2b) los CHIPS de topping caen en cascada (el enredo se sirve solo)
+      const chips = gsap.utils.toArray<HTMLElement>(".carta__chip");
+      if (chips.length) {
+        gsap.from(chips, {
+          y: 16,
+          opacity: 0,
+          duration: 0.45,
+          ease: "power2.out",
+          stagger: { each: 0.035, from: "start" },
+          scrollTrigger: { trigger: ".carta__chips", start: "top 88%", once: true },
+        });
+      }
       // 3) divisores-hebra dibujados por el scroll (se desactiva su transition CSS
       //    para que el scrub mande frame a frame)
       document.querySelectorAll<SVGPathElement>(".divider .hebra-draw-path").forEach((p) => {

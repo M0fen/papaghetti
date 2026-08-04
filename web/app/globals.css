@@ -1564,14 +1564,38 @@ body.enreda-jugando .nav {
    LA CARTA COMPLETA — la lista que faltaba (leer antes de decidir)
    ========================================================================= */
 .carta__grupo {
-  margin-top: 34px;
+  margin-top: 26px;
 }
 .carta__h {
   font-size: 1.15rem;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 0 14px;
+  margin: 0 0 12px;
+}
+/* título de grupo con SU hebrita dibujándose debajo, en el color del grupo
+   (el mismo código de color de los pasos del hero y del juego) */
+.carta__htxt {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 7px;
+}
+.carta__hilo {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 8px;
+  overflow: visible;
+}
+.carta__h--oro .carta__hilo {
+  color: var(--pg-oro);
+}
+.carta__h--pomodoro .carta__hilo {
+  color: var(--pg-pomodoro);
+}
+.carta__h--perejil .carta__hilo {
+  color: var(--pg-perejil);
 }
 .carta__lista {
   list-style: none;
@@ -1579,14 +1603,78 @@ body.enreda-jugando .nav {
   padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 4px 28px;
+  gap: 2px 28px;
 }
 .carta__item {
   display: flex;
   align-items: center;
-  gap: 13px;
-  padding: 11px 4px;
+  gap: 12px;
+  padding: 8px 4px;
   border-bottom: 1px dotted rgba(30, 22, 17, 0.16);
+}
+/* el rasgo dominante como PUNTO de color (el texto en mayúsculas por fila era ruido) */
+.carta__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 7px;
+  vertical-align: 1px;
+}
+/* ===== TOPPINGS COMPACTOS: chips densos con twirl de fideo al tocarlos ===== */
+.carta__chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
+}
+.carta__chip {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 9px;
+  row-gap: 2px;
+  align-items: center;
+  padding: 9px 12px;
+  background: rgba(255, 253, 244, 0.72);
+  border: 1px solid rgba(30, 22, 17, 0.09);
+  border-radius: 15px;
+  transition: transform var(--pg-dur-fast) var(--pg-ease-twirl), box-shadow var(--pg-dur-fast);
+}
+.carta__chip:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--pg-shadow);
+}
+.carta__chip:hover .carta__chipart {
+  transform: rotate(360deg) scale(1.12); /* el twirl del tenedor, en miniatura */
+}
+.carta__chip.is-agotado {
+  opacity: 0.45;
+}
+.carta__chipart {
+  grid-row: 1 / 3; /* el sprite abraza las dos filas */
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  transition: transform 0.55s var(--pg-ease-twirl);
+}
+.carta__chip b {
+  font-family: var(--pg-font-body);
+  font-weight: 700;
+  font-size: 0.84rem;
+  min-width: 0;
+  line-height: 1.18; /* el nombre envuelve NATURAL (sin guiones forzados) */
+}
+.carta__chipprecio {
+  font-family: var(--pg-font-body);
+  font-weight: 800;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+  color: var(--pg-oro-ink);
 }
 .carta__item.is-agotado {
   opacity: 0.45;
@@ -4694,9 +4782,11 @@ body.enreda-jugando .nav {
     -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
     mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
   }
-  /* el hero arranca BAJO el nav de dos filas + promo (antes el kicker quedaba sepultado) */
+  /* el hero arranca BAJO el nav de dos filas + promo, y ANCLADO ARRIBA: centrarlo
+     verticalmente lo metía bajo el nav cuando el contenido quedaba corto */
   .hero {
     padding-top: 138px;
+    align-items: start;
   }
 }
 
