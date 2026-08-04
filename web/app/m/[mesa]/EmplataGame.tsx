@@ -2623,7 +2623,7 @@ export default function EmplataGame(props: {
             m.spamGoal = 8 + Math.floor(Math.random() * 8); // re-sortea el umbral
             s.tone(660, 0.5, "sine", 0.05, 300); // sirena descendente woozy
           } else {
-            const pool = [13, 10, 4];
+            const pool = [17, 13, 10, 4]; // beso del chef / reverencia / brinco / saludo
             m.tapVar = (m.tapVar + 1) % pool.length;
             m.mode = pool[m.tapVar];
             m.modeT = wdU.t;
@@ -3030,6 +3030,8 @@ export default function EmplataGame(props: {
           ctx.quadraticCurveTo(mx, my + 1, mx + 1.3, my - 0.2); // sonrisa sutil
         }
         ctx.stroke();
+        // (se probó un bigote fino de chef: a esta escala se leía como un garabato sobre la
+        // cara — la identidad la llevan los ojos grandes + toque + pañuelo, no más trazos)
         ctx.restore();
       }
     };
@@ -3255,12 +3257,12 @@ export default function EmplataGame(props: {
           m.dur = 120;
         } else if (wd.t - m.modeT > m.dur && !react && wd.ts - m.caressAt > 0.4) {
           // (mientras lo ACARICIAN no se muda ni cambia de gesto: se queda a gusto — Nintendogs)
-          let nm = Math.floor(Math.random() * 9); // 0-7 clásicos + AFILAR el cuchillo
+          let nm = Math.floor(Math.random() * 9); // 0-7 clásicos + CATA de la cuchara
           if (nm === m.mode) nm = (nm + 1) % 9;
-          if (nm === 8) nm = 12; // 8-11 son reacciones por sabor; el afilado vive en 12
+          if (nm === 8) nm = 12; // 8-11 son reacciones por sabor; la cata vive en 12
           m.mode = nm;
           m.modeT = wd.t;
-          m.dur = nm === 12 ? 110 + Math.random() * 60 : 55 + Math.random() * 130; // ~1-3s por modo
+          m.dur = nm === 12 ? 82 + Math.random() * 20 : 55 + Math.random() * 130; // ~1-3s por modo
           if (Math.random() < 0.28) m.home = otroHome(m.home); // se muda de vez en cuando
         }
         const em = react ? wd.reactMode : m.mode;
@@ -3329,10 +3331,15 @@ export default function EmplataGame(props: {
               ty = ay - up * (1.02 + 0.14 * Math.abs(Math.sin(age * 0.42)));
               pupil = 0.3;
               break;
-            case 12: // AFILAR el cuchillo: el maestro cuida su herramienta (serrucho corto + tings)
-              tx = ax + io * boxW * 0.07;
-              ty = ay - up * (0.86 + 0.02 * Math.sin(age * 0.5));
-              pupil = 0.95; // concentrado en la hoja
+            case 12: // CATA: prueba la salsa con su cuchara y remata con el BESO DEL CHEF
+              tx = ax + io * boxW * 0.04;
+              ty = ay - up * (0.98 + 0.02 * Math.sin(age * 0.3));
+              pupil = age < 52 ? 0.8 : 0.15; // mira la cuchara; al beso, al cliente
+              break;
+            case 17: // BESO DEL CHEF corto (reacción al tap): mano a los labios y ¡mwah!
+              ty = ay - up * 1.02;
+              tx = ax + io * 2;
+              pupil = 0.15;
               break;
             case 13: // TAP del cliente: reverencia corta de maestro (interrumpible, <600ms)
               ty = ay - up * (age < 13 ? 0.52 : 1.04);
@@ -3366,6 +3373,7 @@ export default function EmplataGame(props: {
         // Un bob vertical del objetivo sube y baja la criatura entera — la lectura clásica de
         // "está viva". Determinista (wd.ts + seed), sin allocaciones ni draw calls.
         ty += Math.sin(TAU * 0.26 * wd.ts + 5) * up * 0.03;
+        tx = clamp(tx, 26, W - 26); // el protagonista nunca se sale del escenario
         // ATENCIÓN EN DOS CAPAS (el sistema de mirada de HL2/Trico): la PUPILA salta rápido
         // al puntero (lookP de siempre) y el CUERPO lo persigue despacio — el desfase
         // pupila-rápida/cuerpo-lento ES la vida. El interés se GASTA (ventana de 2.5 s):
@@ -3398,84 +3406,152 @@ export default function EmplataGame(props: {
         const MS = MASC_S * (1 + m.sq * 0.18);
         // dilatación de pupila por CERCANÍA del puntero (subliminal, Ori)
         const dil = ptrFresh ? 1 - clamp(Math.hypot(px - m.hx, py - m.hy) / 240, 0, 1) : 0;
-        const sleepyV = em === 14 ? 1 : clamp(m.caressT / 1.8, 0, 1) * 0.75;
-        // ---- MANOPLAS: targets por modo (la FSM solo mueve targets; los muelles interpolan) ----
-        const lat = io === 0 ? 1 : io; // en el home central no hay "lado": elige uno
-        const swy = Math.sin(wd.ts * 1.3 + 2) * 2.2;
-        let t1x = m.hx + lat * 17 * MS;
-        let t1y = m.hy + 27 * MS + swy;
-        let t2x = m.hx - lat * 17 * MS;
-        let t2y = m.hy + 27 * MS - swy * 0.7;
-        let kx = 0;
-        let ky = 0;
-        let krot = 0;
+        const savoring = em === 12 && age > 26 && age < 52; // saborea con los ojos cerrados
+        const sleepyV = em === 14 ? 1 : savoring ? 0.85 : clamp(m.caressT / 1.8, 0, 1) * 0.75;
+        // ---- MANOPLAS ancladas al EJE DEL CUERPO (coherencia): antes los targets eran offsets
+        // horizontales desde la cabeza — al inclinarse la hebra, las manos quedaban flotando
+        // donde el cuerpo YA no estaba. Ahora viven en el marco {bu (eje cabeza→base), pu
+        // (perpendicular)}: se inclinan CON él. Pose por defecto = manos entrelazadas al
+        // frente del pecho — la postura del maître, la señal "profesional" más barata.
+        const lat = io === 0 ? 1 : io;
+        /* El "pecho" NO es un punto de la cuerda cabeza→base: el cuerpo es una CURVA, y al
+           doblarse el punto de la cuerda queda en el aire (manos huérfanas flotando). Se usa
+           el punto REAL del spline del último dibujo (fx0/fy0 quedan poblados del frame
+           anterior del propio masc — 1 frame de retraso, invisible). */
+        /* 0.66 quedaba a la altura del CUELLO: la bezier concentra puntos cerca de la cabeza
+           (no están equiespaciados en arco). 0.5 + un empujón por el eje da el pecho real. */
+        const kCh = Math.round(FN * 0.5);
+        let chX = fx0[kCh];
+        let chY = fy0[kCh];
+        let tgx = fx0[kCh + 1] - fx0[kCh - 1]; // tangente del cuerpo en el pecho (hacia la cabeza)
+        let tgy = fy0[kCh + 1] - fy0[kCh - 1];
+        if (chX === 0 && chY === 0) {
+          // primer frame: el spline aún no se dibujó — cae a la cuerda cabeza→base
+          chX = m.hx + (ax - m.hx) * 0.34;
+          chY = m.hy + (ay - m.hy) * 0.34;
+          tgx = m.hx - ax;
+          tgy = m.hy - ay;
+        }
+        const tgl = Math.hypot(tgx, tgy) || 1;
+        tgx /= tgl;
+        tgy /= tgl;
+        const bux = -tgx; // hacia la BASE del cuerpo (siguiendo la curva real)
+        const buy = -tgy;
+        const pux = buy; // perpendicular: pu*lat apunta hacia la CAJA
+        const puy = -bux;
+        chX += bux * 6 * MS; // del punto medio del spline al PECHO (un pelín hacia la base)
+        chY += buy * 6 * MS;
+        const swb = Math.sin(wd.ts * 1.3 + 2) * 1.6; // respiración de las manos
+        // labios (para la cuchara y el beso): junto al frente bajo de la cabeza
+        const mfx = m.hx + pux * lat * 8 * MS + bux * 4 * MS;
+        const mfy = m.hy + puy * lat * 8 * MS + buy * 4 * MS;
+        let t1x = chX + pux * 4.2 * MS + bux * swb;
+        let t1y = chY + puy * 4.2 * MS + buy * swb;
+        let t2x = chX - pux * 4.2 * MS + bux * swb;
+        let t2y = chY - puy * 4.2 * MS + buy * swb;
         if (em === 4 || em === 15) {
           // saludo (al frente en 4; a CÁMARA en la cuarta pared): la mano exterior ondea alto
-          t2x = m.hx - lat * 22 * MS + Math.sin(age * 0.55) * 9;
-          t2y = m.hy - 20 * MS;
+          const wv = Math.sin(age * 0.55) * 8;
+          t2x = m.hx - pux * lat * 18 * MS - bux * 20 * MS + pux * wv;
+          t2y = m.hy - puy * lat * 18 * MS - buy * 20 * MS + puy * wv;
         } else if (em === 12) {
-          // AFILAR: el cuchillo VIVE en la manopla (serrucho corto), la otra hace de chaira
-          kx = m.hx + lat * 20 * MS + Math.sin(age * 0.5) * 4.5;
-          ky = m.hy + 16 * MS;
-          krot = lat * -0.35 + Math.sin(age * 0.5) * 0.16;
-          t1x = kx - lat * 18 * MS;
-          t1y = ky + 3;
-          t2x = m.hx - lat * 10 * MS;
-          t2y = m.hy + 20 * MS;
+          // CATA: la cuchara SUBE del pecho a los labios, saborea, y remata con el BESO
+          if (age < 26) {
+            const tt = smooth(age / 26);
+            t1x = chX + (mfx - chX) * tt;
+            t1y = chY + (mfy - chY) * tt;
+          } else if (age < 52) {
+            t1x = mfx + pux * Math.sin(age * 0.3) * 1.2; // paladea (micro-vaivén)
+            t1y = mfy + puy * Math.sin(age * 0.3) * 1.2;
+          } else {
+            const tt = smooth(Math.min(1, (age - 52) / 10));
+            t1x = mfx + (pux * lat * 17 * MS - bux * 7 * MS) * tt;
+            t1y = mfy + (puy * lat * 17 * MS - buy * 7 * MS) * tt;
+          }
+          t2x = chX - pux * 5 * MS;
+          t2y = chY - puy * 5 * MS;
+        } else if (em === 17) {
+          // BESO DEL CHEF al tap: mano a los labios (10 frames) y vuela hacia el cliente
+          if (age < 10) {
+            t1x = mfx;
+            t1y = mfy;
+          } else {
+            const tt = smooth(Math.min(1, (age - 10) / 9));
+            t1x = mfx + (pux * lat * 18 * MS - bux * 8 * MS) * tt;
+            t1y = mfy + (puy * lat * 18 * MS - buy * 8 * MS) * tt;
+          }
+          t2x = chX - pux * 5 * MS;
+          t2y = chY - puy * 5 * MS;
         } else if (em === 13 || em === 11) {
-          // reverencia: brazos abiertos de maestro
-          t1x = m.hx + lat * 26 * MS;
-          t1y = m.hy + 8 * MS;
-          t2x = m.hx - lat * 26 * MS;
-          t2y = m.hy + 8 * MS;
+          // reverencia: brazos abiertos de maestro (en el marco del cuerpo inclinado)
+          t1x = chX + pux * lat * 24 * MS + bux * 4 * MS;
+          t1y = chY + puy * lat * 24 * MS + buy * 4 * MS;
+          t2x = chX - pux * lat * 24 * MS + bux * 4 * MS;
+          t2y = chY - puy * lat * 24 * MS + buy * 4 * MS;
         } else if (em === 10) {
-          // brinco contento: las dos arriba
-          t1x = m.hx + lat * 15 * MS;
-          t1y = m.hy - 16 * MS;
-          t2x = m.hx - lat * 15 * MS;
-          t2y = m.hy - 16 * MS;
+          // brinco contento: las dos arriba (más allá de la cabeza)
+          t1x = m.hx + pux * 14 * MS - bux * 14 * MS;
+          t1y = m.hy + puy * 14 * MS - buy * 14 * MS;
+          t2x = m.hx - pux * 14 * MS - bux * 14 * MS;
+          t2y = m.hy - puy * 14 * MS - buy * 14 * MS;
         } else if (em === 2) {
-          // curiosear la bandeja: una mano SEÑALA hacia abajo
+          // curiosear la bandeja: una mano SEÑALA hacia abajo (pantalla: la bandeja está ahí)
           t1x = m.hx + lat * 6 * MS;
-          t1y = m.hy + 44 * MS;
+          t1y = m.hy + 46 * MS;
         } else if (em === 16) {
-          // mareo: manos a la cabeza
-          t1x = m.hx + lat * 13 * MS;
-          t1y = m.hy - 4 * MS;
-          t2x = m.hx - lat * 13 * MS;
-          t2y = m.hy - 4 * MS;
+          // mareo: manos a las sienes
+          t1x = m.hx + pux * 13 * MS;
+          t1y = m.hy + puy * 13 * MS;
+          t2x = m.hx - pux * 13 * MS;
+          t2y = m.hy - puy * 13 * MS;
         } else if (em === 14) {
           // dormido: las manos caen juntas al regazo
-          t1x = m.hx + lat * 8 * MS;
-          t1y = m.hy + 30 * MS;
-          t2x = m.hx - lat * 8 * MS;
-          t2y = m.hy + 30 * MS;
+          t1x = chX + pux * 5 * MS + bux * 10 * MS;
+          t1y = chY + puy * 5 * MS + buy * 10 * MS;
+          t2x = chX - pux * 5 * MS + bux * 10 * MS;
+          t2y = chY - puy * 5 * MS + buy * 10 * MS;
         } else if (em === 8) {
-          // crunch-nod: puños al pecho
-          t1x = m.hx + lat * 10 * MS;
-          t1y = m.hy + 22 * MS;
-          t2x = m.hx - lat * 10 * MS;
-          t2y = m.hy + 22 * MS;
+          // crunch-nod: puños al pecho, apretados
+          t1x = chX + pux * 7 * MS;
+          t1y = chY + puy * 7 * MS;
+          t2x = chX - pux * 7 * MS;
+          t2y = chY - puy * 7 * MS;
         }
-        [m.h1x, m.h1vx] = springStep(m.h1x, m.h1vx, t1x, 230, 20, dt);
-        [m.h1y, m.h1vy] = springStep(m.h1y, m.h1vy, t1y, 230, 20, dt);
-        [m.h2x, m.h2vx] = springStep(m.h2x, m.h2vx, t2x, 230, 20, dt);
-        [m.h2y, m.h2vy] = springStep(m.h2y, m.h2vy, t2y, 230, 20, dt);
+        [m.h1x, m.h1vx] = springStep(m.h1x, m.h1vx, t1x, 300, 24, dt);
+        [m.h1y, m.h1vy] = springStep(m.h1y, m.h1vy, t1y, 300, 24, dt);
+        [m.h2x, m.h2vx] = springStep(m.h2x, m.h2vx, t2x, 300, 24, dt);
+        [m.h2y, m.h2vy] = springStep(m.h2y, m.h2vy, t2y, 300, 24, dt);
         drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy, MS, m.ctrl, 1.85, lookP, sleepyV, dil);
-        // el CUCHILLO en la manopla durante el afilado, con TINGS de chispa en el filo
-        if (em === 12 && wd.knife && !reduce) {
+        // la CUCHARA de palo en la mano durante la cata (mango hacia la mano, cazo a los labios)
+        if (em === 12 && age < 52) {
+          const spr = Math.atan2(m.hy + buy * 2 - m.h1y, m.hx + bux * 2 - m.h1x);
           ctx.save();
-          ctx.translate(kx, ky);
-          ctx.rotate(krot);
-          ctx.drawImage(wd.knife, -24 * MS, -4.8 * MS, 48 * MS, 12.7 * MS);
+          ctx.translate(m.h1x, m.h1y);
+          ctx.rotate(spr);
+          ctx.fillStyle = "#8B5A2B";
+          ctx.beginPath();
+          ctx.roundRect(-2 * MS, -1.1 * MS, 13 * MS, 2.2 * MS, 1.1 * MS);
+          ctx.fill();
+          ctx.fillStyle = "#A66B33";
+          ctx.beginPath();
+          ctx.ellipse(14.5 * MS, 0, 4 * MS, 3 * MS, 0, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = "rgba(255,236,200,0.5)"; // brillo del caldo en el cazo
+          ctx.beginPath();
+          ctx.ellipse(13.6 * MS, -0.7 * MS, 1.9 * MS, 1.1 * MS, 0, 0, TAU);
+          ctx.fill();
           ctx.restore();
-          if (Math.random() < 0.018 * df) {
-            wd.chispas.push({ x: kx + lat * 16 * MS, y: ky - 2, vx: lat * 1.2, vy: -1.4, rot: 0, vr: 0.2, life: 0.5 });
-            s.tone(2100, 0.03, "triangle", 0.02); // ting
-          }
         }
-        // las manoplas SIEMPRE visibles (delante del cuerpo y del cuchillo: agarran el mango)
-        const mScGlove = MS * 1.05;
+        // ¡MWAH! — el beso del chef suelta destellos y campanita (cata al frame 52, tap al 10)
+        const kissAt = em === 12 ? 52 : em === 17 ? 10 : -1;
+        if (kissAt > 0 && age >= kissAt && age - df < kissAt) {
+          for (let ki = 0; ki < 4; ki++)
+            wd.chispas.push({ x: mfx, y: mfy, vx: pux * lat * (1.2 + ki * 0.5) + (Math.random() - 0.5), vy: -0.8 - Math.random() * 1.2, rot: Math.random() * TAU, vr: 0.25, life: 0.7 });
+          s.tone(660, 0.07, "sine", 0.05, 990);
+          s.tone(1760, 0.06, "triangle", 0.035, undefined, 0.06);
+        }
+        // las manoplas SIEMPRE visibles (delante del cuerpo y de la cuchara: la agarran)
+        const mScGlove = MS * 0.92;
         dibujaManopla(m.h1x, m.h1y, 1, mScGlove, clamp(m.h1vx * 0.002, -0.4, 0.4));
         dibujaManopla(m.h2x, m.h2y, -1, mScGlove, clamp(m.h2vx * 0.002, -0.4, 0.4));
         // zzz del sueño (vector barato, fase determinista — sin estado ni allocs)
@@ -4836,6 +4912,88 @@ export default function EmplataGame(props: {
         }
       }
 
+      // ===== TERMÓMETRO DEL ANTOJO — el carácter de tu caja, en vivo. REUBICADO: vivía arriba
+      // (H*0.11) y TAPABA el escenario del chef; ahora vive en la banda de piso libre entre la
+      // caja y las pestañas, y se dibuja ANTES de los fideos → el chef pasa POR DELANTE. =====
+      if (faseRef.current === "arma") {
+        const idsA = [sel.current.baseId, ...sel.current.proteinaIds, ...sel.current.toppingIds].filter(Boolean);
+        const nA = idsA.length;
+        if (nA > 0) {
+          const agg: Sabor = { cro: 0, cre: 0, fre: 0, dul: 0 };
+          for (const id of idsA) {
+            const it = find(id);
+            if (!it) continue;
+            const sv = saborDe(it);
+            agg.cro += sv.cro;
+            agg.cre += sv.cre;
+            agg.fre += sv.fre;
+            agg.dul += sv.dul;
+          }
+          // DOMINANCIA, no promedio: el eje líder llega alto y la barra CRECE al construir.
+          const maxA = Math.max(agg.cro, agg.cre, agg.fre, agg.dul, 0.0001);
+          const pf: Sabor = { cro: agg.cro / maxA, cre: agg.cre / maxA, fre: agg.fre / maxA, dul: agg.dul / maxA };
+          const tv = wd.termoV;
+          const kk = 1 - Math.pow(0.8, df);
+          tv.cro += (pf.cro - tv.cro) * kk;
+          tv.cre += (pf.cre - tv.cre) * kk;
+          tv.fre += (pf.fre - tv.fre) * kk;
+          tv.dul += (pf.dul - tv.dul) * kk;
+          const mw = Math.min(W * 0.66, 250 * U);
+          const mh = 46 * U;
+          const myc = H * 0.462;
+          ctx.fillStyle = "rgba(26,17,8,0.6)";
+          ctx.beginPath();
+          ctx.roundRect(W / 2 - mw / 2, myc - mh / 2, mw, mh, 13 * U);
+          ctx.fill();
+          ctx.strokeStyle = "rgba(255,244,220,0.14)";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.font = fontD(12 * U, 800);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.shadowColor = "rgba(0,0,0,0.45)";
+          ctx.shadowBlur = 3;
+          ctx.fillStyle = "rgba(255,248,232,0.98)";
+          ctx.fillText(tituloAntojo(pf, nA), W / 2, myc - mh / 2 + 11 * U);
+          ctx.shadowBlur = 0;
+          const bw = 46 * U;
+          const gap = 10 * U;
+          const totalB = EJES.length * bw + (EJES.length - 1) * gap;
+          const bx0 = W / 2 - totalB / 2;
+          const by = myc + mh / 2 - 13 * U;
+          const bh = 8 * U;
+          let domK = 0;
+          EJES.forEach((e, k) => {
+            if (tv[e.k] > tv[EJES[domK].k]) domK = k;
+          });
+          EJES.forEach((e, k) => {
+            const v = tv[e.k];
+            const bx = bx0 + k * (bw + gap);
+            ctx.fillStyle = "rgba(251,241,222,0.16)";
+            ctx.beginPath();
+            ctx.roundRect(bx, by, bw, bh, 4 * U);
+            ctx.fill();
+            const fw = Math.max(4, bw * clamp(v, 0, 1));
+            if (k === domK && v > 0.15) {
+              ctx.shadowColor = e.color;
+              ctx.shadowBlur = 8;
+            }
+            ctx.fillStyle = e.color;
+            ctx.beginPath();
+            ctx.roundRect(bx, by, fw, bh, 4 * U);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(255,255,255,0.22)"; // filo superior (relieve)
+            ctx.beginPath();
+            ctx.roundRect(bx, by, fw, 2 * U, 2 * U);
+            ctx.fill();
+            ctx.font = fontB(10 * U, 800);
+            ctx.fillStyle = k === domK ? "rgba(255,246,224,0.98)" : "rgba(251,241,222,0.9)";
+            ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 7 * U);
+          });
+        }
+      }
+
       // ===== EL FIDEO MESERO — sale DESDE LA MASCOTA (su posición actual, su hogar), no del
       // centro de la caja: se estira desde donde estaba, agarra la carta y vuelve a emplatar. =====
       const mby2 = boxY + boxH * 0.32 + entY + focoY;
@@ -4989,91 +5147,8 @@ export default function EmplataGame(props: {
         ctx.globalAlpha = 1;
       }
 
-      // ===== TERMÓMETRO DEL ANTOJO — el carácter de tu caja, en vivo =====
-      if (faseRef.current === "arma") {
-        const idsA = [sel.current.baseId, ...sel.current.proteinaIds, ...sel.current.toppingIds].filter(Boolean);
-        const nA = idsA.length;
-        if (nA > 0) {
-          const agg: Sabor = { cro: 0, cre: 0, fre: 0, dul: 0 };
-          for (const id of idsA) {
-            const it = find(id);
-            if (!it) continue;
-            const sv = saborDe(it);
-            agg.cro += sv.cro;
-            agg.cre += sv.cre;
-            agg.fre += sv.fre;
-            agg.dul += sv.dul;
-          }
-          // DOMINANCIA, no promedio: el eje líder llega alto y la barra CRECE al construir. Antes
-          // pf=agg/nA promediaba → más ingredientes = barras más cortas y "BIEN BALANCEADO" (valor invertido).
-          const maxA = Math.max(agg.cro, agg.cre, agg.fre, agg.dul, 0.0001);
-          const pf: Sabor = { cro: agg.cro / maxA, cre: agg.cre / maxA, fre: agg.fre / maxA, dul: agg.dul / maxA };
-          // suavizado dt-normalizado → las barras se animan al añadir/quitar (no saltan)
-          const tv = wd.termoV;
-          const kk = 1 - Math.pow(0.8, df);
-          tv.cro += (pf.cro - tv.cro) * kk;
-          tv.cre += (pf.cre - tv.cre) * kk;
-          tv.fre += (pf.fre - tv.fre) * kk;
-          tv.dul += (pf.dul - tv.dul) * kk;
-          const mw = Math.min(W * 0.68, 256 * U);
-          const mh = 52 * U;
-          const myc = H * 0.11;
-          // píldora kraft SÓLIDA (vive sobre el punto más claro de la escena → sin fondo real nada
-          // cumple contraste; 0.24 era ilegible). Borde crema tenue para asentarla.
-          ctx.fillStyle = "rgba(26,17,8,0.66)";
-          ctx.beginPath();
-          ctx.roundRect(W / 2 - mw / 2, myc - mh / 2, mw, mh, 14 * U);
-          ctx.fill();
-          ctx.strokeStyle = "rgba(255,244,220,0.14)";
-          ctx.lineWidth = 1;
-          ctx.stroke();
-          // título evocador (13px + sombra → legible a plena luz)
-          ctx.font = fontD(13 * U, 800);
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.shadowColor = "rgba(0,0,0,0.45)";
-          ctx.shadowBlur = 3;
-          ctx.fillStyle = "rgba(255,248,232,0.98)";
-          ctx.fillText(tituloAntojo(pf, nA), W / 2, myc - mh / 2 + 13 * U);
-          ctx.shadowBlur = 0;
-          // 4 barras: crocante / cremoso / fresco / dulce (anchas → los labels de 10px no se tocan)
-          const bw = 46 * U;
-          const gap = 10 * U;
-          const totalB = EJES.length * bw + (EJES.length - 1) * gap;
-          const bx0 = W / 2 - totalB / 2;
-          const by = myc + mh / 2 - 15 * U;
-          const bh = 9 * U;
-          let domK = 0;
-          EJES.forEach((e, k) => {
-            if (tv[e.k] > tv[EJES[domK].k]) domK = k;
-          });
-          EJES.forEach((e, k) => {
-            const v = tv[e.k];
-            const bx = bx0 + k * (bw + gap);
-            ctx.fillStyle = "rgba(251,241,222,0.16)";
-            ctx.beginPath();
-            ctx.roundRect(bx, by, bw, bh, 4 * U);
-            ctx.fill();
-            const fw = Math.max(4, bw * clamp(v, 0, 1));
-            if (k === domK && v > 0.15) {
-              ctx.shadowColor = e.color;
-              ctx.shadowBlur = 8;
-            }
-            ctx.fillStyle = e.color;
-            ctx.beginPath();
-            ctx.roundRect(bx, by, fw, bh, 4 * U);
-            ctx.fill();
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = "rgba(255,255,255,0.22)"; // filo superior (relieve)
-            ctx.beginPath();
-            ctx.roundRect(bx, by, fw, 2 * U, 2 * U);
-            ctx.fill();
-            ctx.font = fontB(10 * U, 800); // 8px era el peor texto de la app; sube a 10 legible
-            ctx.fillStyle = k === domK ? "rgba(255,246,224,0.98)" : "rgba(251,241,222,0.9)";
-            ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 8 * U);
-          });
-        }
-      }
+      // (el TERMÓMETRO vivía aquí, arriba en H*0.11 — TAPABA al chef protagonista; ahora se
+      // dibuja antes de los fideos meseros, abajo en la banda de piso libre)
 
       // ===== FLASH de sabor (destello cálido de la reacción por ingrediente) =====
       if (wd.flash.life > 0) {
