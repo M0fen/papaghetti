@@ -26,7 +26,9 @@ export default function Nav({ offsetTop = 0 }: { offsetTop?: number }) {
         <a href="#carta">La carta</a>
         <a href="#ubicacion">Ubicación</a>
       </div>
-      <a href="#arma" className="btn btn--gold" style={{ padding: "10px 18px" }}>
+      {/* EL color del CTA es exclusivo (regla de los premiados): pomodoro = pedir, en
+          todo el sitio. El oro queda para acentos y acciones secundarias. */}
+      <a href="#arma" className="btn btn--primary" style={{ padding: "10px 18px" }}>
         <span>Pedir</span>
       </a>
     </nav>

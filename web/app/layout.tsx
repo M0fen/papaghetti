@@ -1,12 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Manrope } from "next/font/google";
+import { Fraunces, Manrope } from "next/font/google";
 import "./globals.css";
 
-// Display: Bricolage Grotesque (stand-in libre de Recoleta, ver PLAN §3/§4.2)
-const display = Bricolage_Grotesque({
+/* Display: FRAUNCES variable (ejes SOFT/WONK/opsz) — diseñada sobre Windsor/Cooper,
+   la familia histórica de los restaurantes cálidos, y hermana tipográfica del logo
+   (serif gorda y curva). Cierra la brecha logo↔sitio que Bricolage (geométrica,
+   tech) dejaba abierta. Si algún día llega la licencia de Recoleta, sigue primera
+   en la cadena de --pg-font-display. */
+const display = Fraunces({
   variable: "--font-display",
   subsets: ["latin"],
-  weight: ["600", "700", "800"],
+  axes: ["SOFT", "WONK", "opsz"],
   display: "swap",
 });
 

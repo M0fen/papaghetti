@@ -41,7 +41,10 @@
   --pg-step-0: 1.0625rem; /* 17px — cuerpo */
   --pg-step-1: 1.25rem; /* 20px — h3 menor */
   --pg-step-2: 1.5rem; /* 24px — h3 mayor */
-  --pg-step-3: clamp(1.9rem, 5.4vw, 3rem); /* h2 de sección */
+  --pg-step-3: clamp(2.1rem, 6vw, 3.4rem); /* h2 de sección */
+  /* CONTRASTE DE ESCALA 4:1 (la regla de los menús caros): el nivel héroe existe para
+     que el titular grite y el cuerpo susurre. Si todo vive entre 24 y 40px, es plantilla. */
+  --pg-step-4: clamp(2.8rem, 9vw, 4.8rem); /* titular héroe */
 
   /* LA HEBRA como primitiva de marca: una sola teja que se repite. Sirve de subrayado,
      separador y viñeta sin un solo nodo extra en el DOM ni una imagen que descargar. */
@@ -96,9 +99,13 @@ body {
 }
 h1, h2, h3 {
   font-family: var(--pg-font-display);
-  font-weight: 700;
-  line-height: 1.02;
-  letter-spacing: -0.01em;
+  /* Fraunces variable: SOFT alto = curvas golosas ("rounded, bold, yummy" — el patrón
+     Burger King/Chobani), WONK = el detalle artesanal en las astas. opsz alto para
+     display. El peso 640 es el punto dulce: gordo sin tapar los contraformas. */
+  font-weight: 640;
+  font-variation-settings: "SOFT" 78, "WONK" 1, "opsz" 72;
+  line-height: 1.04;
+  letter-spacing: -0.015em;
   margin: 0;
 }
 a {
@@ -117,8 +124,62 @@ a {
   padding-inline: 22px;
 }
 .section {
-  padding-block: clamp(64px, 10vw, 120px);
+  /* 120px de tope generaba, sumado a los divisores, vacíos de ~400px en desktop:
+     aire muerto, no lujo. El lujo es proporción, no kilómetros. */
+  padding-block: clamp(56px, 8vw, 92px);
   position: relative;
+}
+
+/* GRANO DE PAPEL KRAFT en toda la página (patrón Roman's/Crav: el fondo con textura
+   sutil es lo que separa "color plano de plantilla" de "papel de restaurante"). Un solo
+   feTurbulence en data-URI, capa fija con soft-light — coste de render ~nulo, cero JS. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 240px 240px;
+  opacity: 0.05;
+  mix-blend-mode: soft-light;
+}
+
+/* Titulares que jamás dejan viudas; párrafos sin ríos (coste cero, browsers modernos) */
+h1,
+h2,
+h3,
+.hero__tagline {
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
+}
+
+/* La promo entera es un enlace que EMPUJA al pedido — y SIEMPRE en una línea: si
+   envuelve a dos, corre el nav 38px y aplasta el hero en móvil */
+.promobar--link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: filter var(--pg-dur-fast);
+}
+.promobar__txt {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100vw - 120px); /* deja sitio FIJO al "→ Pedir": el texto cede, el CTA jamás */
+  display: inline-block;
+  vertical-align: middle;
+}
+.promobar--link:hover {
+  filter: brightness(1.06);
+}
+.promobar__cta {
+  margin-left: 10px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
 }
 .section--dark {
   background: var(--pg-espresso);
@@ -240,56 +301,9 @@ a {
   color: var(--pg-pomodoro);
 }
 
-/* Barra de progreso-hebra lateral */
-.scroll-hebra {
-  position: fixed;
-  top: 0;
-  right: 12px;
-  height: 100vh;
-  width: 22px;
-  z-index: 40;
-  pointer-events: none;
-}
-.scroll-hebra path {
-  fill: none;
-  stroke-width: 4;
-  stroke-linecap: round;
-}
-.scroll-hebra .track {
-  stroke: rgba(30, 22, 17, 0.12);
-}
-.scroll-hebra .fill {
-  stroke: var(--pg-oro);
-  stroke-dasharray: var(--len);
-  stroke-dashoffset: calc(var(--len) - var(--len) * var(--progress, 0));
-}
-
-/* =========================================================================
-   CURSOR-TENEDOR
-   ========================================================================= */
-.fork-cursor {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 34px;
-  height: 34px;
-  margin: -17px 0 0 -17px;
-  z-index: 60;
-  pointer-events: none;
-  color: var(--pg-pomodoro);
-  transform: translate(-100px, -100px);
-  transition: transform 60ms linear, opacity var(--pg-dur);
-  will-change: transform;
-}
-.fork-cursor.twirl svg {
-  animation: fork-twirl 700ms var(--pg-ease-twirl);
-}
-@keyframes fork-twirl {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
+/* (La hebra-progreso lateral y el cursor-tenedor murieron en la auditoría de calidad:
+   la primera se leía como artefacto pegado al borde; el segundo rompe accesibilidad
+   y no existe en móvil. El fideo ahora vive DENTRO del layout.) */
 /* =========================================================================
    REVEAL on scroll
    ========================================================================= */
@@ -332,9 +346,114 @@ a {
   background: radial-gradient(120% 100% at 50% 34%, #f4e4c9 0%, #f4e4c9 64%, #ead7b2 100%);
   padding-block: 92px 34px;
 }
+/* HERO v2: identidad (logo) + APETITO (la foto de la caja como objeto héroe).
+   Móvil: copy → FOTO → pasos (la comida arriba del pliegue). Desktop: dos columnas,
+   la foto ocupa la derecha completa y el copy respira a la izquierda. */
 .hero__inner {
   position: relative;
   z-index: 5;
+  display: grid;
+  grid-template-areas: "copy" "plato" "steps";
+  gap: 26px;
+  width: 100%;
+  align-items: center;
+}
+.hero__copy {
+  grid-area: copy;
+}
+.hero__plato {
+  grid-area: plato;
+  position: relative;
+  width: min(78vw, 400px);
+  margin-inline: auto;
+}
+.hero__steps {
+  grid-area: steps;
+}
+.hero__foto {
+  width: 100%;
+  height: auto;
+  border-radius: 30px;
+  border: 9px solid #fffdf4; /* marco de servilleta: la foto es un objeto, no un bloque */
+  box-shadow: var(--pg-shadow-lg);
+  transform: rotate(-2deg);
+}
+/* ingredientes FLOTANDO alrededor del plato (patrón hero F&B premiado); en browsers
+   con scroll-driven animations además hacen parallax al desplazarse */
+.hero__flot {
+  position: absolute;
+  width: clamp(52px, 8vw, 84px);
+  filter: drop-shadow(0 10px 14px rgba(30, 22, 17, 0.3));
+  animation: flot 6.4s ease-in-out infinite alternate;
+}
+.hero__flot--a {
+  top: -5%;
+  left: -9%;
+  animation-duration: 7.1s;
+  rotate: -12deg;
+}
+.hero__flot--b {
+  top: 34%;
+  right: -11%;
+  animation-duration: 5.9s;
+  animation-delay: -2.1s;
+  rotate: 9deg;
+}
+.hero__flot--c {
+  bottom: -4%;
+  left: -4%;
+  width: clamp(44px, 6.5vw, 68px);
+  animation-duration: 6.7s;
+  animation-delay: -4s;
+  rotate: 6deg;
+}
+@keyframes flot {
+  from {
+    transform: translateY(-7px);
+  }
+  to {
+    transform: translateY(9px);
+  }
+}
+@supports (animation-timeline: view()) {
+  .hero__flot {
+    animation:
+      flot 6.4s ease-in-out infinite alternate,
+      flot-par linear both;
+    animation-timeline: auto, view();
+  }
+}
+@keyframes flot-par {
+  from {
+    translate: 0 0;
+  }
+  to {
+    translate: 0 -46px;
+  }
+}
+@media (min-width: 920px) {
+  .hero__inner {
+    grid-template-areas:
+      "copy plato"
+      "steps plato";
+    grid-template-columns: 1.02fr 0.88fr;
+    column-gap: 48px;
+    text-align: left;
+  }
+  .hero__plato {
+    width: 100%;
+    max-width: 460px;
+    justify-self: center;
+  }
+  .hero__cta {
+    justify-content: flex-start;
+  }
+  .hero__steps {
+    margin-inline: 0;
+  }
+  .hero__logo {
+    margin-inline: 0;
+  }
 }
 .hero__kicker {
   font-family: var(--pg-font-body);
@@ -372,10 +491,23 @@ a {
 }
 .hero__tagline {
   font-family: var(--pg-font-display);
-  font-size: clamp(1.1rem, 3.5vw, 1.7rem);
+  /* La voz de la casa en Fraunces con cuerpo: susurra menos que un h1, canta más
+     que un párrafo (contraste 4:1 contra el cuerpo de 17px) */
+  font-size: clamp(1.3rem, 4.2vw, 2rem);
+  font-weight: 560;
+  font-variation-settings: "SOFT" 88, "WONK" 1, "opsz" 40;
+  line-height: 1.22;
+  color: var(--pg-espresso);
   margin-top: 16px;
+  max-width: 21ch;
+  margin-inline: auto;
   opacity: 0;
   animation: fade-up 0.6s var(--pg-ease-twirl) 0.5s forwards;
+}
+@media (min-width: 920px) {
+  .hero__tagline {
+    margin-inline: 0;
+  }
 }
 .hero__cta {
   margin-top: 26px;
@@ -440,9 +572,10 @@ a {
 /* Logo animado del hero (video + fallback PNG), fundido con el fondo crema */
 .hero__logo {
   position: relative;
-  width: min(92vw, 680px);
+  /* Cede escenario a la comida (la foto es el objeto héroe): el logo firma, no domina */
+  width: min(86vw, 520px);
   aspect-ratio: 16 / 10;
-  max-height: 46vh;
+  max-height: 34vh;
   margin: 6px auto 2px;
   /* fundido suave de los bordes como seguro extra sobre el color exacto */
   /* red de seguridad para los bordes, ya sin trabajo pesado que hacer */
@@ -467,26 +600,65 @@ a {
   animation: fade-up 0.6s var(--pg-ease-twirl) 0.68s forwards;
 }
 
-/* 3 pasos integrados al hero (didáctico, mobile-first) */
+/* 3 pasos integrados al hero, CONECTADOS por la hebra (Dashi: el fideo como sistema) */
 .hero__steps {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: 10px;
   max-width: 520px;
-  margin: 20px auto 0;
+  margin: 6px auto 0;
   opacity: 0;
   animation: fade-up 0.6s var(--pg-ease-twirl) 0.62s forwards;
 }
+.hero__hilo {
+  position: absolute;
+  left: -2%;
+  right: -2%;
+  top: 50%;
+  width: 104%;
+  height: 12px;
+  transform: translateY(-50%);
+  z-index: 0;
+  overflow: visible;
+}
+.hero__hilo path {
+  fill: none;
+  stroke: var(--pg-oro);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: hilo-dibuja 1.1s var(--pg-ease-twirl) 1s forwards;
+}
+@keyframes hilo-dibuja {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
 .hstep {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 3px;
   padding: 12px 6px;
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 253, 244, 0.82);
   border: 1px solid rgba(30, 22, 17, 0.08);
   border-radius: 16px;
   backdrop-filter: blur(3px);
+}
+/* CÓDIGO DE COLOR de los 3 pasos (patrón Marco Pasta): el cliente lo aprende aquí y lo
+   reencuentra en la carta y en el juego. base=oro · proteína=pomodoro · topping=perejil */
+.hstep--oro {
+  border-top: 3px solid var(--pg-oro);
+}
+.hstep--pomodoro {
+  border-top: 3px solid var(--pg-pomodoro);
+}
+.hstep--perejil {
+  border-top: 3px solid var(--pg-perejil);
 }
 .hstep__n {
   width: 22px;
@@ -498,6 +670,13 @@ a {
   font-size: 0.78rem;
   display: grid;
   place-items: center;
+}
+.hstep--oro .hstep__n {
+  background: var(--pg-oro);
+  color: var(--pg-espresso);
+}
+.hstep--perejil .hstep__n {
+  background: var(--pg-perejil);
 }
 /* icono de sección en las cards de ubicación (reemplaza a los emojis) */
 .loc__ico {
@@ -4510,10 +4689,118 @@ body.enreda-jugando .nav {
     scroll-snap-align: start;
     white-space: nowrap;
   }
+  /* fade al borde: insinúa que la fila de links SIGUE (sin él, el corte parece bug) */
+  .nav__links {
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+    mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+  }
+  /* el hero arranca BAJO el nav de dos filas + promo (antes el kicker quedaba sepultado) */
+  .hero {
+    padding-top: 138px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .plato:hover {
     transform: none;
   }
+}
+
+/* =========================================================================
+   CTA STICKY móvil — "Pedir" al alcance del pulgar pasado el hero
+   ========================================================================= */
+.sticky-pedir {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  z-index: 55;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 15px 22px;
+  border-radius: var(--pg-radius-pill);
+  background: var(--pg-pomodoro);
+  color: var(--pg-crema);
+  font-weight: 800;
+  font-size: 1.02rem;
+  box-shadow: 0 14px 30px -10px rgba(122, 31, 18, 0.55);
+  transform: translateY(130%);
+  transition: transform 0.38s var(--pg-ease-twirl);
+}
+.sticky-pedir.is-on {
+  transform: none;
+}
+@media (max-width: 860px) {
+  .sticky-pedir {
+    display: flex;
+  }
+}
+body.enreda-jugando .sticky-pedir {
+  display: none !important;
+}
+
+/* =========================================================================
+   RESEÑAS — prueba social (solo con contenido real, ver resenas-data.ts)
+   ========================================================================= */
+.resenas {
+  padding-block: clamp(28px, 4vw, 48px);
+}
+.resenas__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+.resena {
+  margin: 0;
+  padding: 18px 20px;
+  background: rgba(255, 253, 244, 0.85);
+  border: 1px solid rgba(30, 22, 17, 0.08);
+  border-radius: var(--pg-radius-lg);
+  box-shadow: var(--pg-shadow);
+}
+.resena__stars {
+  color: var(--pg-oro);
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+.resena blockquote {
+  margin: 0 0 10px;
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+.resena figcaption {
+  font-weight: 700;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+/* =========================================================================
+   404 — "este enredo no existe" (los premiados diseñan los estados invisibles)
+   ========================================================================= */
+.nf {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(120% 100% at 50% 34%, #f4e4c9 0%, var(--pg-crema) 70%);
+  text-align: center;
+}
+.nf__card h1 {
+  font-size: var(--pg-step-4);
+  margin: 10px 0 14px;
+}
+.nf__txt {
+  max-width: 42ch;
+  margin-inline: auto;
+  opacity: 0.85;
+}
+.nf__hebra {
+  max-width: 380px;
+  margin: 18px auto 26px;
+}
+.nf__hebra .hebra-draw-path {
+  stroke-dashoffset: 0; /* en la 404 la hebra ya está dibujada */
 }

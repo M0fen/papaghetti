@@ -1,7 +1,5 @@
 import Nav from "@/components/Nav";
 import PromoBanner from "@/components/PromoBanner";
-import ForkCursor from "@/components/ForkCursor";
-import ScrollHebra from "@/components/ScrollHebra";
 import Hero from "@/components/Hero";
 import EnredaTuPlato from "@/components/EnredaTuPlato";
 import JuegoProvider from "@/components/JuegoProvider";
@@ -12,6 +10,9 @@ import Story from "@/components/Story";
 import Location from "@/components/Location";
 import Footer from "@/components/Footer";
 import Reveal from "@/components/Reveal";
+import Motion from "@/components/Motion";
+import Resenas from "@/components/Resenas";
+import StickyPedir from "@/components/StickyPedir";
 import { DividerHebra } from "@/components/Hebra";
 import { getCatalog } from "@/lib/catalog";
 
@@ -41,10 +42,12 @@ export default async function Home() {
         Saltar al contenido
       </a>
       <DatosEstructurados catalog={catalog} />
+      {/* El cursor-tenedor y la hebra-progreso lateral murieron en la auditoría:
+          el cursor custom rompe accesibilidad y no existe en móvil (80%+ del tráfico);
+          la hebra lateral se leía como artefacto. El fideo vive ahora DENTRO del
+          layout (conector de pasos, divisores que se dibujan), no flotando encima. */}
       <PromoBanner ajustes={ajustes} />
       <Nav offsetTop={hayBanner ? 38 : 0} />
-      <ForkCursor />
-      <ScrollHebra />
       {/* El juego lo posee el proveedor: lo abren tanto la bifurcación como la ficha
           de un enredo insignia (ahí, ya emplatado). Una sola experiencia. */}
       <JuegoProvider
@@ -55,6 +58,7 @@ export default async function Home() {
       >
         <main>
           <Hero />
+          <Resenas />
           <EnredaTuPlato
             bases={catalog.bases}
             proteinas={catalog.proteinas}
@@ -76,6 +80,8 @@ export default async function Home() {
           <Story />
           <Location ajustes={catalog.ajustes} />
           <Footer />
+          <Motion />
+          <StickyPedir />
         </main>
       </JuegoProvider>
     </>
