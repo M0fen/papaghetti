@@ -3358,8 +3358,9 @@ export default function EmplataGame(props: {
               tx = ax + io * 3;
               pupil = 0.25;
               break;
-            case 14: // DORMIR (escalera de idles): se desploma sobre el borde y respira lento
-              ty = ay - up * (0.5 + 0.025 * Math.sin(age * 0.055));
+            case 14: // DORMIR (escalera de idles): recostado VISIBLE sobre el borde — cabeza
+              // y zzz por encima de la caja (antes se hundía y solo asomaba una z)
+              ty = ay - up * (0.68 + 0.03 * Math.sin(age * 0.055));
               tx = ax + io * boxW * 0.04;
               pupil = 0.6;
               break;
