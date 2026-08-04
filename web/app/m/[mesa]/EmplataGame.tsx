@@ -48,13 +48,19 @@ const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
    asoma; io = hacia dónde queda el interior de la caja. */
 /* PROTAGONISTA: con cuerpo 12px, gorro y pañuelo, el tallo vuelve a crecer (0.52→0.6) sin leer
    como palo — la relación queda ~9:1 y la toque corona la silueta. */
+/* ESCALA DE PROTAGONISTA: el estándar de los juegos reales (Cooking Mama, GPGP) es que el
+   personaje ocupe 15-30% de pantalla — a 16px de cabeza estaba un orden de magnitud por
+   debajo. `up` sube ~55% para que asome CABEZA + PECHO, no medio ojo tras el labio. */
 const HOMES = [
-  { axf: -0.42, ayf: -0.3, up: 0.6, io: 1 }, // costado izquierdo
-  { axf: 0.42, ayf: -0.3, up: 0.6, io: -1 }, // costado derecho
-  { axf: 0.0, ayf: -0.52, up: 0.46, io: 0 }, // asoma por ARRIBA (centro)
-  { axf: -0.24, ayf: -0.48, up: 0.5, io: 1 }, // arriba-izquierda
-  { axf: 0.24, ayf: -0.48, up: 0.5, io: -1 }, // arriba-derecha
+  { axf: -0.42, ayf: -0.3, up: 0.8, io: 1 }, // costado izquierdo
+  { axf: 0.42, ayf: -0.3, up: 0.8, io: -1 }, // costado derecho
+  { axf: 0.0, ayf: -0.52, up: 0.62, io: 0 }, // asoma por ARRIBA (centro)
+  { axf: -0.24, ayf: -0.48, up: 0.7, io: 1 }, // arriba-izquierda
+  { axf: 0.24, ayf: -0.48, up: 0.7, io: -1 }, // arriba-derecha
 ];
+/* Escala del CUERPO del chef en reposo (los personajes de formas simples aguantan ser
+   grandes — Kirby/Rayman; el viewport no tiene scroll ni salto que lo impida). */
+const MASC_S = 1.38;
 const otroHome = (cur: number) => {
   let n = Math.floor(Math.random() * HOMES.length);
   if (n === cur) n = (n + 1) % HOMES.length;
@@ -1295,6 +1301,16 @@ export default function EmplataGame(props: {
       init: false,
       ctrl: nuevoCtrl(),
       tapVar: 0, // rota las reacciones al tap (jamás la misma dos veces seguidas)
+      // MANOPLAS flotantes estilo Rayman (sin brazos, sin IK): cada una persigue su target
+      // con muelle. h1 = mano del lado de la caja (la del cuchillo), h2 = la otra.
+      h1x: 0, h1y: 0, h1vx: 0, h1vy: 0,
+      h2x: 0, h2y: 0, h2vx: 0, h2vy: 0,
+      // FEEL del toque: squash reactivo (primer frame <16ms), escalada de taps, caricia, spam
+      sq: 0, sqv: 0, // muelle de squash del cuerpo (0 = reposo; + = estirado, − = aplastado)
+      tapN: 0, tapT: -9999, // taps consecutivos en ventana (escalada estilo Sackboy)
+      caressT: 0, caressAt: -9999, // caricia acumulada (drag sostenido sobre el chef)
+      lastInputT: 0, // último input global (escalera de idles: dormirse / cuarta pared)
+      spamGoal: 11, // umbral aleatorio 8-15 del premio por spam (Talking Tom)
     },
     t: 0,
     ts: 0, // reloj en SEGUNDOS (wd.t está en frames-a-60): la vida no puede depender del framerate
@@ -2498,6 +2514,20 @@ export default function EmplataGame(props: {
       const g = geo();
       dragging = downY > g.cardY - g.cardH / 2 - 10 * g.U;
       world.current.lastAct = world.current.t;
+      // escalera de idles: cualquier toque resetea; si dormía, DESPIERTA con sobresalto
+      {
+        const wdD = world.current;
+        wdD.masc.lastInputT = wdD.ts;
+        if (wdD.masc.mode === 14 || wdD.masc.mode === 15) {
+          wdD.masc.mode = 10;
+          wdD.masc.modeT = wdD.t;
+          wdD.masc.dur = 34;
+          wdD.masc.sq = 0.5; // estirón de susto en el PRIMER frame
+          wdD.masc.hvy -= 260;
+          s.tone(740, 0.05, "triangle", 0.05);
+          s.tone(1480, 0.06, "triangle", 0.045, undefined, 0.04);
+        }
+      }
       const c = cartaEn(downX, downY);
       world.current.pressed = c ? c.ing.id : "";
       canvas.setPointerCapture(e.pointerId);
@@ -2511,10 +2541,32 @@ export default function EmplataGame(props: {
         ptrTY = clamp(((e.clientY - rr.top) / H - 0.45) * 1.4, -1, 1);
         ptrT = performance.now();
       }
+      // mover el puntero cuenta como "estás ahí": resetea la escalera de idles; si el chef
+      // dormía y solo pasas el cursor, despierta SUAVE (mirar a cámara), sin sobresalto
+      {
+        const mm0 = world.current.masc;
+        mm0.lastInputT = world.current.ts;
+        if (mm0.mode === 14 && !e.buttons) {
+          mm0.mode = 6;
+          mm0.modeT = world.current.t;
+          mm0.dur = 70;
+        }
+      }
       if (!e.buttons) return;
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left;
       const y = e.clientY - r.top;
+      // CARICIA (drag sostenido sobre el chef, no tap): sella el instante; el loop acumula.
+      // La zona cubre cabeza Y cuerpo (si solo fuera la cabeza, al recostarse el chef hacia
+      // el dedo la propia pose rompía el contacto y los mimos nunca acumulaban).
+      {
+        const mm = world.current.masc;
+        const dChef = Math.min(
+          Math.hypot(x - mm.hx, y - mm.hy),
+          Math.hypot(x - mm.hx, y - (mm.hy + 48)),
+        );
+        if (!dragging && mm.init && dChef < 78) mm.caressAt = world.current.ts;
+      }
       maxExc = Math.max(maxExc, Math.hypot(x - downX, y - downY));
       if (maxExc > 10) world.current.pressed = "";
       if (dragging) {
@@ -2550,18 +2602,36 @@ export default function EmplataGame(props: {
       const y = e.clientY - r.top;
       world.current.lastAct = world.current.t;
       if (maxExc > 10) return; // fue drag: excursión máxima, no suma de temblores
-      // TAP SOBRE EL CHEF: responde (Tamagotchi: corto, interrumpible, y JAMÁS la misma
-      // reacción dos veces seguidas — rota reverencia / brinco / saludo)
+      // TAP SOBRE EL CHEF: squash en el PRIMER frame (<16ms, Swink), reacción rotada
+      // (jamás la misma dos veces), ESCALADA por taps consecutivos (Sackboy) y premio
+      // raro por spam (Talking Tom: al 8º-15º tap seguido, mareo cómico)
       {
-        const m = world.current.masc;
-        if (m.init && world.current.fideos.length === 0 && world.current.vuelos.length === 0 && Math.hypot(x - m.hx, y - m.hy) < 46) {
-          const pool = [13, 10, 4];
-          m.tapVar = (m.tapVar + 1) % pool.length;
-          m.mode = pool[m.tapVar];
-          m.modeT = world.current.t;
-          m.dur = 42;
-          s.tone(880, 0.06, "triangle", 0.055);
-          s.tone(1318, 0.07, "triangle", 0.05, 0.06);
+        const wdU = world.current;
+        const m = wdU.masc;
+        if (m.init && wdU.fideos.length === 0 && wdU.vuelos.length === 0 && Math.hypot(x - m.hx, y - m.hy) < 74) {
+          m.sq = -0.5; // aplastón inmediato: el frame siguiente YA responde
+          m.hvy += 240;
+          m.lastInputT = wdU.ts;
+          m.caressAt = -9999; // un tap no es caricia
+          m.tapN = wdU.ts - m.tapT < 2.2 ? m.tapN + 1 : 1;
+          m.tapT = wdU.ts;
+          if (m.tapN >= m.spamGoal) {
+            m.mode = 16; // MAREO: el premio por toquetearlo sin parar
+            m.modeT = wdU.t;
+            m.dur = 150;
+            m.tapN = 0;
+            m.spamGoal = 8 + Math.floor(Math.random() * 8); // re-sortea el umbral
+            s.tone(660, 0.5, "sine", 0.05, 300); // sirena descendente woozy
+          } else {
+            const pool = [13, 10, 4];
+            m.tapVar = (m.tapVar + 1) % pool.length;
+            m.mode = pool[m.tapVar];
+            m.modeT = wdU.t;
+            m.dur = 42;
+            const esc = 1 + 0.06 * Math.min(m.tapN, 6); // el tono SUBE con la escalada
+            s.tone(880 * esc, 0.06, "triangle", 0.055);
+            s.tone(1318 * esc, 0.07, "triangle", 0.05, undefined, 0.06);
+          }
           if (navigator.vibrate) navigator.vibrate(8);
           return;
         }
@@ -2645,6 +2715,11 @@ export default function EmplataGame(props: {
       /* Mirada al PUNTERO cuando está quieto (protagonista interactivo): −1..1 desplaza la
          pupila; 0 = sacadas de ruido de siempre. */
       lookX = 0,
+      /* 0..1: párpados que caen (caricia → entrecerrar; dormir → cerrados). */
+      sleepy = 0,
+      /* 0..1: dilatación de pupila por cercanía del puntero (la señal subliminal de Ori:
+         "me alegra verte" — nadie la nota conscientemente y todos la sienten). */
+      dil = 0,
     ) => {
       const wd = world.current;
       const S = scale; // el fideo escala con su objeto (p.ej. la caja crecida en la espera)
@@ -2848,40 +2923,51 @@ export default function EmplataGame(props: {
       ctx.beginPath();
       ctx.arc(-1.8, -2.4, 1.5, 0, TAU);
       ctx.fill();
-      // ===== EL CHEF: TOQUE BLANCA (el prop que convierte mascota en PROTAGONISTA — la silueta
-      // dice "chef" hasta en negro) + PAÑUELO al cuello en el tomate de la casa. Colores
-      // estáticos, cero allocs; como vive en drawFideo, el chef ES el chef también al repartir.
-      // (En este marco local, +y apunta HACIA FUERA de la hebra: el gorro va en +y, el cuello en −y.)
-      ctx.fillStyle = "#F4EDDD"; // banda del gorro, sobre la frente
+      ctx.restore();
+      // ===== EL CHEF: TOQUE ERGUIDA (billboard). Antes el gorro vivía en el marco rotado de la
+      // hebra: como la curva ENTRA a la cabeza desde arcos distintos, al inclinarse el globo
+      // blanco barría hacia el costado/abajo y se leía como BARBA pegada al ojo. Un chef de
+      // verdad no pierde la toque: corona SIEMPRE en pantalla, hereda solo una fracción de la
+      // inclinación (clamp) y un lean por inercia (se retrasa al moverse — follow-through).
+      const oxw = -Math.sin(ang + Math.PI / 2);
+      const oyw = Math.cos(ang + Math.PI / 2);
+      const hatLean =
+        clamp(Math.atan2(oxw, -oyw) * 0.45, -0.38, 0.38) + clamp(-hvx * 0.0012, -0.14, 0.14);
+      ctx.save();
+      ctx.translate(tipX, tipY);
+      ctx.rotate(hatLean);
+      ctx.scale(S * headScale, S * headScale);
+      ctx.fillStyle = "#F4EDDD"; // banda del gorro, sobre la frente (arriba en PANTALLA)
       ctx.beginPath();
-      ctx.roundRect(-5.6, 5.0, 11.2, 3.6, 1.4);
+      ctx.roundRect(-5.6, -8.6, 11.2, 3.6, 1.4);
       ctx.fill();
       ctx.fillStyle = "rgba(120,95,60,0.25)"; // sombra de contacto del gorro sobre la frente
-      ctx.fillRect(-5.2, 4.4, 10.4, 0.9);
+      ctx.fillRect(-5.2, -5.0, 10.4, 0.9);
       // el globo de la toque (tres nubes)
       ctx.fillStyle = "#FFFDF6";
       ctx.beginPath();
-      ctx.arc(-3.4, 10.2, 3.4, 0, TAU);
-      ctx.arc(0, 12, 4.1, 0, TAU);
-      ctx.arc(3.4, 10.2, 3.4, 0, TAU);
+      ctx.arc(-3.4, -10.2, 3.4, 0, TAU);
+      ctx.arc(0, -12, 4.1, 0, TAU);
+      ctx.arc(3.4, -10.2, 3.4, 0, TAU);
       ctx.fill();
       ctx.fillStyle = "rgba(200,180,140,0.28)"; // pliegue del globo contra la banda
       ctx.beginPath();
-      ctx.ellipse(0, 8.9, 4.6, 1.1, 0, 0, TAU);
+      ctx.ellipse(0, -8.9, 4.6, 1.1, 0, 0, TAU);
       ctx.fill();
-      // pañuelo rojo al cuello (lado del cuerpo = −y local): nudo + una punta al viento
+      // pañuelo rojo de chef: NUDO bajo el mentón, la punta cuelga con la GRAVEDAD (además
+      // tapa la costura cabeza-cuerpo, que antes quedaba a la vista)
       ctx.fillStyle = "#C8321E";
       ctx.beginPath();
-      ctx.moveTo(-3.4, -5.6);
-      ctx.lineTo(3.4, -5.6);
-      ctx.lineTo(0, -8.2);
+      ctx.moveTo(-3.4, 5.6);
+      ctx.lineTo(3.4, 5.6);
+      ctx.lineTo(0, 8.4);
       ctx.closePath();
       ctx.fill();
       ctx.fillStyle = "#A72413";
       ctx.beginPath();
-      ctx.moveTo(0.4, -6.2);
-      ctx.lineTo(3.2, -6.0);
-      ctx.lineTo(2.4, -9.4);
+      ctx.moveTo(0.4, 6.2);
+      ctx.lineTo(3.2, 6.0);
+      ctx.lineTo(2.4, 9.6);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -2898,7 +2984,9 @@ export default function EmplataGame(props: {
         const tb0 = kb * 2.4 + 1.2 + fbm(kb * 1.7) * 0.9;
         const dtb = bt - tb0;
         const doble = fbm(kb * 3.3) > 0.55;
-        const blink = (dtb > 0 && dtb < 0.11) || (doble && dtb > 0.29 && dtb < 0.4) ? 0.12 : 1;
+        const blink0 = (dtb > 0 && dtb < 0.11) || (doble && dtb > 0.29 && dtb < 0.4) ? 0.12 : 1;
+        // párpados caídos (caricia/sueño) por encima del parpadeo normal
+        const blink = Math.max(0.08, blink0 * (1 - sleepy * 0.92));
         const spd2 = Math.hypot(hvx, hvy);
         // quieto: sigue al PUNTERO si hay uno reciente (lookX); si no, sacadas lentas de ruido
         const lx = spd2 > 10 ? clamp(hvx / spd2, -1, 1) * 1.3 : lookX !== 0 ? clamp(lookX, -1, 1) * 1.25 : fbm(wd.ts * 0.19 + seed) * 0.9;
@@ -2916,9 +3004,9 @@ export default function EmplataGame(props: {
           ctx.beginPath();
           ctx.arc(0, 0, 2.4, 0, TAU);
           ctx.fill();
-          ctx.fillStyle = "#2A1608"; // pupila
+          ctx.fillStyle = "#2A1608"; // pupila (se dilata con la cercanía del puntero)
           ctx.beginPath();
-          ctx.arc(lx, ly, 1.35, 0, TAU);
+          ctx.arc(lx, ly, 1.35 * (1 + dil * 0.32), 0, TAU);
           ctx.fill();
           if (blink > 0.5) {
             ctx.fillStyle = "rgba(255,255,255,0.95)";
@@ -2944,6 +3032,43 @@ export default function EmplataGame(props: {
         ctx.stroke();
         ctx.restore();
       }
+    };
+
+    /* MANOPLA de chef flotante (el hallazgo Rayman: manos SIN brazos = silueta legible,
+       alcance libre y cero IK). Palma + pulgar + pliegue del puño; `flip` orienta el pulgar
+       hacia adentro en cada lado. Tres fills planos — sin gradientes, sin allocs. */
+    const dibujaManopla = (x: number, y: number, flip: number, sc: number, rot: number) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      ctx.scale(flip * sc, sc);
+      ctx.fillStyle = "rgba(50,28,10,0.22)"; // sombra propia ↘
+      ctx.beginPath();
+      ctx.ellipse(1.3, 1.7, 4.5, 3.9, 0, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = "#FFFDF6"; // palma + pulgar
+      ctx.beginPath();
+      ctx.arc(0, 0, 4.3, 0, TAU);
+      ctx.arc(-3.3, -2.3, 2.0, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = "rgba(200,180,140,0.4)"; // pliegue del puño (lado del cuerpo)
+      ctx.beginPath();
+      ctx.ellipse(0, 3.3, 3.4, 1.15, 0, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    };
+    /* Corazoncito plano (payoff de la caricia, estilo Nintendogs). */
+    const dibujaCorazon = (x: number, y: number, sc: number) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(sc, sc);
+      ctx.fillStyle = "#E0483A";
+      ctx.beginPath();
+      ctx.moveTo(0, 3);
+      ctx.bezierCurveTo(-4.2, -0.8, -2.4, -4.6, 0, -2.1);
+      ctx.bezierCurveTo(2.4, -4.6, 4.2, -0.8, 0, 3);
+      ctx.fill();
+      ctx.restore();
     };
 
     const frame = (now: number) => {
@@ -3110,11 +3235,26 @@ export default function EmplataGame(props: {
           m.init = true;
           m.hx = ax;
           m.hy = ay - up * 0.6;
+          m.h1x = m.h2x = ax;
+          m.h1y = m.h2y = m.hy + 20;
           m.modeT = wd.t;
         }
         // REACCIÓN por sabor: al aterrizar un ingrediente, el fideo hace un gesto temático
         const react = wd.reactMode >= 0 && wd.t - wd.reactT < 48;
-        if (wd.t - m.modeT > m.dur && !react) {
+        // ESCALERA DE IDLES (Sonic/Crash): sin input ~22s → se DUERME sobre la caja; a los
+        // ~40s, desde el sueño, rompe la cuarta pared (despierta, mira a cámara y saluda) y
+        // vuelve a dormirse. Cualquier input lo despierta con sobresalto (en los handlers).
+        const inact = wd.ts - m.lastInputT;
+        if (!react && inact > 22 && m.mode !== 14 && m.mode !== 15 && m.mode !== 16) {
+          m.mode = 14;
+          m.modeT = wd.t;
+          m.dur = 900;
+        } else if (!react && inact > 40 && m.mode === 14 && wd.t - m.modeT > 500) {
+          m.mode = 15; // cuarta pared: "¿emplatamos?"
+          m.modeT = wd.t;
+          m.dur = 120;
+        } else if (wd.t - m.modeT > m.dur && !react && wd.ts - m.caressAt > 0.4) {
+          // (mientras lo ACARICIAN no se muda ni cambia de gesto: se queda a gusto — Nintendogs)
           let nm = Math.floor(Math.random() * 9); // 0-7 clásicos + AFILAR el cuchillo
           if (nm === m.mode) nm = (nm + 1) % 9;
           if (nm === 8) nm = 12; // 8-11 son reacciones por sabor; el afilado vive en 12
@@ -3199,6 +3339,21 @@ export default function EmplataGame(props: {
               tx = ax + io * 3;
               pupil = 0.25;
               break;
+            case 14: // DORMIR (escalera de idles): se desploma sobre el borde y respira lento
+              ty = ay - up * (0.5 + 0.025 * Math.sin(age * 0.055));
+              tx = ax + io * boxW * 0.04;
+              pupil = 0.6;
+              break;
+            case 15: // CUARTA PARED: despierta, MIRA A CÁMARA y saluda al cliente ("¿emplatamos?")
+              ty = ay - up * (age < 10 ? 0.7 : 1.06);
+              tx = ax + Math.sin(age * 0.5) * 5;
+              pupil = 0.1; // directo a cámara
+              break;
+            case 16: // MAREO (premio por spam de taps, Talking Tom): tambaleo + ojos perdidos
+              tx = ax + Math.sin(age * 0.31) * boxW * 0.07;
+              ty = ay - up * (0.88 + 0.06 * Math.sin(age * 0.57));
+              pupil = Math.sin(age * 0.45) * 1.1;
+              break;
             default: // 11: premium: reverencia (baja y sube con gracia)
               ty = ay - up * (age < 18 ? 0.42 : 1.06);
               tx = ax;
@@ -3211,30 +3366,137 @@ export default function EmplataGame(props: {
         // Un bob vertical del objetivo sube y baja la criatura entera — la lectura clásica de
         // "está viva". Determinista (wd.ts + seed), sin allocaciones ni draw calls.
         ty += Math.sin(TAU * 0.26 * wd.ts + 5) * up * 0.03;
+        // ATENCIÓN EN DOS CAPAS (el sistema de mirada de HL2/Trico): la PUPILA salta rápido
+        // al puntero (lookP de siempre) y el CUERPO lo persigue despacio — el desfase
+        // pupila-rápida/cuerpo-lento ES la vida. El interés se GASTA (ventana de 2.5 s):
+        // si dejas el dedo quieto, el chef se distrae — eso hace creíble que te mire.
+        const ptrFresh = !sensorLive && performance.now() - ptrT < 2500;
+        const px = (ptrTX / 1.2 + 0.5) * W;
+        const py = (ptrTY / 1.4 + 0.45) * H;
+        if (ptrFresh && em !== 14 && em !== 15) tx += clamp((px - ax) * 0.06, -14, 14);
+        // CARICIA (Nintendogs): el drag sostenido sobre el chef acumula; los párpados caen
+        // gradualmente y al superar ~1.6 s llega el payoff (corazoncitos + campanita).
+        const caressing = wd.ts - m.caressAt < 0.15;
+        m.caressT = caressing ? Math.min(3, m.caressT + dt) : Math.max(0, m.caressT - dt * 2);
+        if (m.caressT > 1.6 && m.caressT - dt <= 1.6) {
+          s.tone(1567, 0.09, "sine", 0.05);
+          s.tone(2093, 0.11, "sine", 0.04, 0.07);
+        }
+        if (caressing) {
+          // la caricia MANDA sobre la pose: el chef SUBE a recibirla y se recuesta hacia el
+          // dedo (si no, un modo tímido como "esconderse" lo dejaba oculto mientras lo mimas)
+          tx = ax + clamp((px - ax) * 0.15, -12, 12);
+          ty = ay - up * 0.84 + 4;
+        }
         [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, react ? 240 : 170, react ? 22 : 19, dt);
         [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, react ? 240 : 170, react ? 22 : 19, dt);
         m.pupil += (pupil - m.pupil) * (1 - Math.pow(0.86, df));
-        // MIRADA AL PUNTERO (protagonista interactivo): si hay puntero reciente y no hay sensor,
-        // la pupila sigue el cursor/dedo; si no, sacadas de ruido de siempre.
-        const lookP =
-          !sensorLive && performance.now() - ptrT < 2500
-            ? clamp(((ptrTX / 1.2 + 0.5) * W - m.hx) / 130, -1, 1)
-            : 0;
-        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy, 1, m.ctrl, 1.5, lookP);
-        // el CUCHILLO en mano durante el afilado: serrucho corto contra una chaira invisible,
-        // con TINGS de chispa ocasionales en el filo (el maestro cuida su herramienta)
+        const lookP = ptrFresh ? clamp((px - m.hx) / 130, -1, 1) : 0;
+        // SQUASH reactivo (primer frame <16ms): el tap patea sq en el handler; aquí el muelle
+        // subamortiguado lo devuelve con 1-2 rebotes. Escala TODO el chef (cuerpo+cabeza+manos).
+        [m.sq, m.sqv] = springStep(m.sq, m.sqv, 0, 90, 9, dt);
+        const MS = MASC_S * (1 + m.sq * 0.18);
+        // dilatación de pupila por CERCANÍA del puntero (subliminal, Ori)
+        const dil = ptrFresh ? 1 - clamp(Math.hypot(px - m.hx, py - m.hy) / 240, 0, 1) : 0;
+        const sleepyV = em === 14 ? 1 : clamp(m.caressT / 1.8, 0, 1) * 0.75;
+        // ---- MANOPLAS: targets por modo (la FSM solo mueve targets; los muelles interpolan) ----
+        const lat = io === 0 ? 1 : io; // en el home central no hay "lado": elige uno
+        const swy = Math.sin(wd.ts * 1.3 + 2) * 2.2;
+        let t1x = m.hx + lat * 17 * MS;
+        let t1y = m.hy + 27 * MS + swy;
+        let t2x = m.hx - lat * 17 * MS;
+        let t2y = m.hy + 27 * MS - swy * 0.7;
+        let kx = 0;
+        let ky = 0;
+        let krot = 0;
+        if (em === 4 || em === 15) {
+          // saludo (al frente en 4; a CÁMARA en la cuarta pared): la mano exterior ondea alto
+          t2x = m.hx - lat * 22 * MS + Math.sin(age * 0.55) * 9;
+          t2y = m.hy - 20 * MS;
+        } else if (em === 12) {
+          // AFILAR: el cuchillo VIVE en la manopla (serrucho corto), la otra hace de chaira
+          kx = m.hx + lat * 20 * MS + Math.sin(age * 0.5) * 4.5;
+          ky = m.hy + 16 * MS;
+          krot = lat * -0.35 + Math.sin(age * 0.5) * 0.16;
+          t1x = kx - lat * 18 * MS;
+          t1y = ky + 3;
+          t2x = m.hx - lat * 10 * MS;
+          t2y = m.hy + 20 * MS;
+        } else if (em === 13 || em === 11) {
+          // reverencia: brazos abiertos de maestro
+          t1x = m.hx + lat * 26 * MS;
+          t1y = m.hy + 8 * MS;
+          t2x = m.hx - lat * 26 * MS;
+          t2y = m.hy + 8 * MS;
+        } else if (em === 10) {
+          // brinco contento: las dos arriba
+          t1x = m.hx + lat * 15 * MS;
+          t1y = m.hy - 16 * MS;
+          t2x = m.hx - lat * 15 * MS;
+          t2y = m.hy - 16 * MS;
+        } else if (em === 2) {
+          // curiosear la bandeja: una mano SEÑALA hacia abajo
+          t1x = m.hx + lat * 6 * MS;
+          t1y = m.hy + 44 * MS;
+        } else if (em === 16) {
+          // mareo: manos a la cabeza
+          t1x = m.hx + lat * 13 * MS;
+          t1y = m.hy - 4 * MS;
+          t2x = m.hx - lat * 13 * MS;
+          t2y = m.hy - 4 * MS;
+        } else if (em === 14) {
+          // dormido: las manos caen juntas al regazo
+          t1x = m.hx + lat * 8 * MS;
+          t1y = m.hy + 30 * MS;
+          t2x = m.hx - lat * 8 * MS;
+          t2y = m.hy + 30 * MS;
+        } else if (em === 8) {
+          // crunch-nod: puños al pecho
+          t1x = m.hx + lat * 10 * MS;
+          t1y = m.hy + 22 * MS;
+          t2x = m.hx - lat * 10 * MS;
+          t2y = m.hy + 22 * MS;
+        }
+        [m.h1x, m.h1vx] = springStep(m.h1x, m.h1vx, t1x, 230, 20, dt);
+        [m.h1y, m.h1vy] = springStep(m.h1y, m.h1vy, t1y, 230, 20, dt);
+        [m.h2x, m.h2vx] = springStep(m.h2x, m.h2vx, t2x, 230, 20, dt);
+        [m.h2y, m.h2vy] = springStep(m.h2y, m.h2vy, t2y, 230, 20, dt);
+        drawFideo(ax, ay, m.hx, m.hy, 5, null, true, m.pupil, m.hvx, m.hvy, MS, m.ctrl, 1.85, lookP, sleepyV, dil);
+        // el CUCHILLO en la manopla durante el afilado, con TINGS de chispa en el filo
         if (em === 12 && wd.knife && !reduce) {
-          const kx = m.hx + io * 17 + Math.sin(age * 0.5) * 4;
-          const ky = m.hy + 10;
           ctx.save();
           ctx.translate(kx, ky);
-          ctx.rotate(io * -0.35 + Math.sin(age * 0.5) * 0.16);
-          ctx.drawImage(wd.knife, -24, -4.8, 48, 12.7);
+          ctx.rotate(krot);
+          ctx.drawImage(wd.knife, -24 * MS, -4.8 * MS, 48 * MS, 12.7 * MS);
           ctx.restore();
           if (Math.random() < 0.018 * df) {
-            wd.chispas.push({ x: kx + io * 16, y: ky - 2, vx: io * 1.2, vy: -1.4, rot: 0, vr: 0.2, life: 0.5 });
+            wd.chispas.push({ x: kx + lat * 16 * MS, y: ky - 2, vx: lat * 1.2, vy: -1.4, rot: 0, vr: 0.2, life: 0.5 });
             s.tone(2100, 0.03, "triangle", 0.02); // ting
           }
+        }
+        // las manoplas SIEMPRE visibles (delante del cuerpo y del cuchillo: agarran el mango)
+        const mScGlove = MS * 1.05;
+        dibujaManopla(m.h1x, m.h1y, 1, mScGlove, clamp(m.h1vx * 0.002, -0.4, 0.4));
+        dibujaManopla(m.h2x, m.h2y, -1, mScGlove, clamp(m.h2vx * 0.002, -0.4, 0.4));
+        // zzz del sueño (vector barato, fase determinista — sin estado ni allocs)
+        if (em === 14) {
+          ctx.fillStyle = "rgba(90,60,20,0.6)";
+          ctx.font = "600 11px system-ui, sans-serif";
+          for (let zi = 0; zi < 3; zi++) {
+            const ph = (wd.ts * 0.38 + zi * 0.34) % 1;
+            ctx.globalAlpha = (1 - ph) * 0.7;
+            ctx.fillText("z", m.hx + 16 * MS + zi * 5 + Math.sin(ph * 6 + zi) * 3, m.hy - (10 + ph * 26) * MS);
+          }
+          ctx.globalAlpha = 1;
+        }
+        // corazoncitos del payoff de la caricia
+        if (m.caressT > 1.6) {
+          for (let hi = 0; hi < 2; hi++) {
+            const ph = (wd.ts * 0.5 + hi * 0.5) % 1;
+            ctx.globalAlpha = (1 - ph) * 0.85;
+            dibujaCorazon(m.hx + (hi ? -11 : 11) + Math.sin(ph * 8 + hi) * 3, m.hy - (14 + ph * 30) * MS, MS * (0.9 + 0.25 * Math.sin(ph * 3)));
+          }
+          ctx.globalAlpha = 1;
         }
       }
 
@@ -4528,7 +4790,7 @@ export default function EmplataGame(props: {
           tipXe = anchXe + boxW * 0.04 * fs; // reverencia
           tipYe = anchYe - stand * (0.55 + 0.05 * Math.sin(wd.t * 0.05));
         }
-        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, est === "cocina" ? 1.0 : 0.4, 0, 0, fs * 1.4);
+        drawFideo(anchXe, anchYe, tipXe, tipYe, 5.5, null, true, est === "cocina" ? 1.0 : 0.4, 0, 0, fs * 1.4, null, 1.2);
         // la comanda kraft que lleva el fideo (recibido)
         if (ticket) {
           ctx.save();
@@ -4674,7 +4936,7 @@ export default function EmplataGame(props: {
         [fd.hx, fd.hvx] = springStep(fd.hx!, fd.hvx!, tipX, 320, 26, dt);
         [fd.hy, fd.hvy] = springStep(fd.hy!, fd.hvy!, tipY, 320, 26, dt);
         if (!fd.ctrl) fd.ctrl = nuevoCtrl();
-        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true, 0.35, fd.hvx ?? 0, fd.hvy ?? 0, 1, fd.ctrl, 1.25);
+        drawFideo(anchX, anchY, fd.hx!, fd.hy!, fd.seed, holding ? wd.sprites.get(fd.ing.id) ?? null : null, true, 0.35, fd.hvx ?? 0, fd.hvy ?? 0, 1.12, fd.ctrl, 1.35);
       }
 
 
