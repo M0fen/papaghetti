@@ -2608,7 +2608,15 @@ export default function EmplataGame(props: {
       {
         const wdU = world.current;
         const m = wdU.masc;
-        if (m.init && wdU.fideos.length === 0 && wdU.vuelos.length === 0 && Math.hypot(x - m.hx, y - m.hy) < 74) {
+        // zona = TODO el cuerpo visible (3 puntos a lo largo) y generosa (Fitts: es el
+        // elemento tocable más importante y ADEMÁS se mueve — medir solo a la cabeza
+        // hacía fallar taps que visualmente acertaban)
+        const dTap = Math.min(
+          Math.hypot(x - m.hx, y - m.hy),
+          Math.hypot(x - m.hx, y - (m.hy + 40)),
+          Math.hypot(x - m.hx, y - (m.hy + 80)),
+        );
+        if (m.init && wdU.fideos.length === 0 && wdU.vuelos.length === 0 && dTap < 84) {
           m.sq = -0.5; // aplastón inmediato: el frame siguiente YA responde
           m.hvy += 240;
           m.lastInputT = wdU.ts;
@@ -2627,7 +2635,7 @@ export default function EmplataGame(props: {
             m.tapVar = (m.tapVar + 1) % pool.length;
             m.mode = pool[m.tapVar];
             m.modeT = wdU.t;
-            m.dur = 42;
+            m.dur = m.mode === 17 ? 56 : 42; // el beso respira: labios→vuelo→corazón completo
             const esc = 1 + 0.06 * Math.min(m.tapN, 6); // el tono SUBE con la escalada
             s.tone(880 * esc, 0.06, "triangle", 0.055);
             s.tone(1318 * esc, 0.07, "triangle", 0.05, undefined, 0.06);
@@ -3232,7 +3240,9 @@ export default function EmplataGame(props: {
         const h = HOMES[m.home];
         const ax = boxX + h.axf * boxW + shX; // hogar actual (lado o por encima de la caja)
         const ay = mby + h.ayf * boxH + shY;
-        const up = boxH * h.up;
+        /* CLAMP en px: `up` escalaba con boxH y en desktop (caja ~2×) el chef se estiraba a
+           palo GIGANTE de medio metro. El personaje tiene UNA talla; la caja no lo estira. */
+        const up = Math.min(boxH * h.up, 168);
         if (!m.init) {
           m.init = true;
           m.hx = ax;
@@ -3262,8 +3272,10 @@ export default function EmplataGame(props: {
           if (nm === 8) nm = 12; // 8-11 son reacciones por sabor; la cata vive en 12
           m.mode = nm;
           m.modeT = wd.t;
-          m.dur = nm === 12 ? 82 + Math.random() * 20 : 55 + Math.random() * 130; // ~1-3s por modo
-          if (Math.random() < 0.28) m.home = otroHome(m.home); // se muda de vez en cuando
+          // SERENIDAD: gestos más largos y menos mudanzas — un maestro no se agita; antes
+          // cambiaba de ánimo cada ~1.5s y leía como frenético ("se enloquece")
+          m.dur = nm === 12 ? 82 + Math.random() * 20 : 95 + Math.random() * 150; // ~1.6-4s por modo
+          if (Math.random() < 0.16) m.home = otroHome(m.home); // se muda de vez en cuando
         }
         const em = react ? wd.reactMode : m.mode;
         const age = react ? wd.t - wd.reactT : wd.t - m.modeT;
@@ -3275,14 +3287,14 @@ export default function EmplataGame(props: {
           ty = ay - up * 0.7;
         } else {
           switch (em) {
-            case 0: // mirar alrededor
-              tx = ax + Math.sin(age * 0.05) * boxW * 0.14;
-              ty = ay - up * (0.92 + 0.08 * Math.sin(age * 0.08));
-              pupil = 0.4 + Math.sin(age * 0.05) * 0.6;
+            case 0: // mirar alrededor (sereno)
+              tx = ax + Math.sin(age * 0.04) * boxW * 0.08;
+              ty = ay - up * (0.92 + 0.06 * Math.sin(age * 0.07));
+              pupil = 0.4 + Math.sin(age * 0.04) * 0.6;
               break;
-            case 1: // estirarse alto
-              ty = ay - up * (0.7 + 0.55 * smooth(Math.min(1, age / 45)));
-              tx = ax + Math.sin(age * 0.2) * 5;
+            case 1: // estirarse alto (contenido: antes ganaba 55% y leía como palo)
+              ty = ay - up * (0.74 + 0.3 * smooth(Math.min(1, age / 50)));
+              tx = ax + Math.sin(age * 0.15) * 4;
               pupil = 0.2;
               break;
             case 2: // asomarse a mirar la bandeja (abajo)
@@ -3290,14 +3302,14 @@ export default function EmplataGame(props: {
               ty = ay - up * 0.6;
               pupil = 1.4;
               break;
-            case 3: // noodle-dance
-              tx = ax + Math.sin(age * 0.24) * boxW * 0.2;
-              ty = ay - up * (0.9 + 0.15 * Math.sin(age * 0.48));
+            case 3: // vaivén suave (el noodle-dance frenético mareaba)
+              tx = ax + Math.sin(age * 0.14) * boxW * 0.1;
+              ty = ay - up * (0.92 + 0.09 * Math.sin(age * 0.28));
               pupil = 0.5;
               break;
-            case 4: // saludar
-              tx = ax + Math.sin(age * 0.55) * boxW * 0.13;
-              ty = ay - up * 1.08;
+            case 4: // saludar (la mano ondea; el cuerpo apenas)
+              tx = ax + Math.sin(age * 0.3) * boxW * 0.05;
+              ty = ay - up * 1.05;
               pupil = 0.3;
               break;
             case 5: // curiosear la caja (se inclina hacia adentro, se esconde un poco)
@@ -3396,8 +3408,8 @@ export default function EmplataGame(props: {
           tx = ax + clamp((px - ax) * 0.15, -12, 12);
           ty = ay - up * 0.84 + 4;
         }
-        [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, react ? 240 : 170, react ? 22 : 19, dt);
-        [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, react ? 240 : 170, react ? 22 : 19, dt);
+        [m.hx, m.hvx] = springStep(m.hx, m.hvx, tx, react ? 240 : 150, react ? 22 : 18, dt);
+        [m.hy, m.hvy] = springStep(m.hy, m.hvy, ty, react ? 240 : 150, react ? 22 : 18, dt);
         m.pupil += (pupil - m.pupil) * (1 - Math.pow(0.86, df));
         const lookP = ptrFresh ? clamp((px - m.hx) / 130, -1, 1) : 0;
         // SQUASH reactivo (primer frame <16ms): el tap patea sq en el handler; aquí el muelle
@@ -3464,9 +3476,11 @@ export default function EmplataGame(props: {
             t1x = mfx + pux * Math.sin(age * 0.3) * 1.2; // paladea (micro-vaivén)
             t1y = mfy + puy * Math.sin(age * 0.3) * 1.2;
           } else {
+            // el beso vuela hacia el AIRE libre (lado contrario a la caja: la caja se dibuja
+            // DESPUÉS del chef y tapaba el gesto — además así se lo lanza al CLIENTE)
             const tt = smooth(Math.min(1, (age - 52) / 10));
-            t1x = mfx + (pux * lat * 17 * MS - bux * 7 * MS) * tt;
-            t1y = mfy + (puy * lat * 17 * MS - buy * 7 * MS) * tt;
+            t1x = mfx + (-pux * lat * 17 * MS - bux * 7 * MS) * tt;
+            t1y = mfy + (-puy * lat * 17 * MS - buy * 7 * MS) * tt;
           }
           t2x = chX - pux * 5 * MS;
           t2y = chY - puy * 5 * MS;
@@ -3477,8 +3491,8 @@ export default function EmplataGame(props: {
             t1y = mfy;
           } else {
             const tt = smooth(Math.min(1, (age - 10) / 9));
-            t1x = mfx + (pux * lat * 18 * MS - bux * 8 * MS) * tt;
-            t1y = mfy + (puy * lat * 18 * MS - buy * 8 * MS) * tt;
+            t1x = mfx + (-pux * lat * 18 * MS - bux * 8 * MS) * tt;
+            t1y = mfy + (-puy * lat * 18 * MS - buy * 8 * MS) * tt;
           }
           t2x = chX - pux * 5 * MS;
           t2y = chY - puy * 5 * MS;
@@ -3545,23 +3559,44 @@ export default function EmplataGame(props: {
         // ¡MWAH! — el beso del chef suelta destellos y campanita (cata al frame 52, tap al 10)
         const kissAt = em === 12 ? 52 : em === 17 ? 10 : -1;
         if (kissAt > 0 && age >= kissAt && age - df < kissAt) {
-          for (let ki = 0; ki < 4; ki++)
-            wd.chispas.push({ x: mfx, y: mfy, vx: pux * lat * (1.2 + ki * 0.5) + (Math.random() - 0.5), vy: -0.8 - Math.random() * 1.2, rot: Math.random() * TAU, vr: 0.25, life: 0.7 });
-          s.tone(660, 0.07, "sine", 0.05, 990);
-          s.tone(1760, 0.06, "triangle", 0.035, undefined, 0.06);
+          for (let ki = 0; ki < 7; ki++)
+            wd.chispas.push({ x: mfx, y: mfy, vx: -pux * lat * (1.1 + ki * 0.45) + (Math.random() - 0.5) * 1.6, vy: -0.6 - Math.random() * 1.8, rot: Math.random() * TAU, vr: 0.25, life: 0.9 });
+          s.tone(660, 0.07, "sine", 0.075, 990);
+          s.tone(1760, 0.06, "triangle", 0.05, undefined, 0.06);
         }
         // las manoplas SIEMPRE visibles (delante del cuerpo y de la cuchara: la agarran)
         const mScGlove = MS * 0.92;
         dibujaManopla(m.h1x, m.h1y, 1, mScGlove, clamp(m.h1vx * 0.002, -0.4, 0.4));
         dibujaManopla(m.h2x, m.h2y, -1, mScGlove, clamp(m.h2vx * 0.002, -0.4, 0.4));
-        // zzz del sueño (vector barato, fase determinista — sin estado ni allocs)
+        // el BESO deja además un CORAZÓN que flota desde los labios (antes casi no se leía:
+        // solo 4 chispas de 0.7s — ahora chispas + corazón 26 frames + campanita más presente)
+        if (kissAt > 0 && age > kissAt && age < kissAt + 34) {
+          const phK = (age - kissAt) / 34;
+          ctx.globalAlpha = Math.sin(Math.min(1, phK * 1.15) * Math.PI) * 0.95;
+          dibujaCorazon(
+            mfx - pux * lat * (9 + phK * 26) * MS,
+            mfy - puy * lat * (9 + phK * 26) * MS - phK * 20,
+            MS * (2.0 - phK * 0.55) * (1 + Math.sin(phK * 18) * 0.06),
+          );
+          ctx.globalAlpha = 1;
+        }
+        // zzz del sueño — DESTACADAS: tipografía display, crecen al subir, entran y salen
+        // suave, con un balanceo de pluma (el gesto favorito de la casa se merece su brillo)
         if (em === 14) {
-          ctx.fillStyle = "rgba(90,60,20,0.6)";
-          ctx.font = "600 11px system-ui, sans-serif";
+          ctx.fillStyle = "#7A5322";
+          ctx.textAlign = "center";
           for (let zi = 0; zi < 3; zi++) {
-            const ph = (wd.ts * 0.38 + zi * 0.34) % 1;
-            ctx.globalAlpha = (1 - ph) * 0.7;
-            ctx.fillText("z", m.hx + 16 * MS + zi * 5 + Math.sin(ph * 6 + zi) * 3, m.hy - (10 + ph * 26) * MS);
+            const ph = (wd.ts * 0.28 + zi * 0.33) % 1;
+            ctx.font = fontD((9 + ph * 10) * MS, 800);
+            ctx.globalAlpha = Math.sin(ph * Math.PI) * 0.9;
+            ctx.save();
+            ctx.translate(
+              m.hx + (15 + ph * 13) * MS + Math.sin(ph * 5 + zi * 2.1) * 5,
+              m.hy - (6 + ph * 36) * MS,
+            );
+            ctx.rotate(Math.sin(ph * 4 + zi) * 0.2);
+            ctx.fillText("z", 0, 0);
+            ctx.restore();
           }
           ctx.globalAlpha = 1;
         }
@@ -4012,28 +4047,39 @@ export default function EmplataGame(props: {
           ctx.moveTo(-0.8, 0);
           ctx.lineTo(-0.8, topYp - baseYp);
           ctx.stroke();
-          // banderita triangular kraft
+          // banderín ROJO de la casa: el kraft pálido se PERDÍA sobre la comida ámbar. Tomate
+          // + ribete crema + swirl crema del logo, con sombrita propia — pick de marca real.
           const fy0p = topYp - baseYp;
-          ctx.fillStyle = "#D8B27A";
+          ctx.fillStyle = "rgba(50,28,10,0.2)"; // sombra del banderín
           ctx.beginPath();
-          ctx.moveTo(0, fy0p);
-          ctx.lineTo(boxW * 0.16, fy0p + boxH * 0.03);
-          ctx.lineTo(0, fy0p + boxH * 0.06);
+          ctx.moveTo(1.4, fy0p + 1.8);
+          ctx.lineTo(boxW * 0.17 + 1.4, fy0p + boxH * 0.032 + 1.8);
+          ctx.lineTo(1.4, fy0p + boxH * 0.064 + 1.8);
           ctx.closePath();
           ctx.fill();
-          const kpk = world.current.kraftPat;
-          if (kpk) {
-            ctx.fillStyle = kpk;
-            ctx.fill();
-          }
-          ctx.strokeStyle = "rgba(90,58,24,0.25)";
-          ctx.lineWidth = 0.8;
-          ctx.stroke();
-          // el fideo del logo (mini swirl ámbar en la banderita)
-          ctx.strokeStyle = "#C8321E";
-          ctx.lineWidth = 1.6;
+          ctx.fillStyle = "#C8321E";
           ctx.beginPath();
-          ctx.arc(boxW * 0.05, fy0p + boxH * 0.03, boxH * 0.012, 0.4, TAU);
+          ctx.moveTo(0, fy0p);
+          ctx.lineTo(boxW * 0.17, fy0p + boxH * 0.032);
+          ctx.lineTo(0, fy0p + boxH * 0.064);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = "rgba(120,20,8,0.5)";
+          ctx.lineWidth = 0.9;
+          ctx.stroke();
+          ctx.strokeStyle = "rgba(255,244,214,0.85)"; // ribete crema interior
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(2, fy0p + 2.4);
+          ctx.lineTo(boxW * 0.14, fy0p + boxH * 0.032);
+          ctx.lineTo(2, fy0p + boxH * 0.064 - 2.4);
+          ctx.closePath();
+          ctx.stroke();
+          // el fideo del logo (swirl CREMA sobre el rojo)
+          ctx.strokeStyle = "#FFF4D6";
+          ctx.lineWidth = 1.7;
+          ctx.beginPath();
+          ctx.arc(boxW * 0.052, fy0p + boxH * 0.032, boxH * 0.0135, 0.4, TAU);
           ctx.stroke();
           ctx.restore();
         }
@@ -4938,30 +4984,57 @@ export default function EmplataGame(props: {
           tv.cre += (pf.cre - tv.cre) * kk;
           tv.fre += (pf.fre - tv.fre) * kk;
           tv.dul += (pf.dul - tv.dul) * kk;
-          const mw = Math.min(W * 0.66, 250 * U);
-          const mh = 46 * U;
-          const myc = H * 0.462;
-          ctx.fillStyle = "rgba(26,17,8,0.6)";
+          /* NOTA DE DEGUSTACIÓN en papel — no un HUD flotante oscuro. Papel crema con costura
+             punteada y cinta kraft: el lenguaje de la marca (caja, sello, wordmark). El papel
+             NO escala a valla en desktop (uT tope 1.3); en ancho vive DE PIE junto a la caja
+             (el costado izquierdo está vacío); en móvil, en la banda de piso. */
+          const anchoT = W >= 820;
+          const uT = Math.min(U, 1.3);
+          const mw = 238 * uT;
+          const mh = 58 * uT;
+          const mcx = anchoT ? Math.max(mw / 2 + 12, boxX - boxW * 0.62 - mw / 2) : W / 2;
+          const myc = anchoT ? boxY + boxH * 0.18 : H * 0.462;
+          ctx.save();
+          ctx.translate(mcx, myc);
+          if (anchoT) ctx.rotate(-0.028); // apoyada con gracia, no clavada en un grid
+          ctx.shadowColor = "rgba(40,22,8,0.32)";
+          ctx.shadowBlur = 9 * uT;
+          ctx.shadowOffsetY = 4 * uT;
+          ctx.fillStyle = "#F8EFDB";
           ctx.beginPath();
-          ctx.roundRect(W / 2 - mw / 2, myc - mh / 2, mw, mh, 13 * U);
+          ctx.roundRect(-mw / 2, -mh / 2, mw, mh, 7 * uT);
           ctx.fill();
-          ctx.strokeStyle = "rgba(255,244,220,0.14)";
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetY = 0;
+          ctx.strokeStyle = "rgba(140,104,60,0.4)";
           ctx.lineWidth = 1;
           ctx.stroke();
-          ctx.font = fontD(12 * U, 800);
+          // costura punteada interior (etiqueta cosida, como el sello de la caja)
+          ctx.setLineDash([3 * uT, 3 * uT]);
+          ctx.strokeStyle = "rgba(160,120,70,0.38)";
+          ctx.beginPath();
+          ctx.roundRect(-mw / 2 + 4 * uT, -mh / 2 + 4 * uT, mw - 8 * uT, mh - 8 * uT, 5 * uT);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          // cinta kraft que la pega a la escena
+          ctx.save();
+          ctx.rotate(0.07);
+          ctx.fillStyle = "rgba(205,164,106,0.72)";
+          ctx.fillRect(-15 * uT, -mh / 2 - 5 * uT, 30 * uT, 9 * uT);
+          ctx.restore();
+          // título en tinta cálida
+          ctx.font = fontD(12.5 * uT, 800);
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.shadowColor = "rgba(0,0,0,0.45)";
-          ctx.shadowBlur = 3;
-          ctx.fillStyle = "rgba(255,248,232,0.98)";
-          ctx.fillText(tituloAntojo(pf, nA), W / 2, myc - mh / 2 + 11 * U);
-          ctx.shadowBlur = 0;
-          const bw = 46 * U;
-          const gap = 10 * U;
+          ctx.fillStyle = "#4A2E14";
+          ctx.fillText(tituloAntojo(pf, nA), 0, -mh / 2 + 14 * uT);
+          const bw = 48 * uT;
+          const gap = 8 * uT;
           const totalB = EJES.length * bw + (EJES.length - 1) * gap;
-          const bx0 = W / 2 - totalB / 2;
-          const by = myc + mh / 2 - 13 * U;
-          const bh = 8 * U;
+          const bx0 = -totalB / 2;
+          const by = mh / 2 - 14 * uT;
+          const bh = 7 * uT;
           let domK = 0;
           EJES.forEach((e, k) => {
             if (tv[e.k] > tv[EJES[domK].k]) domK = k;
@@ -4969,28 +5042,29 @@ export default function EmplataGame(props: {
           EJES.forEach((e, k) => {
             const v = tv[e.k];
             const bx = bx0 + k * (bw + gap);
-            ctx.fillStyle = "rgba(251,241,222,0.16)";
+            ctx.fillStyle = "rgba(90,62,30,0.14)"; // riel sobre papel
             ctx.beginPath();
-            ctx.roundRect(bx, by, bw, bh, 4 * U);
+            ctx.roundRect(bx, by, bw, bh, 4 * uT);
             ctx.fill();
             const fw = Math.max(4, bw * clamp(v, 0, 1));
             if (k === domK && v > 0.15) {
               ctx.shadowColor = e.color;
-              ctx.shadowBlur = 8;
+              ctx.shadowBlur = 6;
             }
             ctx.fillStyle = e.color;
             ctx.beginPath();
-            ctx.roundRect(bx, by, fw, bh, 4 * U);
+            ctx.roundRect(bx, by, fw, bh, 4 * uT);
             ctx.fill();
             ctx.shadowBlur = 0;
-            ctx.fillStyle = "rgba(255,255,255,0.22)"; // filo superior (relieve)
+            ctx.fillStyle = "rgba(255,255,255,0.3)"; // filo superior (relieve)
             ctx.beginPath();
-            ctx.roundRect(bx, by, fw, 2 * U, 2 * U);
+            ctx.roundRect(bx, by, fw, 2 * uT, 2 * uT);
             ctx.fill();
-            ctx.font = fontB(10 * U, 800);
-            ctx.fillStyle = k === domK ? "rgba(255,246,224,0.98)" : "rgba(251,241,222,0.9)";
-            ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 7 * U);
+            ctx.font = fontB(9.5 * uT, 800);
+            ctx.fillStyle = k === domK ? "#4A2E14" : "rgba(90,62,30,0.72)";
+            ctx.fillText(e.label.toUpperCase(), bx + bw / 2, by - 7 * uT);
           });
+          ctx.restore();
         }
       }
 
