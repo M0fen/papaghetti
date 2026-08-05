@@ -4,18 +4,25 @@ import {
   formatCantidad,
   insumoBajo,
   estadoLabel,
+  esVenta,
+  ventaNeta,
 } from "@/lib/menu";
+import { diaNegocio } from "@/lib/precios";
 import TurnoReportes from "@/components/admin/TurnoReportes";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
   const cat = await getCatalog();
-  const hoy = new Date().toDateString();
+  /* El día se cuenta en hora de PEREIRA (antes `toDateString()` usaba la del servidor,
+     que en Vercel es UTC: el día "de hoy" empezaba a las 7 p.m.), y los CANCELADOS no
+     son ventas (esta pantalla los sumaba mientras Finanzas los excluía: dos cifras
+     distintas del mismo día en el mismo panel). */
+  const hoy = diaNegocio();
   const pedidosHoy = cat.pedidos.filter(
-    (p) => new Date(p.creadoEn).toDateString() === hoy
+    (p) => diaNegocio(p.creadoEn) === hoy && esVenta(p)
   );
-  const ventasHoy = pedidosHoy.reduce((s, p) => s + p.total, 0);
+  const ventasHoy = pedidosHoy.reduce((s, p) => s + ventaNeta(p), 0);
   const ticket = pedidosHoy.length ? Math.round(ventasHoy / pedidosHoy.length) : 0;
   const activos = cat.pedidos.filter(
     (p) => p.estado !== "entregado" && p.estado !== "cancelado"

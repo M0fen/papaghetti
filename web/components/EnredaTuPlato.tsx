@@ -32,6 +32,7 @@ export default function EnredaTuPlato({
   impuestoPct,
   costoDomicilio,
   pedidoMinimo,
+  abierto = true,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
@@ -41,6 +42,8 @@ export default function EnredaTuPlato({
   impuestoPct: number;
   costoDomicilio?: number;
   pedidoMinimo?: number;
+  /** Negocio abierto: con el local cerrado el CTA no puede seguir aceptando pedidos. */
+  abierto?: boolean;
 }) {
   const [modo, setModo] = useState<Modo>("elegir");
   const juego = useJuego();
@@ -121,6 +124,7 @@ export default function EnredaTuPlato({
               impuestoPct={impuestoPct}
               costoDomicilio={costoDomicilio}
               pedidoMinimo={pedidoMinimo}
+              abierto={abierto}
               embebido
             />
           </div>

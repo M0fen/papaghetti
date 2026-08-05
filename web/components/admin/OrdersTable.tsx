@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ESTADOS,
   estadoLabel,
@@ -9,6 +10,7 @@ import {
   tipoIcon,
   METODOS,
   metodoLabel,
+  metodoEmoji,
   type Pedido,
   type EstadoPedido,
 } from "@/lib/menu";
@@ -17,11 +19,21 @@ import {
   cobrarAction,
   cancelarAction,
 } from "@/app/pedido-actions";
+import { esVenta } from "@/lib/menu";
 
 type Filtro = "todos" | EstadoPedido | "porpagar";
 
 export default function OrdersTable({ pedidos }: { pedidos: Pedido[] }) {
   const [filtro, setFiltro] = useState<Filtro>("todos");
+  const router = useRouter();
+
+  /* La caja era la ÚNICA de las tres pantallas operativas sin auto-refresco (cocina va
+     a 8s y mesas a 15s): el cajero cobraba sobre una lista vieja, sin nada que le
+     avisara de que estaba desactualizada. */
+  useEffect(() => {
+    const id = setInterval(() => router.refresh(), 10000);
+    return () => clearInterval(id);
+  }, [router]);
 
   const filtrados =
     filtro === "todos"
@@ -30,8 +42,10 @@ export default function OrdersTable({ pedidos }: { pedidos: Pedido[] }) {
       ? pedidos.filter((p) => p.pago === "pendiente" && p.estado !== "cancelado")
       : pedidos.filter((p) => p.estado === filtro);
 
+  /* "Cobrado" excluye los cancelados, igual que Finanzas. Antes esta pantalla los
+     seguía sumando y las dos daban cifras distintas del mismo turno. */
   const cobrado = pedidos
-    .filter((p) => p.pago === "pagado")
+    .filter((p) => p.pago === "pagado" && esVenta(p))
     .reduce((s, p) => s + p.total, 0);
   const porCobrar = pedidos
     .filter((p) => p.pago === "pendiente" && p.estado !== "cancelado")
@@ -136,6 +150,7 @@ function OrderCard({ p }: { p: Pedido }) {
         {activo && (
           <form action={avanzarPedidoAction}>
             <input type="hidden" name="id" value={p.id} />
+            <input type="hidden" name="desde" value={p.estado} />
             <button className="btn btn--primary btnmini" type="submit">
               <span>Avanzar →</span>
             </button>
@@ -155,14 +170,31 @@ function OrderCard({ p }: { p: Pedido }) {
             <span className="muted">Cobrar:</span>
             {METODOS.map((m) => (
               <button key={m} className="chipbtn" name="metodo" value={m} type="submit">
-                {metodoLabel[m]}
+                {metodoEmoji[m]} {metodoLabel[m]}
               </button>
             ))}
           </form>
         )}
+        {/* Cancelar pide MOTIVO y confirma: estaba a un mis-tap de los chips de cobro,
+            sin confirmación ninguna, y el motivo ahora queda en el historial. */}
         {activo && (
-          <form action={cancelarAction} style={{ marginLeft: "auto" }}>
+          <form
+            action={cancelarAction}
+            style={{ marginLeft: "auto" }}
+            onSubmit={(e) => {
+              const motivo = window.prompt(
+                `¿Por qué se cancela el pedido #${p.id}? (queda registrado)`,
+              );
+              if (motivo === null) {
+                e.preventDefault();
+                return;
+              }
+              (e.currentTarget.elements.namedItem("motivo") as HTMLInputElement).value =
+                motivo;
+            }}
+          >
             <input type="hidden" name="id" value={p.id} />
+            <input type="hidden" name="motivo" defaultValue="" />
             <button className="ocard__cancel" type="submit">
               Cancelar
             </button>

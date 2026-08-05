@@ -6,14 +6,16 @@ import {
   CATALOG_TABLE,
   CATALOG_ID,
 } from "./supabase";
-import { desglosarPrecioFinal, faltaParaMinimo } from "./precios";
+import { desglosarPrecioFinal, faltaParaMinimo, totalDe } from "./precios";
 import {
   SEED_CATALOG,
   SEED_AJUSTES,
   SEED_INSUMOS,
   SEED_RECETAS,
   TOPPINGS_INCLUIDOS,
+  ESTADOS,
   nextEstado,
+  type EstadoPedido,
   type Catalog,
   type Ingrediente,
   type EnredoInsignia,
@@ -77,8 +79,23 @@ function migrate(cat: Catalog): Catalog {
   cat.historial ??= []; // Fase 4.5 · auditoría
   cat.undo ??= [];
   cat.redo ??= [];
-  // insumos (despensa real): si el catálogo es previo, siembra la despensa
-  if (!Array.isArray(cat.insumos) || cat.insumos.length === 0) {
+  /* Los snapshots creados ANTES de la auditoría llevan dentro pedidos, movimientos y
+     leads (eran el 90% del peso del documento, y la razón de que un Deshacer pudiera
+     borrar el turno). Se limpian al leer: es idempotente y encoge el cerebro de una vez
+     sin necesitar migración aparte. */
+  const limpiarPila = (pila: Catalog[] | undefined) =>
+    (pila ?? []).map((s) =>
+      s && (s.pedidos?.length || s.movimientos?.length || s.leads?.length)
+        ? { ...s, pedidos: [], movimientos: [], leads: [] }
+        : s,
+    );
+  cat.undo = limpiarPila(cat.undo);
+  cat.redo = limpiarPila(cat.redo);
+  // insumos (despensa real): si el catálogo es previo (campo AUSENTE), siembra la despensa.
+  // Ojo: una lista VACÍA es una decisión del operador ("borré los 16 de demo para cargar
+  // los míos"), no un catálogo viejo. Confundirlas resucitaba 40 lb de papa inexistente
+  // en la siguiente recarga de la página.
+  if (!Array.isArray(cat.insumos)) {
     cat.insumos = structuredClone(SEED_INSUMOS);
   } else {
     // backfill de categoría para insumos previos (agrupación del inventario)
@@ -123,62 +140,111 @@ async function readFile(): Promise<Catalog> {
   try {
     const raw = await fs.readFile(FILE, "utf8");
     return migrate(JSON.parse(raw) as Catalog);
-  } catch {
-    // Primer arranque: aún no hay archivo → arrancamos desde la semilla.
-    return structuredClone(SEED_CATALOG);
+  } catch (e) {
+    // SOLO "el archivo todavía no existe" justifica arrancar desde la semilla.
+    // El catch desnudo de antes trataba igual un JSON truncado por un corte de luz:
+    // devolvía la semilla sin marcarla, y la siguiente acción del operador la
+    // escribía encima — destruyendo el único respaldo que quedaba.
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return structuredClone(SEED_CATALOG);
+    }
+    throw new Error(
+      `No se pudo leer el catálogo (${(e as Error)?.message ?? e}). No se tocó nada.`,
+    );
   }
 }
 
 async function writeFile(cat: Catalog): Promise<void> {
-  try {
-    await fs.mkdir(path.dirname(FILE), { recursive: true });
-    await fs.writeFile(FILE, JSON.stringify(cat, null, 2), "utf8");
-  } catch (e) {
-    // FS de solo lectura (p. ej. Vercel) → no rompemos la request.
-    console.error("catalog write falló:", e);
-  }
+  // Escritura ATÓMICA: a un temporal y luego rename (operación atómica del FS).
+  // Con writeFile directo, un corte a mitad de los ~300KB dejaba el JSON truncado
+  // y el cerebro ilegible.
+  await fs.mkdir(path.dirname(FILE), { recursive: true });
+  const tmp = `${FILE}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(cat, null, 2), "utf8");
+  await fs.rename(tmp, FILE);
 }
 
 /* --- Backend: Supabase (persistencia real). El cerebro es 1 documento jsonb --- */
 async function readSupabase(): Promise<Catalog> {
-  try {
-    const sb = supabaseAdmin();
-    const { data, error } = await sb
-      .from(CATALOG_TABLE)
-      .select("data")
-      .eq("id", CATALOG_ID)
-      .maybeSingle();
-    if (error) throw error;
-    if (data?.data) return migrate(data.data as Catalog);
-    // Primera vez: siembra el documento y devuélvelo.
-    const seed = structuredClone(SEED_CATALOG);
-    await writeSupabase(seed);
-    return seed;
-  } catch (e) {
-    console.error("supabase read falló, uso semilla:", (e as Error)?.message ?? e);
-    return structuredClone(SEED_CATALOG);
-  }
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from(CATALOG_TABLE)
+    .select("data")
+    .eq("id", CATALOG_ID)
+    .maybeSingle();
+  // NUNCA caer a la semilla ante un error de red o de la base: un timeout de 200ms
+  // un sábado a las 8:30 p.m. devolvía el catálogo de fábrica, la cocina pulsaba
+  // "Listo", y el upsert siguiente subía 0 pedidos y 0 movimientos encima del turno.
+  // Fallar ruidosamente es infinitamente mejor que borrar la noche en silencio.
+  if (error) throw new Error(`Supabase no respondió: ${error.message}`);
+  if (data?.data) return migrate(data.data as Catalog);
+  // Fila ausente CON consulta exitosa: es el primer arranque legítimo. Siembra.
+  const seed = structuredClone(SEED_CATALOG);
+  await writeSupabase(seed);
+  return seed;
 }
 
 async function writeSupabase(cat: Catalog): Promise<void> {
-  try {
-    const sb = supabaseAdmin();
-    const { error } = await sb
-      .from(CATALOG_TABLE)
-      .upsert({ id: CATALOG_ID, data: cat, updated_at: new Date().toISOString() });
-    if (error) throw error;
-  } catch (e) {
-    console.error("supabase write falló:", (e as Error)?.message ?? e);
-  }
+  const sb = supabaseAdmin();
+  const { error } = await sb
+    .from(CATALOG_TABLE)
+    .upsert({ id: CATALOG_ID, data: cat, updated_at: new Date().toISOString() });
+  if (error) throw new Error(`No se pudo guardar en Supabase: ${error.message}`);
+}
+
+/**
+ * ¿Estamos en Vercel SIN Supabase? Entonces el cerebro escribe en /tmp, que es
+ * efímero y distinto por instancia de lambda: el pedido que entra por QR puede no
+ * existir para la pantalla de cocina. No lanzamos (tumbaría el sitio público),
+ * pero el panel muestra la alarma y aquí queda el rastro en los logs.
+ */
+export function persistenciaEnRiesgo(): boolean {
+  return Boolean(process.env.VERCEL) && !supabaseEnabled();
+}
+if (persistenciaEnRiesgo()) {
+  console.warn(
+    "[papaghetti] AVISO: corriendo en Vercel sin Supabase. El catálogo se guarda en /tmp " +
+      "(efímero y por instancia): los pedidos NO persisten. Define NEXT_PUBLIC_SUPABASE_URL " +
+      "y SUPABASE_SERVICE_ROLE.",
+  );
 }
 
 /* ------- Historial + deshacer/rehacer (snapshots) ------- */
 const UNDO_CAP = 12; // profundidad de deshacer/rehacer
 const HIST_CAP = 120; // entradas visibles del historial
 
-/** Copia del catálogo SIN sus propias pilas ni historial (evita recursión/peso). */
+/**
+ * Copia del catálogo para la pila de deshacer.
+ *
+ * Fuera van, además de las propias pilas: PEDIDOS, MOVIMIENTOS y LEADS. Son datos
+ * TRANSACCIONALES — cosas que pasaron — y "deshacer" no puede significar "que no
+ * hayan pasado". Antes viajaban enteros dentro de cada snapshot, así que el dueño
+ * corregía el precio del pollo, entraban cuatro pedidos por QR, se arrepentía del
+ * precio, y los cuatro pedidos que la cocina estaba preparando desaparecían.
+ *
+ * Efecto lateral grande: los 12 snapshots eran el 90% del documento (254KB de 282KB).
+ * Sin ellos el cerebro pesa una décima parte y cada acción escribe una décima parte.
+ */
 function stripSnap(cat: Catalog): Catalog {
-  return { ...cat, undo: undefined, redo: undefined, historial: undefined };
+  return {
+    ...cat,
+    undo: undefined,
+    redo: undefined,
+    historial: undefined,
+    pedidos: [],
+    movimientos: [],
+    leads: [],
+  };
+}
+
+/** Devuelve el snapshot con lo TRANSACCIONAL de hoy re-inyectado (nunca se revierte). */
+function conLoVivo(snap: Catalog, vivo: Catalog): Catalog {
+  return {
+    ...snap,
+    pedidos: vivo.pedidos ?? [],
+    movimientos: vivo.movimientos ?? [],
+    leads: vivo.leads ?? [],
+  };
 }
 
 function nuevaEntrada(texto: string, meta = false): HistItem {
@@ -205,7 +271,7 @@ export async function deshacer(): Promise<Catalog> {
   if (undo.length === 0) return cat;
   const snap = undo[undo.length - 1];
   const restored: Catalog = {
-    ...snap,
+    ...conLoVivo(snap, cat), // pedidos/movimientos/leads de HOY sobreviven al deshacer
     undo: undo.slice(0, -1),
     redo: [...(cat.redo ?? []), stripSnap(cat)].slice(-UNDO_CAP),
     historial: [nuevaEntrada("↩︎ Deshacer", true), ...(cat.historial ?? [])].slice(0, HIST_CAP),
@@ -221,7 +287,7 @@ export async function rehacer(): Promise<Catalog> {
   if (redo.length === 0) return cat;
   const snap = redo[redo.length - 1];
   const restored: Catalog = {
-    ...snap,
+    ...conLoVivo(snap, cat), // ídem: rehacer tampoco resucita ni borra pedidos
     redo: redo.slice(0, -1),
     undo: [...(cat.undo ?? []), stripSnap(cat)].slice(-UNDO_CAP),
     historial: [nuevaEntrada("↪︎ Rehacer", true), ...(cat.historial ?? [])].slice(0, HIST_CAP),
@@ -232,6 +298,75 @@ export async function rehacer(): Promise<Catalog> {
 
 export async function getCatalog(): Promise<Catalog> {
   return read();
+}
+
+/**
+ * EL CATÁLOGO QUE PUEDE VER UN DESCONOCIDO.
+ *
+ * `getCatalog()` devuelve el documento entero, y la página pública se lo pasaba a un
+ * componente `"use client"`: Next serializa las props de los componentes cliente dentro
+ * del HTML, así que en el código fuente del sitio —legible con Ctrl+U desde el CDN—
+ * viajaban el costo de cada insumo, las recetas, el stock, los pedidos con teléfono
+ * de cliente, la contabilidad y hasta 12 copias de todo eso en la pila de undo.
+ *
+ * REGLA PERMANENTE: ninguna ruta pública llama a `getCatalog()`. Esta es la puerta.
+ */
+export interface CatalogoPublico {
+  bases: Ingrediente[];
+  proteinas: Ingrediente[];
+  toppings: Ingrediente[];
+  enredos: EnredoInsignia[];
+  ajustes: AjustesPublicos;
+}
+/** Ajustes que sí puede ver el cliente (los demás campos son de operación). */
+export type AjustesPublicos = Pick<
+  Ajustes,
+  | "negocio"
+  | "whatsapp"
+  | "direccion"
+  | "horarios"
+  | "instagram"
+  | "rappi"
+  | "abierto"
+  | "numMesas"
+  | "impuestoPct"
+  | "costoDomicilio"
+  | "pedidoMinimo"
+  | "promos"
+>;
+
+/** Un ingrediente sin su interior de negocio (receta, stock, costo). */
+function limpiarIngrediente(i: Ingrediente): Ingrediente {
+  const { receta, stock, parStock, ...publico } = i;
+  void receta;
+  void stock;
+  void parStock;
+  return publico as Ingrediente;
+}
+
+export async function getCatalogPublico(): Promise<CatalogoPublico> {
+  const cat = await read();
+  const a = cat.ajustes;
+  return {
+    bases: cat.bases.map(limpiarIngrediente),
+    proteinas: cat.proteinas.map(limpiarIngrediente),
+    toppings: cat.toppings.map(limpiarIngrediente),
+    enredos: cat.enredos,
+    ajustes: {
+      negocio: a.negocio,
+      whatsapp: a.whatsapp,
+      direccion: a.direccion,
+      horarios: a.horarios,
+      instagram: a.instagram,
+      rappi: a.rappi,
+      abierto: a.abierto,
+      numMesas: a.numMesas,
+      impuestoPct: a.impuestoPct,
+      costoDomicilio: a.costoDomicilio,
+      pedidoMinimo: a.pedidoMinimo,
+      promos: a.promos,
+    },
+  };
 }
 
 export async function updateIngrediente(
@@ -263,10 +398,18 @@ export async function updateEnredo(
   return cat;
 }
 
-/** Restaura el catálogo a la semilla (útil para demos). */
+/**
+ * Restaura la CARTA a la semilla (útil para demos).
+ *
+ * Conserva lo transaccional: la etiqueta del botón dice "catálogo" pero antes
+ * reemplazaba el documento entero, o sea que borraba los pedidos del turno, la
+ * contabilidad y los leads del Club. Un submit sin confirmación al final de
+ * /admin/menu no puede tener el poder de borrar el negocio.
+ */
 export async function resetCatalog(): Promise<Catalog> {
-  const seed = structuredClone(SEED_CATALOG);
-  await commit(seed, "Restauró el catálogo a la semilla");
+  const vivo = await read();
+  const seed = conLoVivo(structuredClone(SEED_CATALOG), vivo);
+  await commit(seed, "Restauró la carta a la semilla (pedidos y caja intactos)");
   return seed;
 }
 
@@ -379,6 +522,16 @@ export interface NuevoPedido {
    * entra por el mismo flujo que el armado a mano, sin una segunda contabilidad.
    */
   enredoId?: string;
+  /** Dirección de entrega — obligatoria cuando el servicio es a domicilio. */
+  direccion?: string;
+  /** Nota del cliente para la cocina: "sin cebolla", alergias. */
+  notas?: string;
+  /**
+   * Clave de idempotencia generada por el cliente AL ARMAR la caja (no al enviar) y
+   * reusada en los reintentos. Sin ella, un doble toque con red lenta creaba dos
+   * pedidos y descontaba la despensa dos veces.
+   */
+  idemKey?: string;
 }
 
 /** Índice de insumos por id (referencias vivas dentro del catálogo). */
@@ -390,8 +543,45 @@ function puedePreparar(ing: Ingrediente, byId: Map<string, Insumo>): boolean {
   if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) > 0;
   return ing.receta.every((r) => {
     const ins = byId.get(r.insumoId);
-    return ins ? ins.stock >= r.cantidad : true; // insumo inexistente → no bloquea
+    // FAIL-CLOSED: un insumo que la receta nombra y que ya no existe significa que no
+    // sabemos si se puede preparar. Antes devolvía true ("no bloquea") y el sistema
+    // vendía alegremente lo que no tenía con qué hacer.
+    return ins ? ins.stock >= r.cantidad : false;
   });
+}
+
+/** ¿Alcanza para N porciones del mismo componente en un solo pedido? */
+function alcanzaPara(ing: Ingrediente, byId: Map<string, Insumo>, veces: number): boolean {
+  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) >= veces;
+  return ing.receta.every((r) => {
+    const ins = byId.get(r.insumoId);
+    return ins ? ins.stock >= r.cantidad * veces : false;
+  });
+}
+
+/** Máximos que la propia interfaz permite; el servidor no acepta más. */
+const MAX_TOPPINGS = 12;
+const MAX_PROTEINAS = 4;
+
+/**
+ * Tope de pedidos guardados. Antes era 200 a secas y el corte se hacía sin mirar el
+ * estado: el pedido 201 expulsaba al más viejo aunque estuviera SIN COBRAR, y con él
+ * desaparecía la única forma de cobrarlo. Ahora se conservan 2.000 y, si hay que
+ * recortar, solo caen los CERRADOS (pagados o cancelados) — nunca una deuda viva.
+ *
+ * Esto es un puente mientras el cerebro sea un documento único; el arreglo real es
+ * sacar `pedidos` a su propia tabla en Supabase.
+ */
+const PEDIDOS_CAP = 2000;
+function recortarPedidos(lista: Pedido[]): Pedido[] {
+  if (lista.length <= PEDIDOS_CAP) return lista;
+  const cerrado = (p: Pedido) => p.pago === "pagado" || p.estado === "cancelado";
+  const vivos = lista.filter((p) => !cerrado(p));
+  const cerrados = lista.filter(cerrado);
+  // Los vivos SIEMPRE se conservan; el recorte se lo comen los cerrados más antiguos.
+  return [...vivos, ...cerrados.slice(0, Math.max(0, PEDIDOS_CAP - vivos.length))].sort((a, b) =>
+    b.creadoEn.localeCompare(a.creadoEn),
+  );
 }
 
 /** Descuenta de la despensa los insumos de la receta de un componente. */
@@ -402,24 +592,39 @@ function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>): void {
   }
 }
 
-/** Crea un pedido, descuenta insumos por receta y auto-agota lo que ya no alcanza. */
+/**
+ * Crea un pedido, descuenta insumos por receta y auto-agota lo que ya no alcanza.
+ *
+ * ORDEN SAGRADO: resolver → VALIDAR TODO → recién entonces consumir. Antes se
+ * consumía mientras se resolvía, así que un pedido que luego era rechazado (por el
+ * mínimo a domicilio) ya había descontado la despensa, y un id inexistente producía
+ * un ticket "Base: —" con subtotal 0 que la cocina recibía como pedido real.
+ *
+ * Es la ÚNICA función pública que muta el cerebro (`enviarPedido` no pide sesión,
+ * a propósito: la usan los clientes). Por eso valida como si el que llama fuera hostil.
+ */
 export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
   const cat = await read();
   const byId = insumosPorId(cat);
 
-  const consumir = (id: string): Ingrediente | undefined => {
+  // — 0. IDEMPOTENCIA: el mismo envío dos veces es un solo pedido.
+  const idemKey = input.idemKey?.trim() || undefined;
+  if (idemKey) {
+    const previo = cat.pedidos.find((p) => p.idemKey === idemKey);
+    if (previo) return previo; // reintento del cliente: devolvemos el que ya existe
+  }
+
+  // — 1. ¿Estamos abiertos?
+  if (cat.ajustes.abierto === false) {
+    throw new Error(
+      `Ahora mismo estamos cerrados${cat.ajustes.horarios ? ` · ${cat.ajustes.horarios}` : ""}. ¡Te esperamos!`,
+    );
+  }
+
+  const buscar = (id: string): Ingrediente | undefined => {
     for (const grupo of ["bases", "proteinas", "toppings"] as const) {
       const it = cat[grupo].find((x) => x.id === id);
-      if (it) {
-        if (it.receta && it.receta.length > 0) {
-          consumirReceta(it, byId); // ← descuenta despensa real
-          it.agotado = !puedePreparar(it, byId); // agota si ya no da para otra
-        } else if (typeof it.stock === "number") {
-          it.stock = Math.max(0, it.stock - 1); // legado: unidades abstractas
-          if (it.stock === 0) it.agotado = true;
-        }
-        return it;
-      }
+      if (it) return it;
     }
     return undefined;
   };
@@ -428,21 +633,80 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
   const insignia = input.enredoId
     ? cat.enredos.find((e) => e.id === input.enredoId)
     : undefined;
-  // Proteínas: N (sin límite). Prioridad: array explícito → [proteinaId, proteinaId2] → insignia.
-  const protIds = insignia
+  if (input.enredoId && !insignia) throw new Error("Ese plato ya no está en la carta.");
+
+  // — 2. Topes y deduplicación. La UI nunca permite más; el servidor tampoco.
+  const protIdsCrudos = insignia
     ? [insignia.proteinaId]
     : input.proteinaIds && input.proteinaIds.length
       ? input.proteinaIds
-      : [input.proteinaId, input.proteinaId2].filter(Boolean) as string[];
-  const receta = insignia
-    ? { baseId: insignia.baseId, toppingIds: insignia.toppingIds }
-    : { baseId: input.baseId, toppingIds: input.toppingIds };
+      : ([input.proteinaId, input.proteinaId2].filter(Boolean) as string[]);
+  const protIds = protIdsCrudos.filter(Boolean).slice(0, MAX_PROTEINAS);
+  // Los toppings NO se deduplican (pedir doble aguacate es legítimo y se cobra doble),
+  // pero sí se topan: sin límite, un pedido con 5.000 toppings vaciaba la despensa real.
+  const topIdsCrudos = insignia ? insignia.toppingIds : input.toppingIds;
+  const topIds = (Array.isArray(topIdsCrudos) ? topIdsCrudos : []).slice(0, MAX_TOPPINGS);
+  const baseId = insignia ? insignia.baseId : input.baseId;
 
-  const base = consumir(receta.baseId);
-  const prots = protIds.map(consumir).filter(Boolean) as Ingrediente[]; // todas a precio completo
-  const tops = receta.toppingIds
-    .map(consumir)
-    .filter(Boolean) as Ingrediente[];
+  // — 3. Resolver TODOS los componentes; ninguno puede faltar.
+  const pedidos: { id: string; ing: Ingrediente }[] = [];
+  for (const id of [baseId, ...protIds, ...topIds]) {
+    const ing = buscar(id);
+    if (!ing) throw new Error("Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.");
+    pedidos.push({ id, ing });
+  }
+  if (!buscar(baseId)) throw new Error("Falta la base del enredo.");
+  if (protIds.length === 0) throw new Error("Falta la proteína del enredo.");
+
+  // — 4. DISPONIBILIDAD: nada agotado, nada fuera de carta, y que la despensa alcance
+  //      para TODAS las porciones de este pedido (dos aguacates piden dos aguacates).
+  const necesarias = new Map<string, number>();
+  for (const { id } of pedidos) necesarias.set(id, (necesarias.get(id) ?? 0) + 1);
+  for (const [id, veces] of necesarias) {
+    const ing = buscar(id)!;
+    if (ing.activo === false) throw new Error(`"${ing.nombre}" ya no está en la carta.`);
+    if (ing.agotado) throw new Error(`Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`);
+    if (!alcanzaPara(ing, byId, veces)) {
+      throw new Error(
+        veces > 1
+          ? `No nos alcanza para ${veces} de "${ing.nombre}".`
+          : `Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`,
+      );
+    }
+  }
+
+  // — 5. Servicio. El default NO puede ser el que cobra: si nadie dice el tipo,
+  //      un pedido con mesa es de mesa y el resto es para llevar. Antes caía en
+  //      "domicilio" y le sumaba $5.000 a alguien que estaba sentado en el local.
+  const tipo = input.tipo ?? (input.mesa ? "mesa" : "llevar");
+  if (tipo === "mesa") {
+    const n = Number(input.mesa ?? 0);
+    const max = cat.ajustes.numMesas ?? 0;
+    if (!Number.isInteger(n) || n < 1 || (max > 0 && n > max)) {
+      throw new Error("Esa mesa no existe.");
+    }
+  }
+  const direccion = input.direccion?.trim() || undefined;
+  if (tipo === "domicilio" && !direccion) {
+    throw new Error("Necesitamos la dirección de entrega para llevártelo.");
+  }
+
+  // — 6. Ya validado todo: AHORA sí se consume la despensa.
+  const consumir = (id: string): Ingrediente => {
+    const it = buscar(id)!;
+    if (it.receta && it.receta.length > 0) {
+      consumirReceta(it, byId); // ← descuenta despensa real
+      it.agotado = !puedePreparar(it, byId); // agota si ya no da para otra
+    } else if (typeof it.stock === "number") {
+      it.stock = Math.max(0, it.stock - 1); // legado: unidades abstractas
+      if (it.stock === 0) it.agotado = true;
+    }
+    return it;
+  };
+
+  const base = consumir(baseId);
+  const prots = protIds.map(consumir); // todas a precio completo
+  const tops = topIds.map(consumir);
 
   const impuestoPct = cat.ajustes.impuestoPct ?? 0;
   // El insignia tiene precio de carta CERRADO (todo incluido) → se desglosa hacia atrás
@@ -456,7 +720,6 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     : { subtotal: armado, impuesto: Math.round((armado * impuestoPct) / 100) };
 
   // Domicilio: solo cuando el servicio lo es, y con el mínimo que fijó el dueño.
-  const tipo = input.tipo ?? "domicilio";
   const domicilio = tipo === "domicilio" ? cat.ajustes.costoDomicilio ?? 0 : 0;
   const falta = faltaParaMinimo(subtotal, tipo, cat.ajustes.pedidoMinimo);
   if (falta > 0)
@@ -478,33 +741,61 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     mesa: tipo === "mesa" ? input.mesa : undefined,
     cliente: input.cliente?.trim() || undefined,
     telefono: input.telefono?.trim() || undefined,
+    direccion,
+    notas: input.notas?.trim().slice(0, 200) || undefined,
     estado: "recibido",
     pago: "pendiente",
-    base: base?.nombre ?? "—",
-    proteina: prots.map((p) => p.nombre).join(" + ") || "—",
+    base: base.nombre,
+    proteina: prots.map((p) => p.nombre).join(" + "),
     toppings: tops.map((t) => t.nombre),
+    /** Los ids, para poder devolver la despensa si el pedido se cancela. */
+    componentes: [baseId, ...protIds, ...topIds],
     subtotal,
     impuesto,
     domicilio,
     propina: 0,
     descuento: 0,
-    total: subtotal + impuesto + domicilio,
+    total: totalDe({ subtotal, impuesto, domicilio }),
     costo,
     enredoId: insignia?.id,
+    idemKey,
   };
 
-  cat.pedidos = [pedido, ...cat.pedidos].slice(0, 200);
+  cat.pedidos = recortarPedidos([pedido, ...cat.pedidos]);
   await commit(cat, `Nuevo pedido #${pedido.id} (${formatCOP(pedido.total)})`);
   return pedido;
 }
 
-/** Avanza un pedido al siguiente estado (recibido→cocina→listo→entregado). */
-export async function avanzarPedido(id: string): Promise<Pedido[]> {
+/**
+ * Avanza un pedido al siguiente estado (recibido→cocina→listo→entregado).
+ *
+ * `desde` hace la operación IDEMPOTENTE: el botón del KDS no lleva useFormStatus, así
+ * que con red lenta y manos ocupadas el cocinero tocaba dos veces y el pedido saltaba
+ * de "recibido" a "listo" sin pasar por la plancha. Si el estado ya no es el que el
+ * operario vio en pantalla, no se hace nada.
+ */
+export async function avanzarPedido(id: string, desde?: EstadoPedido): Promise<Pedido[]> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
-  if (p && p.estado !== "cancelado") p.estado = nextEstado(p.estado);
-  await commit(cat, `Avanzó #${id}${p ? ` a ${p.estado}` : ""}`);
+  if (!p) throw new Error(`No existe el pedido #${id}.`);
+  if (p.estado === "cancelado") throw new Error("Ese pedido está cancelado.");
+  if (desde && p.estado !== desde) return cat.pedidos; // otro ya lo avanzó: no duplicamos
+  if (p.estado === "entregado") return cat.pedidos;
+  p.estado = nextEstado(p.estado);
+  await commit(cat, `Avanzó #${id} a ${p.estado}`);
   return cat.pedidos;
+}
+
+/** Retrocede un pedido un paso (el KDS necesita corregir un toque de más). */
+export async function retrocederPedido(id: string): Promise<Catalog> {
+  const cat = await read();
+  const p = cat.pedidos.find((x) => x.id === id);
+  if (!p) throw new Error(`No existe el pedido #${id}.`);
+  if (p.estado === "cancelado") throw new Error("Ese pedido está cancelado.");
+  const i = ESTADOS.indexOf(p.estado);
+  if (i > 0) p.estado = ESTADOS[i - 1];
+  await commit(cat, `Devolvió #${id} a ${p.estado}`);
+  return cat;
 }
 
 /** Marca un pedido como pagado con su método, propina y descuento. */
@@ -516,23 +807,61 @@ export async function cobrarPedido(
 ): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
-  if (p) {
-    p.pago = "pagado";
-    p.metodoPago = metodo;
-    p.propina = Math.max(0, Math.round(propina));
-    p.descuento = Math.max(0, Math.round(descuento));
-    p.total = Math.max(0, p.subtotal + p.impuesto + p.propina - p.descuento);
-  }
-  await commit(cat, `Cobró #${id} (${metodo}${p ? ` · ${formatCOP(p.total)}` : ""})`);
+  if (!p) throw new Error(`No existe el pedido #${id}.`);
+  // Cobrar dos veces pisaba propina, descuento y método: la propina del mesero
+  // desaparecía y el arqueo por método dejaba de cuadrar con el datáfono.
+  if (p.pago === "pagado") throw new Error(`El pedido #${id} ya estaba cobrado.`);
+  if (p.estado === "cancelado") throw new Error("No se puede cobrar un pedido cancelado.");
+  p.pago = "pagado";
+  p.metodoPago = metodo;
+  p.propina = Math.max(0, Math.round(propina));
+  p.descuento = Math.max(0, Math.min(p.subtotal, Math.round(descuento)));
+  p.total = totalDe(p); // ← con el domicilio incluido. Ver lib/precios.ts
+  await commit(cat, `Cobró #${id} (${metodo} · ${formatCOP(p.total)})`);
   return cat;
 }
 
-/** Cancela un pedido (estado terminal). */
-export async function cancelarPedido(id: string): Promise<Catalog> {
+/**
+ * Cancela un pedido y DEVUELVE la despensa si todavía no se había cocinado.
+ *
+ * Antes solo escribía `estado = "cancelado"`. Tres agujeros a la vez: se podía cancelar
+ * un pedido ya cobrado (el ingreso salía de los reportes y el efectivo se quedaba en la
+ * caja sin rastro), los insumos consumidos no volvían nunca (merma invisible que se
+ * acumulaba día a día), y no quedaba constancia de por qué.
+ */
+export async function cancelarPedido(id: string, motivo?: string): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
-  if (p) p.estado = "cancelado";
-  await commit(cat, `Canceló pedido #${id}`);
+  if (!p) throw new Error(`No existe el pedido #${id}.`);
+  if (p.estado === "cancelado") return cat;
+  if (p.pago === "pagado") {
+    throw new Error(
+      `El pedido #${id} ya está cobrado (${formatCOP(p.total)}). Para anularlo hay que registrar la devolución del dinero.`,
+    );
+  }
+  // Si aún no entró a cocina, la comida no se tocó: la despensa vuelve.
+  if (p.estado === "recibido" && p.componentes?.length) {
+    const byId = insumosPorId(cat);
+    for (const compId of p.componentes) {
+      for (const g of ["bases", "proteinas", "toppings"] as const) {
+        const it = cat[g].find((x) => x.id === compId);
+        if (!it) continue;
+        if (it.receta?.length) {
+          for (const r of it.receta) {
+            const ins = byId.get(r.insumoId);
+            if (ins) ins.stock = Number((ins.stock + r.cantidad).toFixed(3));
+          }
+        } else if (typeof it.stock === "number") {
+          it.stock += 1;
+        }
+        break;
+      }
+    }
+    reactivarPreparables(cat);
+  }
+  p.estado = "cancelado";
+  p.motivoCancelacion = motivo?.trim().slice(0, 140) || undefined;
+  await commit(cat, `Canceló #${id}${motivo ? ` — ${motivo.trim().slice(0, 60)}` : ""}`);
   return cat;
 }
 
@@ -540,10 +869,17 @@ export async function cancelarPedido(id: string): Promise<Catalog> {
 export async function asignarMesa(id: string, mesa: number): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
-  if (p) {
-    p.mesa = mesa;
-    p.tipo = "mesa";
+  if (!p) throw new Error(`No existe el pedido #${id}.`);
+  const max = cat.ajustes.numMesas ?? 0;
+  if (!Number.isInteger(mesa) || mesa < 1 || (max > 0 && mesa > max)) {
+    throw new Error("Esa mesa no existe.");
   }
+  p.mesa = mesa;
+  p.tipo = "mesa";
+  // Pasar un domicilio a mesa dejaba los $5.000 del envío dentro del total: un
+  // estado internamente contradictorio ("come aquí, pero paga el domiciliario").
+  p.domicilio = 0;
+  if (p.pago !== "pagado") p.total = totalDe(p);
   await commit(cat, `Asignó #${id} a mesa ${mesa}`);
   return cat;
 }
@@ -634,14 +970,29 @@ export async function updateInsumo(id: string, patch: Partial<Insumo>): Promise<
   return cat;
 }
 
+/**
+ * Elimina un insumo — y se NIEGA si alguna receta lo usa.
+ *
+ * Antes lo borraba y de paso amputaba la línea en todas las recetas, en silencio. El
+ * plato quedaba con receta vacía, así que `puedePreparar` caía a un contador abstracto
+ * que nadie mantiene y `costoReceta([])` devolvía 0: el componente más caro pasaba a
+ * costar cero en el P&L y se seguía vendiendo sin materia prima. Todo por un clic
+ * pegado al botón Guardar.
+ */
 export async function deleteInsumo(id: string): Promise<Catalog> {
   const cat = await read();
   const nombre = cat.insumos.find((i) => i.id === id)?.nombre ?? id;
-  cat.insumos = cat.insumos.filter((i) => i.id !== id);
+  const usan: string[] = [];
   for (const g of ["bases", "proteinas", "toppings"] as const)
     cat[g].forEach((it) => {
-      if (it.receta) it.receta = it.receta.filter((r) => r.insumoId !== id);
+      if (it.receta?.some((r) => r.insumoId === id)) usan.push(it.nombre);
     });
+  if (usan.length) {
+    throw new Error(
+      `No se puede eliminar "${nombre}": lo usan ${usan.length} receta(s) — ${usan.slice(0, 4).join(", ")}${usan.length > 4 ? "…" : ""}. Quítalo primero de esas fichas técnicas.`,
+    );
+  }
+  cat.insumos = cat.insumos.filter((i) => i.id !== id);
   await commit(cat, `Eliminó insumo "${nombre}"`);
   return cat;
 }
@@ -677,13 +1028,20 @@ export async function abastecerInsumo(id: string, cantidad: number): Promise<Cat
   return cat;
 }
 
-/** Deja un insumo en su nivel estándar (par) y registra la compra. */
+/**
+ * Deja un insumo AL MENOS en su nivel estándar (par) y registra la compra.
+ *
+ * Antes era `it.stock = it.parStock` a secas, así que con 60 lb de papa y un par de 40
+ * el botón "Llenar hasta el estándar" BORRABA 20 lb del registro — y `registrarCompra`
+ * ignora los deltas negativos, así que no quedaba rastro. No se evaporaba comida: se
+ * evaporaba el inventario, y el operario volvía a comprar lo que ya tenía.
+ */
 export async function abastecerAPar(id: string): Promise<Catalog> {
   const cat = await read();
   const it = cat.insumos.find((x) => x.id === id);
   if (it) {
     const antes = it.stock;
-    it.stock = it.parStock;
+    it.stock = Math.max(it.stock, it.parStock);
     registrarCompra(cat, it, it.stock - antes);
   }
   reactivarPreparables(cat, id);
@@ -696,7 +1054,7 @@ export async function abastecerTodoAPar(): Promise<Catalog> {
   const cat = await read();
   cat.insumos.forEach((i) => {
     const antes = i.stock;
-    i.stock = i.parStock;
+    i.stock = Math.max(i.stock, i.parStock); // llenar nunca puede significar vaciar
     registrarCompra(cat, i, i.stock - antes);
   });
   reactivarPreparables(cat);

@@ -6,9 +6,12 @@ import {
   formatCantidad,
   unidadCorta,
   insumoBajo,
+  esVenta,
+  ventaNeta,
   type Catalog,
   type Pedido,
 } from "@/lib/menu";
+import { diaNegocio } from "@/lib/precios";
 
 type Vista = null | "apertura" | "cierre" | "jornada";
 
@@ -22,19 +25,26 @@ export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
   const [vista, setVista] = useState<Vista>(null);
 
   const insumos = catalog.insumos ?? [];
-  const hoyStr = new Date().toDateString();
-  const hoyPed = catalog.pedidos.filter((p) => new Date(p.creadoEn).toDateString() === hoyStr);
-  const validos = hoyPed.filter((p) => p.estado !== "cancelado");
+  // El día del negocio, en hora de Pereira. Este componente es "use client", así que
+  // antes usaba la zona del NAVEGADOR mientras el dashboard usaba la del servidor (UTC):
+  // dos "ventas de hoy" distintas en la misma pantalla.
+  const hoyStr = diaNegocio();
+  const hoyPed = catalog.pedidos.filter((p) => diaNegocio(p.creadoEn) === hoyStr);
+  const validos = hoyPed.filter(esVenta);
   const cancelados = hoyPed.length - validos.length;
   const activos = catalog.pedidos.filter(
     (p) => p.estado !== "entregado" && p.estado !== "cancelado"
   );
-  const porCobrar = activos.filter((p) => p.pago === "pendiente");
+  // POR COBRAR: todo lo no cancelado que sigue sin pagar — incluidos los ENTREGADOS.
+  // Antes se calculaba sobre , que excluye "entregado": justo la deuda más
+  // peligrosa de un restaurante (el que ya comió y no pagó) era la única que el cierre
+  // de caja no mostraba, y aparecía como faltante del cajero.
+  const porCobrar = catalog.pedidos.filter((p) => esVenta(p) && p.pago === "pendiente");
   const sum = (arr: Pedido[], f: (p: Pedido) => number) => arr.reduce((s, p) => s + f(p), 0);
   const metodo = (m: string) =>
     sum(validos.filter((p) => p.pago === "pagado" && p.metodoPago === m), (p) => p.total);
 
-  const ventasHoy = sum(validos, (p) => p.total);
+  const ventasHoy = sum(validos, ventaNeta);
   const ticket = validos.length ? Math.round(ventasHoy / validos.length) : 0;
   const cobrado = sum(validos.filter((p) => p.pago === "pagado"), (p) => p.total);
 

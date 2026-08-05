@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --import ./qa-ts.mjs qa-dominio.mjs && node --import ./qa-ts.mjs qa-pedidos.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

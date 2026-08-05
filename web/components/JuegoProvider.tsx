@@ -11,7 +11,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import type { Ajustes, Ingrediente } from "@/lib/menu";
+import type { Ingrediente } from "@/lib/menu";
+import type { AjustesPublicos } from "@/lib/catalog";
 import { TOPPINGS_INCLUIDOS } from "@/lib/menu";
 
 /* PEREZOSO (auditoría): el juego NO viaja en el JS inicial del landing — su chunk
@@ -30,6 +31,13 @@ export interface Precarga {
   baseId: string;
   proteinaId: string;
   toppingIds: string[];
+  /**
+   * Identidad del enredo insignia del que salió la caja. Mientras el cliente no
+   * cambie nada, el pedido conserva su PRECIO DE CARTA cerrado; sin este campo,
+   * "Enredarlo a mi gusto" recotizaba a la carta y el precio subía justo después
+   * de haberle prometido un ahorro.
+   */
+  enredoId?: string;
 }
 
 interface JuegoApi {
@@ -63,7 +71,7 @@ export default function JuegoProvider({
   bases: Ingrediente[];
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
-  ajustes: Ajustes;
+  ajustes: AjustesPublicos;
   children: React.ReactNode;
 }) {
   const [abierto, setAbierto] = useState(false);
@@ -144,7 +152,7 @@ export default function JuegoProvider({
         <div className="enreda-overlay">
           <EmplataGame
             /* la clave fuerza un montaje limpio por cada apertura: la precarga se sirve de nuevo */
-            key={precarga ? `${precarga.baseId}-${precarga.proteinaId}` : "libre"}
+            key={precarga ? `${precarga.enredoId ?? ""}-${precarga.baseId}-${precarga.proteinaId}` : "libre"}
             mesa={1}
             negocio={ajustes.negocio || "Papaghetti"}
             abierto={ajustes.abierto ?? true}

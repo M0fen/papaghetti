@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { haySesion } from "@/lib/sesion";
 import {
   getCatalog,
   abastecerInsumo,
@@ -125,6 +125,14 @@ async function ejecutar(name: string, args: Args): Promise<{ msg: string; change
   if (name === "registrar_gasto") {
     const monto = Math.max(0, Number(args.monto) || 0);
     if (!monto) return { changed: false, msg: "El monto no es válido." };
+    // Tope de seguridad: la IA escribe contabilidad sin confirmación humana. Un cero
+    // de más por mala transcripción no puede convertirse en un gasto de millones.
+    const TOPE = 5_000_000;
+    if (monto > TOPE)
+      return {
+        changed: false,
+        msg: `Ese monto (${formatCOP(monto)}) supera el tope que puedo registrar solo. Regístralo tú en Finanzas.`,
+      };
     let categoria = String(args.categoria ?? "otro") as GastoCategoria;
     if (!GASTO_CATEGORIAS.includes(categoria)) categoria = "otro";
     const concepto = String(args.concepto ?? "Gasto");
@@ -260,7 +268,7 @@ async function chatDeepSeek(key: string, messages: ChatMsg[], forzarTool = false
 }
 
 export async function POST(req: Request) {
-  const authed = (await cookies()).get("pg_admin")?.value === "1";
+  const authed = await haySesion();
   if (!authed) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
   const key = process.env.DEEPSEEK_API_KEY?.replace(/[^\x20-\x7E]/g, "").trim();

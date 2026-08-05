@@ -2,7 +2,15 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { estadoLabel, formatCOP, type Pedido } from "@/lib/menu";
+import {
+  estadoLabel,
+  formatCOP,
+  METODOS,
+  metodoLabel,
+  metodoEmoji,
+  type Pedido,
+} from "@/lib/menu";
+import { cobrarMesaAction } from "@/app/pedido-actions";
 
 export default function TablesBoard({
   pedidos,
@@ -17,8 +25,12 @@ export default function TablesBoard({
     return () => clearInterval(id);
   }, [router]);
 
+  /* Una mesa sigue OCUPADA mientras el cliente no haya pagado, aunque el plato ya se
+     haya entregado. Antes  excluía "entregado", así que la mesa se pintaba
+     LIBRE en cuanto la cocina pulsaba "Entregar ✓" — con el cliente todavía sentado y
+     sin pagar. Y el KDS empuja justo a eso: ese es el último botón del ticket. */
   const activos = pedidos.filter(
-    (p) => p.estado !== "entregado" && p.estado !== "cancelado"
+    (p) => p.estado !== "cancelado" && (p.estado !== "entregado" || p.pago === "pendiente")
   );
   const mesas = Array.from({ length: Math.max(1, numMesas) }, (_, i) => i + 1);
   const enMesa = (n: number) => activos.filter((p) => p.tipo === "mesa" && p.mesa === n);
@@ -97,13 +109,34 @@ export default function TablesBoard({
                       {porCobrar > 0 ? `Por cobrar ${formatCOP(porCobrar)}` : "Todo pagado"}
                     </span>
                   </div>
+                  {/* Cobrar la mesa ENTERA de un gesto: un grupo de 4 que pidió por QR
+                      son 4 pedidos que el cajero tenía que buscar y cobrar uno a uno
+                      entre todos los del día. */}
+                  {porCobrar > 0 && (
+                    <form action={cobrarMesaAction} className="tbl__cobrar-form">
+                      <input type="hidden" name="mesa" value={n} />
+                      <select name="metodo" aria-label={`Método de pago mesa ${n}`}>
+                        {METODOS.map((m) => (
+                          <option key={m} value={m}>
+                            {metodoEmoji[m]} {metodoLabel[m]}
+                          </option>
+                        ))}
+                      </select>
+                      <button className="btn btn--primary tbl__cobrar" type="submit">
+                        <span>Cobrar mesa · {formatCOP(porCobrar)}</span>
+                      </button>
+                    </form>
+                  )}
                 </>
               )}
             </div>
           );
         })}
       </div>
-      <p className="muted salon-note">Se actualiza solo cada 15 s. La mesa se asigna al crear el pedido.</p>
+      <p className="muted salon-note">
+        Se actualiza solo cada 15 s. La mesa sigue ocupada hasta que se cobra, aunque el
+        plato ya se haya entregado.
+      </p>
     </>
   );
 }

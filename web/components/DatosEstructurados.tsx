@@ -7,12 +7,12 @@
  * así que no puede quedar desincronizado.
  */
 
-import type { Catalog } from "@/lib/menu";
+import type { CatalogoPublico } from "@/lib/catalog";
 import { findIn } from "@/lib/menu";
 
 const SITIO = "https://papaghetti.vercel.app";
 
-export default function DatosEstructurados({ catalog }: { catalog: Catalog }) {
+export default function DatosEstructurados({ catalog }: { catalog: CatalogoPublico }) {
   const { ajustes } = catalog;
   const byId = (id: string) => findIn(catalog, id);
   const activos = (l: typeof catalog.bases) => l.filter((i) => i.activo && !i.agotado);

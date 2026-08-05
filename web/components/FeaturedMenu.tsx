@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import {
-  findIn,
   formatCOP,
   waLink,
   whatsappValido,
-  type Catalog,
   type EnredoInsignia,
+  type Ingrediente,
 } from "@/lib/menu";
+import type { CatalogoPublico } from "@/lib/catalog";
 import { calcularTotales } from "@/lib/precios";
 import Reveal from "./Reveal";
 import CajaMini from "./CajaMini";
@@ -17,14 +17,43 @@ import IngImg from "./IngImg";
 import PedirInsignia from "./PedirInsignia";
 import { useJuegoOpcional } from "./JuegoProvider";
 
-export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
-  const byId = (id: string) => findIn(catalog, id)!;
+/** Índice de ingredientes del catálogo público (bases + proteínas + toppings). */
+function indice(catalog: CatalogoPublico): Map<string, Ingrediente> {
+  return new Map(
+    [...catalog.bases, ...catalog.proteinas, ...catalog.toppings].map((i) => [i.id, i]),
+  );
+}
+
+/**
+ * ¿Se puede preparar hoy este enredo? Basta con que UNO de sus componentes esté
+ * agotado o fuera de carta. Este componente no conocía la palabra "agotado", así que
+ * "El Antojado" ($30.900) se seguía ofreciendo y pidiendo con la tocineta agotada —
+ * mientras la carta completa, tres secciones más abajo, sí la marcaba. La misma
+ * página se contradecía sola.
+ */
+function faltante(e: EnredoInsignia, ix: Map<string, Ingrediente>): Ingrediente | null {
+  for (const id of [e.baseId, e.proteinaId, ...e.toppingIds]) {
+    const ing = ix.get(id);
+    if (!ing || ing.agotado || ing.activo === false) return ing ?? null;
+  }
+  return null;
+}
+
+export default function FeaturedMenu({ catalog }: { catalog: CatalogoPublico }) {
+  const ix = indice(catalog);
+  const byId = (id: string) => ix.get(id)!;
   const [sel, setSel] = useState<EnredoInsignia | null>(null);
   const juego = useJuegoOpcional();
-  // "Enredarlo a mi gusto" abre el MISMO juego con este plato ya servido en la caja.
+  // "Enredarlo a mi gusto" abre el MISMO juego con este plato ya servido en la caja,
+  // conservando su identidad para que el precio de carta no cambie por abrirlo.
   const onEnredar = juego
     ? (e: EnredoInsignia) =>
-        juego.abrir({ baseId: e.baseId, proteinaId: e.proteinaId, toppingIds: e.toppingIds })
+        juego.abrir({
+          baseId: e.baseId,
+          proteinaId: e.proteinaId,
+          toppingIds: e.toppingIds,
+          enredoId: e.id,
+        })
     : undefined;
 
   return (
@@ -54,10 +83,11 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
               impuestoPct: catalog.ajustes.impuestoPct ?? 0,
             }).total;
             const ahorro = suelto - e.precio;
+            const falta = faltante(e, ix);
             return (
               <Reveal key={e.id} delay={i * 120}>
                 <article
-                  className="plato"
+                  className={`plato${falta ? " plato--agotado" : ""}`}
                   role="button"
                   tabIndex={0}
                   onClick={() => setSel(e)}
@@ -69,8 +99,12 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
                   }}
                 >
                   <div className="plato__art">
-                    {e.destacado && <span className="plato__tag">El favorito</span>}
-                    {ahorro > 0 && (
+                    {falta ? (
+                      <span className="plato__tag plato__tag--agotado">Hoy no disponible</span>
+                    ) : (
+                      e.destacado && <span className="plato__tag">El favorito</span>
+                    )}
+                    {ahorro > 0 && !falta && (
                       <span className="plato__ahorro">Ahorras {formatCOP(ahorro)}</span>
                     )}
                     {e.foto ? (
@@ -103,6 +137,7 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
         <EnredoModal
           enredo={sel}
           catalog={catalog}
+          falta={faltante(sel, ix)}
           onClose={() => setSel(null)}
           onEnredar={onEnredar}
         />
@@ -114,15 +149,18 @@ export default function FeaturedMenu({ catalog }: { catalog: Catalog }) {
 function EnredoModal({
   enredo,
   catalog,
+  falta,
   onClose,
   onEnredar,
 }: {
   enredo: EnredoInsignia;
-  catalog: Catalog;
+  catalog: CatalogoPublico;
+  falta: Ingrediente | null;
   onClose: () => void;
   onEnredar?: (e: EnredoInsignia) => void;
 }) {
-  const byId = (id: string) => findIn(catalog, id)!;
+  const ix = indice(catalog);
+  const byId = (id: string) => ix.get(id)!;
   const base = byId(enredo.baseId);
   const proteina = byId(enredo.proteinaId);
   const toppings = enredo.toppingIds.map(byId);
@@ -196,13 +234,22 @@ function EnredoModal({
             ))}
           </ul>
 
-          <PedirInsignia
-            enredo={enredo}
-            numMesas={ajustes.numMesas}
-            impuestoPct={ajustes.impuestoPct ?? 0}
-            costoDomicilio={ajustes.costoDomicilio}
-            pedidoMinimo={ajustes.pedidoMinimo}
-          />
+          {falta ? (
+            <p className="modal__agotado">
+              Hoy no lo podemos preparar: se nos acabó{" "}
+              <b>{falta.nombre ?? "un ingrediente"}</b>. Ármate uno a tu gusto y te lo
+              hacemos igual de rico.
+            </p>
+          ) : (
+            <PedirInsignia
+              enredo={enredo}
+              abierto={ajustes.abierto !== false}
+              numMesas={ajustes.numMesas}
+              impuestoPct={ajustes.impuestoPct ?? 0}
+              costoDomicilio={ajustes.costoDomicilio}
+              pedidoMinimo={ajustes.pedidoMinimo}
+            />
+          )}
 
           <div className="modal__otros">
             {onEnredar && (

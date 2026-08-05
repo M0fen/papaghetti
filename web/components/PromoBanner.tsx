@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Ajustes, Promo } from "@/lib/menu";
+import type { Promo } from "@/lib/menu";
+import type { AjustesPublicos } from "@/lib/catalog";
 
 const tonoBg: Record<string, string> = {
   oro: "var(--pg-oro)",
@@ -9,7 +10,7 @@ const tonoBg: Record<string, string> = {
   perejil: "var(--pg-perejil)",
 };
 
-export default function PromoBanner({ ajustes }: { ajustes: Ajustes }) {
+export default function PromoBanner({ ajustes }: { ajustes: AjustesPublicos }) {
   const banners: Promo[] = (ajustes.promos ?? []).filter((p) => p.activo && p.banner);
   const cerrado = ajustes.abierto === false;
   const [i, setI] = useState(0);

@@ -1,8 +1,18 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import {
+  haySesion,
+  abrirSesion,
+  cerrarSesion,
+  claveCorrecta,
+  sesionConfigurada,
+  loginBloqueado,
+  registrarFallo,
+  limpiarIntentos,
+} from "@/lib/sesion";
 import {
   updateIngrediente,
   updateEnredo,
@@ -40,10 +50,59 @@ import type {
   GastoCategoria,
 } from "@/lib/menu";
 
-const COOKIE = "pg_admin";
-
+/**
+ * Puerta única del panel. La sesión ahora va FIRMADA (ver lib/sesion.ts): antes esto
+ * era `cookie === "1"`, así que cualquiera escribía esa cookie a mano y era dueño del
+ * negocio. Y de paso RENUEVA el turno: la cookie de 8 h no se refrescaba nunca, así que
+ * el operario se quedaba fuera a media tarde sin explicación.
+ */
 async function guard(): Promise<boolean> {
-  return (await cookies()).get(COOKIE)?.value === "1";
+  if (!(await haySesion())) return false;
+  await abrirSesion();
+  return true;
+}
+
+/**
+ * Aviso efímero para el operario. Las 31 acciones hacían `return` mudo cuando algo
+ * fallaba: "guardado" y "no pasó nada" se veían exactamente igual. Esto deja un
+ * mensaje de 10 s que la barra del panel pinta en el siguiente render.
+ */
+export async function avisar(texto: string, tipo: "ok" | "error" = "error") {
+  (await cookies()).set("pg_aviso", `${tipo}:${texto}`.slice(0, 300), {
+    httpOnly: false,
+    sameSite: "lax",
+    path: "/admin",
+    maxAge: 10,
+  });
+}
+
+/**
+ * Sanea la foto que llega de un formulario.
+ *
+ * `foto` se guardaba tal cual: cualquier cadena, de cualquier tamaño. La compresión a
+ * 640px vive solo en el navegador (ImageUpload), o sea del lado de quien envía. Un data
+ * URI de 5MB se replicaba en cada snapshot de undo y acababa dentro del HTML público.
+ */
+function fotoValida(raw: FormData | string | null): string | undefined {
+  const v = typeof raw === "string" ? raw.trim() : "";
+  if (!v) return undefined;
+  const esData = /^data:image\/(jpeg|png|webp|avif);base64,[A-Za-z0-9+/=]+$/.test(v);
+  const esUrl = /^https?:\/\/[^\s"'<>]+$/i.test(v) || /^\/[^\s"'<>]*$/.test(v);
+  if (!esData && !esUrl) return undefined;
+  if (v.length > 300_000) return undefined; // ~220KB de imagen: de sobra para una ficha
+  return v;
+}
+
+/** Ejecuta una mutación del cerebro y convierte su error en un aviso visible. */
+async function intentar(fn: () => Promise<unknown>, exito?: string): Promise<boolean> {
+  try {
+    await fn();
+    if (exito) await avisar(exito, "ok");
+    return true;
+  } catch (e) {
+    await avisar(e instanceof Error ? e.message : "No se pudo completar la acción.");
+    return false;
+  }
 }
 
 function reflejar() {
@@ -53,21 +112,24 @@ function reflejar() {
 }
 
 export async function login(formData: FormData) {
+  // Freno de fuerza bruta: antes se podían probar contraseñas sin límite ni castigo.
+  const ip =
+    (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "desconocida";
+  if (loginBloqueado(ip)) redirect("/admin?error=espera");
+  if (!sesionConfigurada()) redirect("/admin?error=config");
+
   const pass = String(formData.get("password") ?? "").trim();
-  // .trim() en el valor esperado por si la env var llegó con salto de línea/espacios.
-  const expected = (process.env.ADMIN_PASSWORD ?? "papaghetti").trim();
-  if (pass !== expected) redirect("/admin?error=1");
-  (await cookies()).set(COOKIE, "1", {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 8,
-  });
+  if (!claveCorrecta(pass)) {
+    registrarFallo(ip);
+    redirect("/admin?error=1");
+  }
+  limpiarIntentos(ip);
+  await abrirSesion();
   redirect("/admin");
 }
 
 export async function logout() {
-  (await cookies()).delete(COOKIE);
+  await cerrarSesion();
   redirect("/admin");
 }
 
@@ -79,7 +141,7 @@ export async function savePrecio(formData: FormData) {
   await updateIngrediente(id, {
     nombre: String(formData.get("nombre") ?? "").trim() || "—",
     emoji: String(formData.get("emoji") ?? "").trim() || "🍽️",
-    foto: String(formData.get("foto") ?? "").trim() || undefined,
+    foto: fotoValida(String(formData.get("foto") ?? "")),
     precio: Math.max(0, Number(formData.get("precio") ?? 0)),
     activo: formData.get("activo") === "on",
     agotado: formData.get("agotado") === "on",
@@ -111,7 +173,7 @@ export async function saveEnredo(formData: FormData) {
     nombre: String(formData.get("nombre") ?? ""),
     gancho: String(formData.get("gancho") ?? ""),
     precio: Math.max(0, Number(formData.get("precio") ?? 0)),
-    foto: String(formData.get("foto") ?? "").trim() || undefined,
+    foto: fotoValida(String(formData.get("foto") ?? "")),
   });
   reflejar();
   revalidatePath("/admin/menu");
@@ -239,7 +301,9 @@ export async function eliminarInsumoAction(formData: FormData) {
   if (!(await guard())) return;
   const id = String(formData.get("id") ?? "");
   if (!id) return;
-  await deleteInsumo(id);
+  // deleteInsumo ahora se NIEGA si alguna receta lo usa: ese "no" tiene que llegar
+  // a la pantalla, no morir en un 500.
+  await intentar(() => deleteInsumo(id), "Insumo eliminado");
   reflejarInv();
 }
 
@@ -357,7 +421,7 @@ export async function crearIngredienteAction(formData: FormData) {
     nombre,
     precio: Number(formData.get("precio") ?? 0),
     emoji: String(formData.get("emoji") ?? "").trim(),
-    foto: String(formData.get("foto") ?? "").trim() || undefined,
+    foto: fotoValida(String(formData.get("foto") ?? "")),
   });
   reflejar();
   revalidatePath("/admin/menu");
@@ -390,7 +454,7 @@ export async function crearEnredoAction(formData: FormData) {
       .map((s) => s.trim())
       .filter(Boolean),
     precio: Number(formData.get("precio") ?? 0),
-    foto: String(formData.get("foto") ?? "").trim() || undefined,
+    foto: fotoValida(String(formData.get("foto") ?? "")),
   });
   reflejar();
   revalidatePath("/admin/menu");

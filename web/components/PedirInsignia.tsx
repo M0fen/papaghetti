@@ -9,7 +9,7 @@
  * desglosa hacia atrás para que subtotal/impuesto sigan siendo comparables.
  */
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import {
   TIPOS,
   tipoLabel,
@@ -19,10 +19,12 @@ import {
   type TipoServicio,
 } from "@/lib/menu";
 import { faltaParaMinimo } from "@/lib/precios";
+import { nuevaClave } from "@/lib/idem";
 import { enviarPedido } from "@/app/pedido-actions";
 
 export default function PedirInsignia({
   enredo,
+  abierto = true,
   numMesas,
   impuestoPct,
   costoDomicilio = 0,
@@ -30,6 +32,8 @@ export default function PedirInsignia({
   onListo,
 }: {
   enredo: EnredoInsignia;
+  /** Si el negocio está cerrado, no se puede pedir (el servidor también lo rechaza). */
+  abierto?: boolean;
   numMesas: number;
   impuestoPct: number;
   costoDomicilio?: number;
@@ -40,7 +44,12 @@ export default function PedirInsignia({
   const [mesa, setMesa] = useState(1);
   const [cliente, setCliente] = useState("");
   const [telefono, setTelefono] = useState("");
+  const [direccion, setDireccion] = useState("");
+  const [notas, setNotas] = useState("");
   const [pending, start] = useTransition();
+  // Idempotencia: se rellena al ENVIAR, no en el render (crypto.randomUUID es impuro
+  // y React 19 lo prohíbe en el cuerpo del componente). Ver lib/idem.ts.
+  const idem = useRef("");
   const [ok, setOk] = useState<{ id: string; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +62,7 @@ export default function PedirInsignia({
   const pedir = () =>
     start(async () => {
       setError(null);
+      if (!idem.current) idem.current = nuevaClave();
       const r = await enviarPedido({
         enredoId: enredo.id,
         // el cerebro toma los componentes del insignia; estos van por compatibilidad
@@ -64,6 +74,9 @@ export default function PedirInsignia({
         mesa: tipo === "mesa" ? mesa : undefined,
         cliente: tipo !== "mesa" ? cliente.trim() || undefined : undefined,
         telefono: tipo === "domicilio" ? telefono.trim() || undefined : undefined,
+        direccion: tipo === "domicilio" ? direccion.trim() || undefined : undefined,
+        notas: notas.trim() || undefined,
+        idemKey: idem.current,
       });
       if (!r.ok) return setError(r.error);
       setOk({ id: r.id, total: r.total });
@@ -118,19 +131,40 @@ export default function PedirInsignia({
             />
           </label>
           {tipo === "domicilio" && (
-            <label className="svc__field">
-              <span>WhatsApp / teléfono</span>
-              <input
-                type="tel"
-                inputMode="numeric"
-                value={telefono}
-                onChange={(e) => setTelefono(e.target.value)}
-                placeholder="Para confirmar el domicilio"
-              />
-            </label>
+            <>
+              <label className="svc__field">
+                <span>WhatsApp / teléfono</span>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  placeholder="Para confirmar el domicilio"
+                />
+              </label>
+              <label className="svc__field">
+                <span>Dirección</span>
+                <input
+                  type="text"
+                  value={direccion}
+                  onChange={(e) => setDireccion(e.target.value)}
+                  placeholder="Calle, barrio y punto de referencia"
+                />
+              </label>
+            </>
           )}
         </>
       )}
+      <label className="svc__field">
+        <span>Algo que debamos saber</span>
+        <input
+          type="text"
+          value={notas}
+          maxLength={140}
+          onChange={(e) => setNotas(e.target.value)}
+          placeholder="Sin cebolla, alergias… (opcional)"
+        />
+      </label>
 
       <div className="insig-pedir__cuentas">
         <div>
@@ -156,14 +190,18 @@ export default function PedirInsignia({
       )}
       {error && <p className="ticket__error">{error}</p>}
 
+      {!abierto && (
+        <p className="ticket__aviso">Ahora mismo estamos cerrados. ¡Te esperamos!</p>
+      )}
+
       <button
         className="btn btn--primary"
         style={{ width: "100%", justifyContent: "center" }}
         onClick={pedir}
-        disabled={pending || falta > 0}
+        disabled={pending || falta > 0 || !abierto}
         type="button"
       >
-        <span>{pending ? "Enviando…" : "Pedir este enredo"}</span>
+        <span>{pending ? "Enviando…" : !abierto ? "Cerrado" : "Pedir este enredo"}</span>
       </button>
     </div>
   );

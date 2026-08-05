@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import {
   TOPPINGS_INCLUIDOS,
   TIPOS,
@@ -13,6 +13,7 @@ import {
   type TipoServicio,
 } from "@/lib/menu";
 import { calcularTotales, faltaParaMinimo } from "@/lib/precios";
+import { nuevaClave } from "@/lib/idem";
 import { enviarPedido } from "@/app/pedido-actions";
 import Reveal from "./Reveal";
 import Bowl from "./Bowl";
@@ -30,6 +31,7 @@ export default function Configurator({
   impuestoPct,
   costoDomicilio = 0,
   pedidoMinimo = 0,
+  abierto = true,
   embebido,
 }: {
   bases: Ingrediente[];
@@ -40,6 +42,8 @@ export default function Configurator({
   impuestoPct: number;
   costoDomicilio?: number;
   pedidoMinimo?: number;
+  /** El negocio cerrado no acepta pedidos (el servidor tambien los rechaza). */
+  abierto?: boolean;
   /** true = lo monta EnredaTuPlato dentro de su sección: no repite <section> ni encabezado. */
   embebido?: boolean;
 }) {
@@ -59,6 +63,10 @@ export default function Configurator({
   const [mesa, setMesa] = useState(1);
   const [cliente, setCliente] = useState("");
   const [telefono, setTelefono] = useState("");
+  const [direccion, setDireccion] = useState("");
+  const [notas, setNotas] = useState("");
+  // Idempotencia: se rellena al ENVIAR, no en el render. Ver lib/idem.ts.
+  const idem = useRef("");
 
   const base = find(baseId)!;
   const proteina = find(proteinaId)!;
@@ -106,6 +114,7 @@ export default function Configurator({
   const pedir = () =>
     startPedido(async () => {
       setError(null);
+      if (!idem.current) idem.current = nuevaClave();
       const r = await enviarPedido({
         baseId,
         proteinaId,
@@ -115,6 +124,9 @@ export default function Configurator({
         mesa: tipo === "mesa" ? mesa : undefined,
         cliente: tipo !== "mesa" ? cliente : undefined,
         telefono: tipo === "domicilio" ? telefono : undefined,
+        direccion: tipo === "domicilio" ? direccion.trim() || undefined : undefined,
+        notas: notas.trim() || undefined,
+        idemKey: idem.current,
       });
       if (!r.ok) return setError(r.error);
       setOk({ id: r.id, total: r.total });
@@ -266,18 +278,43 @@ export default function Configurator({
                       />
                     </label>
                     {tipo === "domicilio" && (
-                      <label className="svc__field">
-                        <span>WhatsApp / teléfono</span>
-                        <input
-                          type="tel"
-                          inputMode="numeric"
-                          value={telefono}
-                          onChange={(e) => setTelefono(e.target.value)}
-                          placeholder="Para confirmar el domicilio"
-                          aria-label="Teléfono"
-                        />
-                      </label>
+                      <>
+                        <label className="svc__field">
+                          <span>WhatsApp / teléfono</span>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            value={telefono}
+                            onChange={(e) => setTelefono(e.target.value)}
+                            placeholder="Para confirmar el domicilio"
+                            aria-label="Teléfono"
+                          />
+                        </label>
+                        {/* El domiciliario no tenía a dónde ir: el pedido no guardaba
+                            dirección en ninguna parte del sistema. */}
+                        <label className="svc__field">
+                          <span>Dirección</span>
+                          <input
+                            type="text"
+                            value={direccion}
+                            onChange={(e) => setDireccion(e.target.value)}
+                            placeholder="Calle, barrio y punto de referencia"
+                            aria-label="Dirección de entrega"
+                          />
+                        </label>
+                      </>
                     )}
+                    <label className="svc__field">
+                      <span>Algo que debamos saber</span>
+                      <input
+                        type="text"
+                        value={notas}
+                        maxLength={140}
+                        onChange={(e) => setNotas(e.target.value)}
+                        placeholder="Sin cebolla, alergias… (opcional)"
+                        aria-label="Notas para la cocina"
+                      />
+                    </label>
                   </div>
                 )}
               </div>
@@ -312,7 +349,7 @@ export default function Configurator({
                   className="btn btn--primary"
                   style={{ width: "100%", justifyContent: "center", marginTop: 16 }}
                   onClick={pedir}
-                  disabled={pending || falta > 0}
+                  disabled={pending || falta > 0 || !abierto}
                   type="button"
                 >
                   <span>{pending ? "Enviando…" : "Pedir aquí"}</span>

@@ -14,7 +14,7 @@ import Motion from "@/components/Motion";
 import Resenas from "@/components/Resenas";
 import StickyPedir from "@/components/StickyPedir";
 import { DividerHebra } from "@/components/Hebra";
-import { getCatalog } from "@/lib/catalog";
+import { getCatalogPublico } from "@/lib/catalog";
 
 /* ESTÁTICO + revalidación on-demand (auditoría de optimización): force-dynamic cobraba
    ~700ms de TTFB por visita (función por request, cold starts de hasta 2.5s en Hobby)
@@ -33,7 +33,12 @@ function Divider({ color }: { color?: "oro" | "pomodoro" }) {
 }
 
 export default async function Home() {
-  const catalog = await getCatalog();
+  /* SOLO lo que puede ver un desconocido (auditoría de seguridad): antes esto era
+     `getCatalog()`, el documento entero, y se lo pasábamos a componentes "use client".
+     Next serializa las props de un componente cliente DENTRO del HTML, así que en el
+     código fuente del sitio viajaban los costos de cada insumo, las recetas, el stock,
+     los pedidos con teléfono del cliente y la contabilidad. Ver getCatalogPublico(). */
+  const catalog = await getCatalogPublico();
   const { ajustes } = catalog;
   const hayBanner =
     ajustes.abierto === false ||
@@ -71,6 +76,7 @@ export default async function Home() {
             impuestoPct={catalog.ajustes.impuestoPct}
             costoDomicilio={catalog.ajustes.costoDomicilio}
             pedidoMinimo={catalog.ajustes.pedidoMinimo}
+            abierto={catalog.ajustes.abierto !== false}
           />
           <Divider color="pomodoro" />
           <FeaturedMenu catalog={catalog} />

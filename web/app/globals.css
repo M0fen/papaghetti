@@ -4923,3 +4923,245 @@ body.enreda-jugando .sticky-pedir {
 .nf__hebra .hebra-draw-path {
   stroke-dashoffset: 0; /* en la 404 la hebra ya está dibujada */
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   AUDITORÍA DEL POS · lo que la operación necesitaba y no tenía
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* --- Avisos del panel: antes "guardado" y "no pasó nada" se veían igual --- */
+.adminx__alarma {
+  margin: 0 0 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #4a1212;
+  color: #ffd9d9;
+  border: 1px solid #7d2020;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.adminx__alarma code {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.adminx__aviso {
+  margin: 0 0 12px;
+  padding: 11px 16px;
+  border-radius: 12px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  animation: avisoEntra 0.25s ease-out;
+}
+.adminx__aviso--ok {
+  background: #12341c;
+  color: #b9f0c9;
+  border: 1px solid #2b6b3f;
+}
+.adminx__aviso--error {
+  background: #4a1212;
+  color: #ffd9d9;
+  border: 1px solid #7d2020;
+}
+@keyframes avisoEntra {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* --- KDS: un cocinero mira esto de lejos, con las manos ocupadas --- */
+.kds__son {
+  margin-left: 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--pg-linea, #3a3129);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  min-height: 36px;
+}
+.kds__son[aria-pressed="true"] {
+  background: var(--pg-oro, #f2a516);
+  color: #241a0c;
+  border-color: transparent;
+  font-weight: 700;
+}
+/* El semáforo del ticket: verde recién entrado, ámbar a los 8', rojo a los 15'. */
+.ticket-card--ambar {
+  border-color: #c98a12 !important;
+  box-shadow: 0 0 0 1px #c98a12 inset;
+}
+.ticket-card--roja {
+  border-color: var(--pg-pomodoro, #d1381f) !important;
+  box-shadow: 0 0 0 2px var(--pg-pomodoro, #d1381f) inset;
+  animation: kdsLatido 2.2s ease-in-out infinite;
+}
+@keyframes kdsLatido {
+  0%, 100% { box-shadow: 0 0 0 2px var(--pg-pomodoro, #d1381f) inset; }
+  50% { box-shadow: 0 0 0 2px var(--pg-pomodoro, #d1381f) inset, 0 0 14px rgba(209, 56, 31, 0.5); }
+}
+.ticket-card__crono {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+.ticket-card--ambar .ticket-card__crono { color: #f0b33c; }
+.ticket-card--roja .ticket-card__crono { color: #ff7a63; }
+/* La nota lleva ALERGIAS: no puede ir en gris pequeño como los toppings. */
+.ticket-card__nota {
+  margin: 6px 0 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #4a3a10;
+  color: #ffe9a8;
+  border-left: 3px solid var(--pg-oro, #f2a516);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.ticket-card__dir {
+  margin: 6px 0 0;
+  font-size: 0.88rem;
+  opacity: 0.92;
+}
+.ticket-card__acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ticket-card__back {
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 9px;
+  border: 1px solid var(--pg-linea, #3a3129);
+  background: transparent;
+  color: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.ticket-card__back:hover { background: rgba(255, 255, 255, 0.07); }
+/* Legible a un metro: la letra de escritorio no sirve en una cocina. */
+.kds .ticket-card__line { font-size: 1.22rem; font-weight: 700; line-height: 1.3; }
+.kds .ticket-card__tops { font-size: 1rem; opacity: 1; color: #cbbda9; }
+.kds .ticket-card__btn { min-height: 54px; font-size: 1rem; }
+
+/* --- Insignia no disponible: la carta y la cocina dejan de contradecirse --- */
+.plato--agotado { opacity: 0.62; filter: saturate(0.55); }
+.plato__tag--agotado {
+  background: #2b2b2b !important;
+  color: #ffb4a4 !important;
+  border: 1px solid #6b3227;
+}
+.modal__agotado {
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(209, 56, 31, 0.12);
+  border: 1px solid rgba(209, 56, 31, 0.45);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+/* --- Reportes: decir cuándo el margen no es de fiar --- */
+.fin-hero__aviso {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: #f0b33c;
+  line-height: 1.45;
+}
+.fin-hero__aviso a { color: inherit; text-decoration: underline; }
+
+/* --- EMPLATA: el "no" del servidor, visible --- */
+.emp-bar__error {
+  flex-basis: 100%;
+  margin: 0 0 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(209, 56, 31, 0.16);
+  border: 1px solid rgba(209, 56, 31, 0.5);
+  color: #ffd9d2;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+/* --- Nuevo pedido desde el panel (mostrador / teléfono) --- */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.npedido { display: grid; gap: 14px; }
+.npedido__tipos { display: flex; flex-wrap: wrap; gap: 8px; }
+.npedido__tipo {
+  font-family: var(--pg-font-body);
+  font-weight: 700;
+  font-size: 0.88rem;
+  padding: 10px 16px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 12px;
+  border: 2px solid var(--pg-linea, rgba(0, 0, 0, 0.15));
+  background: transparent;
+  color: inherit; /* el panel es claro: heredar, no forzar crema */
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.npedido__tipo.is-on {
+  border-color: var(--pg-pomodoro, #d1381f);
+  background: rgba(209, 56, 31, 0.12);
+}
+.npedido__grupo { border: 0; padding: 0; margin: 0; }
+.npedido__grupo legend {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+  margin-bottom: 7px;
+}
+.npedido__chips { display: flex; flex-wrap: wrap; gap: 7px; }
+/* Objetivo táctil de verdad: esto se usa con una mano y el teléfono en la otra. */
+.npedido__chips .chipbtn { min-height: 42px; cursor: pointer; }
+.npedido__chips .chipbtn.is-on {
+  background: var(--pg-oro, #f2a516);
+  color: #241a0c;
+  border-color: transparent;
+  font-weight: 700;
+}
+.npedido__datos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+.npedido__pie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--pg-linea, #3a3129);
+  padding-top: 12px;
+}
+.npedido__pie b { font-size: 1.08rem; }
+
+/* --- Mesas: tercer estado "servida · por cobrar" --- */
+.tbl--porcobrar {
+  border-color: var(--pg-oro, #f2a516) !important;
+  background: rgba(242, 165, 22, 0.12);
+}
+.tbl__cobrar {
+  margin-top: 8px;
+  width: 100%;
+  min-height: 40px;
+}

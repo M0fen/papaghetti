@@ -31,6 +31,7 @@ import { calcularTotales, faltaParaMinimo } from "@/lib/precios";
 import { creaPostFx } from "./postfx";
 import { EJES, perfilDe, rasgoDominante, saborDe, tituloAntojo, type Sabor } from "@/lib/sabor";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
+import { nuevaClave } from "@/lib/idem";
 import { useSonido } from "./sonido";
 
 const TAU = Math.PI * 2;
@@ -1128,7 +1129,13 @@ export default function EmplataGame(props: {
   costoDomicilio?: number; // se cobra aparte cuando el servicio es a domicilio
   pedidoMinimo?: number; // mínimo para domicilio; bloquea el sellado
   /** Enredo insignia con el que arrancar la caja ya emplatada (desde la carta). */
-  precargar?: { baseId: string; proteinaId: string; toppingIds: string[] } | null;
+  precargar?: {
+    baseId: string;
+    proteinaId: string;
+    toppingIds: string[];
+    /** Identidad del enredo insignia: conserva su precio de carta si nada cambia. */
+    enredoId?: string;
+  } | null;
 }) {
   const { mesa, negocio, abierto, impuestoPct, incluidos, bases, proteinas, toppings } = props;
   const canal = props.canal ?? "qr";
@@ -1159,6 +1166,8 @@ export default function EmplataGame(props: {
   const [mesaSel, setMesaSel] = useState(1);
   const [cliente, setCliente] = useState("");
   const [telefono, setTelefono] = useState("");
+  const [direccion, setDireccion] = useState("");
+  const [notas, setNotas] = useState("");
 
   const sel = useRef({ baseId: "", proteinaIds: [] as string[], toppingIds: [] as string[], tab: 0 as 0 | 1 | 2 });
   useEffect(() => {
@@ -1471,12 +1480,37 @@ export default function EmplataGame(props: {
     [despachar, sacarDeCaja, s],
   );
 
+  /**
+   * ¿La caja sigue siendo EXACTAMENTE el enredo insignia con el que se abrió?
+   * Mientras no se agregue ni se quite nada, el pedido conserva su identidad y su
+   * precio de carta cerrado. En cuanto el cliente lo toca, deja de ser ese plato.
+   */
+  const enredoIntacto = useCallback((): string => {
+    const p = props.precargar;
+    if (!p?.enredoId) return "";
+    const igual = (a: string[], b: string[]) =>
+      a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
+    return baseId === p.baseId &&
+      igual(proteinaIds, p.proteinaId ? [p.proteinaId] : []) &&
+      igual(toppingIds, p.toppingIds ?? [])
+      ? p.enredoId
+      : "";
+  }, [props.precargar, baseId, proteinaIds, toppingIds]);
+
+  /**
+   * Clave de idempotencia: una por caja armada. Se genera al ENVIAR, no durante el
+   * render — `crypto.randomUUID()` es impuro y React 19 lo prohíbe en el cuerpo del
+   * componente (en renderizado concurrente puede ejecutarse dos veces). Ver lib/idem.ts.
+   */
+  const idemRef = useRef<string>("");
+
   /** Envía de verdad: pliega la caja y manda el pedido por el flujo existente (canal según modo). */
   const enviarAhora = useCallback(async () => {
     if (enviando || world.current.folding) return;
     setErrorEnvio(null);
     setPidiendoDatos(false);
     setEnviando(true);
+    if (!idemRef.current) idemRef.current = nuevaClave();
     world.current.folding = true;
     s.confirmar();
     if (navigator.vibrate) navigator.vibrate([18, 40, 24]);
@@ -1492,6 +1526,16 @@ export default function EmplataGame(props: {
         mesa: esWeb ? (tipoSel === "mesa" ? mesaSel : undefined) : mesa,
         cliente: esWeb && tipoSel !== "mesa" ? cliente.trim() || undefined : undefined,
         telefono: esWeb && tipoSel === "domicilio" ? telefono.trim() || undefined : undefined,
+        direccion: tipoSel === "domicilio" ? direccion.trim() || undefined : undefined,
+        notas: notas.trim() || undefined,
+        /* Si llegaste desde un enredo insignia y NO tocaste nada, sigue siendo ese plato
+           a su precio de carta cerrado. Sin esto, "Enredarlo a mi gusto" cotizaba a la
+           carta y el precio SUBÍA $1.232 justo después de prometerte un ahorro — y el
+           pedido perdía el enredoId, así que los reportes nunca sabían qué se vendió. */
+        enredoId: enredoIntacto() || undefined,
+        /* Idempotencia: la misma caja enviada dos veces (doble toque, red lenta) es UN
+           pedido. La clave nace al armar, no al enviar, para sobrevivir al reintento. */
+        idemKey: idemRef.current,
       });
       // El cerebro puede rechazar (p. ej. pedido mínimo): la caja se vuelve a abrir
       // y el aviso se muestra en la hoja, no se pierde en silencio.
@@ -1517,7 +1561,7 @@ export default function EmplataGame(props: {
       setPidiendoDatos(esWeb);
     }
     setEnviando(false);
-  }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, mesaSel, cliente, telefono, mesa, s]);
+  }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, mesaSel, cliente, telefono, direccion, notas, enredoIntacto, mesa, s]);
 
   /**
    * PRIMER SERVICIO. Dos casos, un mismo gesto: el fideo trae la comida a la caja.
@@ -6426,19 +6470,42 @@ export default function EmplataGame(props: {
                   <input type="text" value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="¿A nombre de quién?" />
                 </label>
                 {tipoSel === "domicilio" && (
-                  <label className="emp-datos__campo">
-                    <span>WhatsApp / teléfono</span>
-                    <input
-                      type="tel"
-                      inputMode="numeric"
-                      value={telefono}
-                      onChange={(e) => setTelefono(e.target.value)}
-                      placeholder="Para confirmar el domicilio"
-                    />
-                  </label>
+                  <>
+                    <label className="emp-datos__campo">
+                      <span>WhatsApp / teléfono</span>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        value={telefono}
+                        onChange={(e) => setTelefono(e.target.value)}
+                        placeholder="Para confirmar el domicilio"
+                      />
+                    </label>
+                    {/* Sin dirección el domiciliario sale a ciegas con el plato en la mano. */}
+                    <label className="emp-datos__campo">
+                      <span>Dirección</span>
+                      <input
+                        type="text"
+                        value={direccion}
+                        onChange={(e) => setDireccion(e.target.value)}
+                        placeholder="Calle, barrio y punto de referencia"
+                      />
+                    </label>
+                  </>
                 )}
               </>
             )}
+            {/* La cocina necesita saber "sin cebolla" — y sobre todo las alergias. */}
+            <label className="emp-datos__campo">
+              <span>Algo que debamos saber</span>
+              <input
+                type="text"
+                value={notas}
+                maxLength={140}
+                onChange={(e) => setNotas(e.target.value)}
+                placeholder="Sin cebolla, alergias… (opcional)"
+              />
+            </label>
             <div className="emp-datos__linea">
               <span>Tu caja</span>
               <span>{formatCOP(totalComida)}</span>

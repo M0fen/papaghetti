@@ -15,9 +15,12 @@ import {
   TIPOS,
   tipoLabel,
   tipoIcon,
+  esVenta,
+  ventaNeta,
   type Periodo,
   type Pedido,
 } from "@/lib/menu";
+import { diaNegocio } from "@/lib/precios";
 import { crearGastoAction, eliminarMovimientoAction } from "../actions";
 import type { CSSVars } from "@/lib/cssVars";
 
@@ -44,13 +47,27 @@ export default async function FinanzasPage({
     (p) => p.estado !== "cancelado" && enPeriodo(p.creadoEn, periodo, now)
   );
   const sum = (a: Pedido[], f: (p: Pedido) => number) => a.reduce((s, p) => s + f(p), 0);
-  const ventas = sum(pedPer, (p) => p.total);
+  /* VENTAS = lo que se queda el negocio. `p.total` lleva dentro el impoconsumo (de la
+     DIAN) y la propina (del personal): contarlos como venta inflaba la utilidad con
+     plata ajena. Se muestran aparte, como lo que son: dinero de terceros en tránsito. */
+  const ventas = sum(pedPer, ventaNeta);
+  const impuestoRecaudado = sum(pedPer, (p) => p.impuesto ?? 0);
+  const propinas = sum(pedPer, (p) => p.propina ?? 0);
+  const domicilios = sum(pedPer, (p) => p.domicilio ?? 0);
   const cobrado = sum(pedPer.filter((p) => p.pago === "pagado"), (p) => p.total);
   const porCobrar = sum(pedPer.filter((p) => p.pago === "pendiente"), (p) => p.total);
   const cogs = sum(pedPer, (p) => p.costo ?? 0);
   const utilBruta = ventas - cogs;
   const margenPct = ventas > 0 ? Math.round((utilBruta / ventas) * 100) : 0;
   const ticket = pedPer.length ? Math.round(ventas / pedPer.length) : 0;
+  /* Cuántos pedidos NO tienen ficha técnica: su costo entra como 0 y el margen sale
+     inflado. Mejor decirlo que dibujar un 100% que nadie puede creerse. */
+  const sinFicha = pedPer.filter((p) => !p.costo).length;
+  const porCanal = (["web", "qr", "salon"] as const).map((c) => ({
+    c,
+    n: pedPer.filter((p) => p.canal === c).length,
+    total: sum(pedPer.filter((p) => p.canal === c), ventaNeta),
+  }));
 
   // --- Movimientos del período (salidas de caja) ---
   const movPer = (cat.movimientos ?? []).filter((m) => enPeriodo(m.fecha, periodo, now));
@@ -59,6 +76,13 @@ export default async function FinanzasPage({
   const totalCompras = compras.reduce((s, m) => s + m.monto, 0);
   const totalGastos = gastos.reduce((s, m) => s + m.monto, 0);
   const salidas = totalCompras + totalGastos;
+  /* Los gastos de categoría "insumos" YA se cuentan como COGS cuando esos insumos se
+     venden. Restarlos otra vez en la utilidad los contaba dos veces, y la utilidad del
+     mes salía negativa justo cuando más se había abastecido. Siguen en el flujo de caja
+     (son salida real de plata), pero fuera del P&L. */
+  const gastosOperativos = gastos
+    .filter((g) => g.categoria !== "insumos")
+    .reduce((s, m) => s + m.monto, 0);
 
   // Compras agrupadas por insumo (lo gastado de cada cosa)
   const porInsumo = new Map<string, { nombre: string; monto: number; cant: number }>();
@@ -99,10 +123,12 @@ export default async function FinanzasPage({
     return d;
   });
   const porDia = dias.map((d) => {
-    const key = d.toDateString();
+    // El día se compara en hora de PEREIRA: con toDateString() del servidor (UTC) cada
+    // barra se partía a las 7 p.m. y mezclaba el cierre de un día con la apertura del otro.
+    const key = diaNegocio(d);
     const total = cat.pedidos
-      .filter((p) => p.estado !== "cancelado" && new Date(p.creadoEn).toDateString() === key)
-      .reduce((s, p) => s + p.total, 0);
+      .filter((p) => esVenta(p) && diaNegocio(p.creadoEn) === key)
+      .reduce((s, p) => s + ventaNeta(p), 0);
     return { label: d.toLocaleDateString("es-CO", { weekday: "short" }), total };
   });
   const maxDia = Math.max(1, ...porDia.map((x) => x.total));
@@ -116,7 +142,7 @@ export default async function FinanzasPage({
     .filter((i) => i.falta > 0 || insumoBajo(i))
     .sort((a, b) => Number(insumoBajo(b)) - Number(insumoBajo(a)));
 
-  const utilTeorica = utilBruta - totalGastos;
+  const utilTeorica = utilBruta - gastosOperativos;
 
   return (
     <section className="fin">
@@ -149,6 +175,13 @@ export default async function FinanzasPage({
           <span className="fin-hero__sub">
             Margen bruto <b>{margenPct}%</b> · {pedPer.length} pedidos · ticket {formatCOP(ticket)}
           </span>
+          {sinFicha > 0 && (
+            <span className="fin-hero__aviso">
+              ⚠️ {sinFicha} de {pedPer.length} pedidos sin ficha técnica: su costo cuenta
+              como $0 y este margen sale más alto de lo real.{" "}
+              <a href="/admin/recetas">Completar recetas →</a>
+            </span>
+          )}
         </div>
         <div className="fin-hero__break">
           <div className="fin-hero__line">
@@ -158,7 +191,7 @@ export default async function FinanzasPage({
             <span>Costo de lo vendido</span><b>−{formatCOP(cogs)}</b>
           </div>
           <div className="fin-hero__line is-minus">
-            <span>Gastos operativos</span><b>−{formatCOP(totalGastos)}</b>
+            <span>Gastos operativos</span><b>−{formatCOP(gastosOperativos)}</b>
           </div>
         </div>
       </div>
@@ -171,11 +204,43 @@ export default async function FinanzasPage({
         <div className="fin-flow__item is-pend"><span>Pendiente por cobrar</span><b>{formatCOP(porCobrar)}</b></div>
       </div>
 
+      {/* PLATA DE TERCEROS: entra a la caja pero NO es del negocio. Antes se sumaba a
+          "Ventas" y a la "Utilidad", que quedaban infladas con dinero ajeno. */}
+      {(impuestoRecaudado > 0 || propinas > 0 || domicilios > 0) && (
+        <div className="fin-flow">
+          <div className="fin-flow__item">
+            <span>Impuesto recaudado (de la DIAN)</span><b>{formatCOP(impuestoRecaudado)}</b>
+          </div>
+          <div className="fin-flow__item">
+            <span>Propinas (del personal)</span><b>{formatCOP(propinas)}</b>
+          </div>
+          <div className="fin-flow__item">
+            <span>Domicilios cobrados</span><b>{formatCOP(domicilios)}</b>
+          </div>
+        </div>
+      )}
+
       <p className="fin-hint">
-        La <b>utilidad</b> es Ventas − Costo de lo vendido − Gastos. El costo sale de la receta de
-        cada plato × el costo de sus insumos. Las <b>compras</b> (reponer despensa) son flujo de
-        caja, no pérdida: se vuelven costo cuando vendes.
+        La <b>utilidad</b> es Ventas − Costo de lo vendido − Gastos. <b>Ventas</b> no incluye el
+        impuesto ni la propina: esa plata pasa por tu caja pero es de la DIAN y del personal. El
+        costo sale de la receta de cada plato × el costo de sus insumos. Las <b>compras</b>
+        (reponer despensa) son flujo de caja, no pérdida: se vuelven costo cuando vendes.
       </p>
+
+      {/* ¿Por dónde entra la venta? El canal se guardaba en cada pedido desde siempre
+          y no aparecía en ningún reporte: era imposible saber si el QR de la mesa vende. */}
+      <h2 className="fin-sech">📲 Por dónde entran los pedidos</h2>
+      <div className="fin-flow">
+        {porCanal.map((c) => (
+          <div key={c.c} className="fin-flow__item">
+            <span>
+              {c.c === "qr" ? "QR en mesa" : c.c === "salon" ? "Mostrador / teléfono" : "Sitio web"}{" "}
+              · {c.n}
+            </span>
+            <b>{formatCOP(c.total)}</b>
+          </div>
+        ))}
+      </div>
 
       {/* Despensa: hay vs falta */}
       <h2 className="fin-sech">📦 Despensa · lo que hay vs. lo que se necesita</h2>

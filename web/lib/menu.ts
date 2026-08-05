@@ -399,12 +399,45 @@ export const tipoIcon: Record<TipoServicio, string> = {
 };
 
 export type EstadoPago = "pendiente" | "pagado";
-export type MetodoPago = "efectivo" | "tarjeta" | "transferencia";
-export const METODOS: MetodoPago[] = ["efectivo", "tarjeta", "transferencia"];
+/**
+ * Métodos de pago reales de Colombia 2026.
+ *
+ * Antes eran tres: efectivo / tarjeta / transferencia — y esa última bolsa mezclaba
+ * Nequi, Daviplata, Bre-B y transferencia bancaria, que es justo lo que hoy más se usa
+ * en un mostrador de Pereira. Un POS que no distingue por dónde entró la plata no puede
+ * cuadrar la caja contra el datáfono ni contra el celular.
+ */
+export type MetodoPago =
+  | "efectivo"
+  | "nequi"
+  | "daviplata"
+  | "breb"
+  | "tarjeta"
+  | "transferencia";
+/** Ordenados por frecuencia de uso real en el mostrador. */
+export const METODOS: MetodoPago[] = [
+  "efectivo",
+  "nequi",
+  "daviplata",
+  "breb",
+  "tarjeta",
+  "transferencia",
+];
 export const metodoLabel: Record<MetodoPago, string> = {
   efectivo: "Efectivo",
+  nequi: "Nequi",
+  daviplata: "Daviplata",
+  breb: "Bre-B / QR",
   tarjeta: "Tarjeta",
   transferencia: "Transferencia",
+};
+export const metodoEmoji: Record<MetodoPago, string> = {
+  efectivo: "💵",
+  nequi: "💜",
+  daviplata: "❤️",
+  breb: "🔗",
+  tarjeta: "💳",
+  transferencia: "🏦",
 };
 
 export interface Pedido {
@@ -416,12 +449,26 @@ export interface Pedido {
   /** Referencia de quién pide: nombre y/o teléfono (WhatsApp). */
   cliente?: string;
   telefono?: string;
+  /** A dónde se lleva. Obligatoria en domicilio: sin ella el domiciliario sale a ciegas. */
+  direccion?: string;
+  /** Lo que el cliente escribió para la cocina: "sin cebolla", alergias. */
+  notas?: string;
   estado: EstadoPedido;
+  /** Por qué se canceló (queda en el historial y en el ticket). */
+  motivoCancelacion?: string;
   pago: EstadoPago;
   metodoPago?: MetodoPago;
   base: string;
   proteina: string;
   toppings: string[];
+  /**
+   * Los IDS de los componentes (base, proteínas, toppings), en orden.
+   * `base`/`proteina`/`toppings` guardan NOMBRES para el ticket; sin los ids no se
+   * podía devolver la despensa al cancelar ni saber qué se vendió de verdad.
+   */
+  componentes?: string[];
+  /** Clave de idempotencia del cliente: el mismo envío repetido es un solo pedido. */
+  idemKey?: string;
   subtotal: number;
   impuesto: number;
   /** Costo del envío, solo en pedidos a domicilio (0 en mesa/llevar). */
@@ -504,25 +551,60 @@ export const periodoNombre: Record<Periodo, string> = {
   mes: "este mes",
   anio: "este año",
 };
-/** Inicio del período (semana arranca el lunes). */
+/**
+ * Inicio del período (semana arranca el lunes) EN HORA DE PEREIRA.
+ *
+ * Antes esto era `d.setHours(0,0,0,0)`, que usa la hora local del PROCESO. En Vercel el
+ * runtime corre en UTC y Colombia es UTC−5: el día contable arrancaba a las 7:00 p.m.
+ * hora Pereira, así que a las 7:30 p.m. —justo cuando el dueño mira las ventas— el
+ * reporte de "Hoy" ya había borrado el almuerzo y la tarde entera.
+ *
+ * Se calcula sobre la fecha civil colombiana y se devuelve el instante UTC equivalente.
+ */
 export function inicioDe(periodo: Periodo, now: Date = new Date()): Date {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  if (periodo === "hoy") return d;
+  // "YYYY-MM-DD" del día colombiano actual.
+  const hoyCol = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const [y, m, d] = hoyCol.split("-").map(Number);
+  /** Medianoche colombiana de una fecha civil → instante UTC (Colombia es UTC−5 fijo). */
+  const medianoche = (yy: number, mm: number, dd: number) =>
+    new Date(Date.UTC(yy, mm - 1, dd, 5, 0, 0, 0));
+
+  if (periodo === "hoy") return medianoche(y, m, d);
   if (periodo === "semana") {
-    const dow = (d.getDay() + 6) % 7; // 0 = lunes
-    d.setDate(d.getDate() - dow);
-    return d;
+    // El día de la semana de la fecha civil colombiana, sin que la zona lo corra.
+    const dow = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7; // 0 = lunes
+    const lunes = new Date(Date.UTC(y, m - 1, d - dow));
+    return medianoche(lunes.getUTCFullYear(), lunes.getUTCMonth() + 1, lunes.getUTCDate());
   }
-  if (periodo === "mes") {
-    d.setDate(1);
-    return d;
-  }
-  // año
-  return new Date(d.getFullYear(), 0, 1);
+  if (periodo === "mes") return medianoche(y, m, 1);
+  return medianoche(y, 1, 1); // año
 }
 export const enPeriodo = (iso: string, periodo: Periodo, now: Date = new Date()): boolean =>
   new Date(iso) >= inicioDe(periodo, now);
+
+/**
+ * LA DEFINICIÓN ÚNICA DE "VENTA".
+ *
+ * Cada pantalla tenía la suya: el dashboard sumaba los cancelados, Finanzas no, y el
+ * cierre de turno usaba un tercer criterio. Tres cifras distintas del mismo día en el
+ * mismo panel. Una venta es un pedido que no está cancelado, y punto.
+ */
+export const esVenta = (p: Pedido): boolean => p.estado !== "cancelado";
+
+/**
+ * Lo que de verdad se queda el negocio de un pedido.
+ *
+ * NO es `p.total`: ahí van dentro el impoconsumo (que es de la DIAN) y la propina (que
+ * es del personal). Contarlos como ventas inflaba la "Utilidad" del reporte con plata
+ * ajena. El domicilio tampoco es margen —se le paga al domiciliario— pero sí entra a
+ * caja, por eso se separa.
+ */
+export const ventaNeta = (p: Pedido): number => Math.max(0, p.subtotal - (p.descuento ?? 0));
 
 /** ------- Leads / CRM (Fase 3.5) ------- */
 export type EstadoLead = "nuevo" | "contactado" | "cliente" | "descartado";
@@ -748,7 +830,12 @@ export const TODOS: Ingrediente[] = [...BASES, ...PROTEINAS, ...TOPPINGS];
 export const byId = (id: string) => TODOS.find((i) => i.id === id);
 
 /** Busca un ingrediente por id dentro de un catálogo dado (versión "en vivo"). */
-export const findIn = (catalog: Catalog, id: string): Ingrediente | undefined =>
+/** Busca un ingrediente por id. Pide solo los tres grupos: sirve igual para el
+ *  catálogo completo del panel que para la vista pública (sin pedidos ni costos). */
+export const findIn = (
+  catalog: Pick<Catalog, "bases" | "proteinas" | "toppings">,
+  id: string,
+): Ingrediente | undefined =>
   [...catalog.bases, ...catalog.proteinas, ...catalog.toppings].find(
     (i) => i.id === id
   );

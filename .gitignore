@@ -40,6 +40,11 @@ yarn-error.log*
 
 # artefactos locales de QA visual (capturas/Playwright) y respaldos de assets
 web/qa-*.mjs
+# …salvo las pruebas de dominio de la auditoría, que SÍ son parte del proyecto
+# (`npm test` desde web/): la aritmética del dinero y el ciclo del pedido.
+!web/qa-dominio.mjs
+!web/qa-pedidos.mjs
+!web/qa-ts.mjs
 web/dbg.mjs
 *.webp.bak
 *.bak384

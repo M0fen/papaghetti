@@ -10,9 +10,10 @@
  * (#caja-3d-slot) para montar la caja R3F encima SIN tocar la lógica (fallback = esta 2D).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatCOP, estadoLabel, type EstadoPedido, type Ingrediente } from "@/lib/menu";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
+import { nuevaClave } from "@/lib/idem";
 import { useSonido } from "./sonido";
 
 type Modo = "emplata" | "rapido";
@@ -112,6 +113,10 @@ export default function EmplataClient({
   const [enviando, setEnviando] = useState(false);
   const [cerrando, setCerrando] = useState(false); // animación de cierre origami
   const [pedido, setPedido] = useState<{ id: string; total: number } | null>(null);
+  /** El "no" del servidor tiene que verse: antes se perdía en un catch inalcanzable. */
+  const [error, setError] = useState<string | null>(null);
+  /** Idempotencia: se rellena al enviar, no en el render. Ver lib/idem.ts. */
+  const idem = useRef("");
   const [estado, setEstado] = useState<EstadoPedido>("recibido");
   const [drops, setDrops] = useState<Drop[]>([]);
   const [vapor, setVapor] = useState(0); // puffs activos
@@ -185,6 +190,7 @@ export default function EmplataClient({
       setCerrando(true);
       await new Promise((r) => setTimeout(r, 900)); // la caja se pliega
     }
+    if (!idem.current) idem.current = nuevaClave();
     try {
       const r = await enviarPedido({
         baseId,
@@ -193,11 +199,25 @@ export default function EmplataClient({
         canal: "qr",
         tipo: "mesa",
         mesa,
+        idemKey: idem.current,
       });
+      /* El servidor puede decir que no (se acabó un ingrediente, cerramos, mesa
+         inválida) y `enviarPedido` NUNCA lanza: devuelve {ok:false, error}. Sin esta
+         guarda se pintaba la pantalla de "¡pedido recibido!" con id vacío mientras la
+         cocina no había recibido nada — el peor fallo posible, porque el cliente se
+         queda esperando un plato que no existe. */
+      if (!r.ok) {
+        setCerrando(false);
+        setError(r.error);
+        setEnviando(false);
+        return;
+      }
+      setError(null);
       setPedido({ id: r.id, total: r.total });
       setEstado(r.estado as EstadoPedido);
     } catch {
       setCerrando(false);
+      setError("No pudimos enviar el pedido. Intenta otra vez.");
     }
     setEnviando(false);
   }, [abierto, enviando, baseId, proteinaId, toppingIds, mesa, reduce, s]);
@@ -396,6 +416,13 @@ export default function EmplataClient({
 
           {/* -------- barra fija de pulgar: total + confirmar -------- */}
           <footer className="emp-bar">
+            {/* El "no" del servidor, visible. Se nos acabó algo, cerramos, la mesa no
+                existe: todo eso llegaba antes como un éxito falso. */}
+            {error && (
+              <p className="emp-bar__error" role="alert">
+                {error}
+              </p>
+            )}
             <div className="emp-total">
               <small>
                 {tops.length > incluidos

@@ -49,9 +49,24 @@ export default function MenuEditor({ catalog }: { catalog: Catalog }) {
         </div>
       </section>
 
-      <form action={resetTodo} style={{ marginTop: 24, textAlign: "center" }}>
+      {/* Era un submit pelado, sin confirmación, al final de la página. La etiqueta dice
+          "catálogo" pero antes borraba TAMBIÉN los pedidos, la caja y los leads del
+          turno. Ahora conserva lo transaccional (ver resetCatalog) y además hay que
+          escribir la palabra para que ocurra. */}
+      <form
+        action={resetTodo}
+        style={{ marginTop: 24, textAlign: "center" }}
+        onSubmit={(e) => {
+          const r = window.prompt(
+            "Esto devuelve la CARTA (bases, proteínas, toppings, platos) a los valores de fábrica.\n" +
+              "Tus pedidos, tu caja y tus leads NO se tocan.\n\n" +
+              'Escribe RESTAURAR para confirmar:',
+          );
+          if (r !== "RESTAURAR") e.preventDefault();
+        }}
+      >
         <button className="btn btn--ghost" type="submit" style={{ padding: "10px 16px" }}>
-          <span>↺ Restaurar catálogo a la semilla</span>
+          <span>↺ Restaurar carta a la semilla</span>
         </button>
       </form>
     </>
