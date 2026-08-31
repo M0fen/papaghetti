@@ -28,8 +28,12 @@ const CLAVE_DEV = "papaghetti-dev";
  * única opción defendible cuando hay dinero detrás.
  */
 function secreto(): string | null {
-  const s = process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD;
-  if (s && s.trim().length >= 8) return s.trim();
+  const s = (process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || "").trim();
+  // CUALQUIER contraseña no vacía sirve como llave de firma. Exigir 8 caracteres
+  // aquí era una trampa: el día que Carlos pusiera una clave más corta se quedaría
+  // fuera de su propio panel con un mensaje que no explica nada. La longitud es
+  // asunto de la contraseña, no del mecanismo de firma.
+  if (s) return s;
   return ES_DEV ? CLAVE_DEV : null;
 }
 
@@ -65,9 +69,11 @@ export async function abrirSesion(): Promise<void> {
   (await cookies()).set(COOKIE, `${vence}.${firmar(vence, key)}`, {
     httpOnly: true,
     sameSite: "lax",
-    // En producción la cookie NUNCA debe viajar en claro. En local (http) sí,
-    // o no habría forma de entrar al panel para desarrollar.
-    secure: process.env.NODE_ENV === "production",
+    // `secure` solo donde la conexión ES https. En Vercel siempre lo es; en local
+    // (tanto `next dev` como `next start`) no, y con la marca puesta el navegador
+    // descarta la cookie: el panel quedaba imposible de probar contra un build de
+    // producción. Atarlo a VERCEL es exacto; atarlo a NODE_ENV no lo era.
+    secure: Boolean(process.env.VERCEL),
     path: "/",
     maxAge: Math.floor(DURACION_MS / 1000),
   });
