@@ -491,8 +491,29 @@ function conLoVivo(snap: Catalog, vivo: Catalog): Catalog {
   };
 }
 
-function nuevaEntrada(texto: string, meta = false): HistItem {
-  return { id: crypto.randomUUID().slice(0, 6), fecha: new Date().toISOString(), texto, meta };
+/**
+ * Quién está haciendo la acción, si hay una petición con sesión detrás.
+ *
+ * Se lee de forma perezosa y tolerante: los scripts de QA y las tareas de fondo
+ * llaman a las mismas funciones sin contexto de petición, y ahí simplemente no hay
+ * nombre. Sin esto, el historial decía "Canceló #A1B2" y no había a quién preguntarle.
+ */
+async function quien(): Promise<string> {
+  try {
+    const { usuarioSesion } = await import("./sesion");
+    return (await usuarioSesion()) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function nuevaEntrada(texto: string, meta = false, usuario = ""): HistItem {
+  return {
+    id: crypto.randomUUID().slice(0, 6),
+    fecha: new Date().toISOString(),
+    texto: usuario ? `${texto} · ${usuario}` : texto,
+    meta,
+  };
 }
 
 /**
@@ -579,7 +600,7 @@ async function commit(
       doc.undo = [...(actual.undo ?? []), stripSnap(actual)].slice(-UNDO_CAP);
       doc.redo = [];
       if (texto) {
-        doc.historial = [nuevaEntrada(texto), ...(actual.historial ?? [])].slice(0, HIST_CAP);
+        doc.historial = [nuevaEntrada(texto, false, await quien()), ...(actual.historial ?? [])].slice(0, HIST_CAP);
       }
       try {
         // Último intento: se escribe SIN condición. Ya venimos de releer y fusionar,
@@ -1548,16 +1569,26 @@ export async function abastecerAPar(id: string): Promise<Catalog> {
 }
 
 /** Apertura de turno: deja TODA la despensa en su nivel estándar (registra compras). */
-export async function abastecerTodoAPar(): Promise<Catalog> {
+export async function abastecerTodoAPar(): Promise<{ repuestos: number; total: number }> {
   const cat = await read();
+  let repuestos = 0;
   cat.insumos.forEach((i) => {
     const antes = i.stock;
     i.stock = Math.max(i.stock, i.parStock); // llenar nunca puede significar vaciar
+    if (i.stock > antes) repuestos++;
     registrarCompra(cat, i, i.stock - antes);
   });
-  reactivarPreparables(cat);
-  await commit(cat, "Abasteció toda la despensa a estándar");
-  return cat;
+  recalcularDisponibilidad(cat);
+  /* Devuelve CUÁNTO cambió. El botón parecía roto: como la despensa arranca ya en su
+     nivel estándar, Math.max no movía nada y la pantalla se quedaba igual sin decir
+     por qué. Una acción que no hace nada tiene que decir que no hizo nada. */
+  await commit(
+    cat,
+    repuestos > 0
+      ? `Repuso ${repuestos} insumo(s) a su nivel estándar`
+      : "Revisó la despensa: ya estaba toda en su nivel estándar",
+  );
+  return { repuestos, total: cat.insumos.length };
 }
 
 /* ------- Contabilidad: gastos y movimientos ------- */

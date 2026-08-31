@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   haySesion,
+  usuarioSesion,
   abrirSesion,
   cerrarSesion,
   claveCorrecta,
@@ -57,8 +58,9 @@ import type {
  * el operario se quedaba fuera a media tarde sin explicación.
  */
 async function guard(): Promise<boolean> {
-  if (!(await haySesion())) return false;
-  await abrirSesion();
+  const u = await usuarioSesion();
+  if (!u) return false;
+  await abrirSesion(u); // renueva el turno SIN cambiar de persona
   return true;
 }
 
@@ -124,7 +126,7 @@ export async function login(formData: FormData) {
     redirect("/admin?error=1");
   }
   limpiarIntentos(ip);
-  await abrirSesion();
+  await abrirSesion(String(formData.get("usuario") ?? ""));
   redirect("/admin");
 }
 
@@ -264,7 +266,17 @@ export async function abastecerAParAction(formData: FormData) {
 
 export async function abastecerTodoAParAction() {
   if (!(await guard())) return;
-  await abastecerTodoAPar();
+  try {
+    const r = await abastecerTodoAPar();
+    await avisar(
+      r.repuestos > 0
+        ? `Se repusieron ${r.repuestos} de ${r.total} insumos a su nivel estándar`
+        : `Los ${r.total} insumos ya estaban en su nivel estándar: no hubo nada que reponer`,
+      "ok",
+    );
+  } catch (e) {
+    await avisar(e instanceof Error ? e.message : "No se pudo abastecer.");
+  }
   reflejarInv();
 }
 

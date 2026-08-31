@@ -24,10 +24,12 @@ import {
   TIPOS,
   tipoLabel,
   type EstadoPedido,
+  type EnredoInsignia,
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
-import { calcularTotales, faltaParaMinimo } from "@/lib/precios";
+import { calcularTotales, faltaParaMinimo, idsGratis, soloCobrables } from "@/lib/precios";
+import PlatosCarta from "@/components/PlatosCarta";
 import { creaPostFx } from "./postfx";
 import { EJES, perfilDe, rasgoDominante, saborDe, tituloAntojo, type Sabor } from "@/lib/sabor";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
@@ -1118,6 +1120,8 @@ export default function EmplataGame(props: {
   abierto: boolean;
   impuestoPct: number;
   incluidos: number;
+  /** Platos de precio cerrado (combos, ensaladas, a la carta, especiales). */
+  platos?: EnredoInsignia[];
   bases: Ingrediente[];
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
@@ -1137,6 +1141,7 @@ export default function EmplataGame(props: {
   } | null;
 }) {
   const { mesa, negocio, abierto, impuestoPct, incluidos, bases, proteinas, toppings } = props;
+  const platos = props.platos ?? [];
   const canal = props.canal ?? "qr";
   const esWeb = canal === "web";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1160,18 +1165,26 @@ export default function EmplataGame(props: {
   const [estado, setEstado] = useState<EstadoPedido>("recibido");
   // ------- modo WEB: servicio + contacto (se piden al EMPLATAR, no antes: primero se juega) -------
   const [pidiendoDatos, setPidiendoDatos] = useState(false);
+  /** La carta de platos listos (combos, ensaladas, a la carta): capa DOM, no toca el canvas. */
+  const [verCarta, setVerCarta] = useState(false);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
-  const [tipoSel, setTipoSel] = useState<TipoServicio>("domicilio");
-  const [referencia, setReferencia] = useState("");
+  /* Por QR el cliente está SENTADO: el tipo nace en "En el local". Antes nacía en
+     "domicilio" y, como la hoja de datos no se abría por QR, nadie lo cambiaba: la
+     referencia se enviaba como undefined y TODO pedido del QR llegaba anónimo. */
+  const [tipoSel, setTipoSel] = useState<TipoServicio>(esWeb ? "domicilio" : "mesa");
+  /* Prerrellenada con el código del QR para que NUNCA llegue vacía; el cliente la
+     puede cambiar por algo mejor ("mesa del ventanal"). */
+  const [referencia, setReferencia] = useState(esWeb ? "" : `Mesa ${mesa}`);
   const [cliente, setCliente] = useState("");
   const [telefono, setTelefono] = useState("");
   const [direccion, setDireccion] = useState("");
   const [notas, setNotas] = useState("");
 
-  const sel = useRef({ baseId: "", proteinaIds: [] as string[], toppingIds: [] as string[], tab: 0 as 0 | 1 | 2 });
-  useEffect(() => {
-    sel.current = { baseId, proteinaIds, toppingIds, tab };
-  }, [baseId, proteinaIds, toppingIds, tab]);
+  /* `gratis` = los ids que van de cortesía, calculados con la MISMA función que el
+     precio (idsGratis). Las etiquetas del canvas los leen de aquí: antes cada una
+     decidía por su cuenta, por orden de toque y contando las salsas, así que el
+     cartel "GRATIS" contradecía al total que tenía al lado. */
+  const sel = useRef({ baseId: "", proteinaIds: [] as string[], toppingIds: [] as string[], tab: 0 as 0 | 1 | 2, gratis: new Set<string>() });
 
   // W4: la escena NO se desmonta al pedir. faseRef gobierna el loop; estadoRef lo lee sin re-render.
   const faseRef = useRef<"arma" | "espera">("arma");
@@ -1202,6 +1215,14 @@ export default function EmplataGame(props: {
   const all = [...bases, ...proteinas, ...toppings];
   const find = (id: string) => all.find((i) => i.id === id);
   const tops = toppingIds.map(find).filter(Boolean) as Ingrediente[];
+  /** Solo los que de verdad cuentan para la cortesía: las salsas van incluidas. */
+  const cobrables = soloCobrables(tops);
+  /* El espejo de la selección que lee el canvas. Va DESPUÉS de `tops` porque
+     necesita los ingredientes ya resueltos para saber cuáles van de cortesía. */
+  useEffect(() => {
+    sel.current = { baseId, proteinaIds, toppingIds, tab, gratis: idsGratis(tops, incluidos) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseId, proteinaIds, toppingIds, tab, incluidos]);
   // En QR el servicio es siempre "mesa" (sin domicilio); en web depende de la hoja final.
   const tipoActual: TipoServicio = esWeb ? tipoSel : "mesa";
   const { subtotal, impuesto, domicilio, total } = calcularTotales({
@@ -1543,7 +1564,7 @@ export default function EmplataGame(props: {
         world.current.fold = 0;
         world.current.selloHecho = false;
         setErrorEnvio(r.error);
-        setPidiendoDatos(esWeb);
+        setPidiendoDatos(true);
         setEnviando(false);
         return;
       }
@@ -1557,7 +1578,7 @@ export default function EmplataGame(props: {
       world.current.fold = 0;
       world.current.selloHecho = false;
       setErrorEnvio("No pudimos enviar el pedido. Intenta otra vez.");
-      setPidiendoDatos(esWeb);
+      setPidiendoDatos(true);
     }
     setEnviando(false);
   }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, referencia, cliente, telefono, direccion, notas, enredoIntacto, mesa, s]);
@@ -1601,12 +1622,13 @@ export default function EmplataGame(props: {
   /** EMPLATAR: en QR manda directo; en el menú WEB pide antes servicio + contacto (se juega primero). */
   const confirmar = useCallback(() => {
     if (!abierto || enviando || !baseId || world.current.folding) return;
-    if (esWeb) {
-      setPidiendoDatos(true);
-      return;
-    }
-    void enviarAhora();
-  }, [abierto, enviando, baseId, esWeb, enviarAhora]);
+    /* SIEMPRE pasa por la hoja de ÚLTIMO PASO, también por QR. Es donde el cliente
+       dice dónde está y avisa de una alergia, y es el ÚNICO sitio del árbol donde se
+       pinta el error del servidor: mandando directo, un rechazo (sin proteína, algo
+       agotado, local cerrado) desplegaba la caja sin decir una palabra y el cliente
+       se quedaba esperando un plato que nunca se pidió. */
+    setPidiendoDatos(true);
+  }, [abierto, enviando, baseId]);
 
   useEffect(() => {
     if (!pedido) return;
@@ -2843,14 +2865,14 @@ export default function EmplataGame(props: {
       }
       if (cat !== "base") wd.manchas.push({ fx, fy: ty, life: 1, r: radioDe(cat, sc) * 0.7 });
       const idxT = sel.current.toppingIds.indexOf(ing.id);
-      const gratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
+      const gratis = sel.current.gratis.has(ing.id);
       // los pops vivos suben para dejar sitio (nunca ilegibles apilados); el nuevo nace en el borde
       if (!reduce) for (const pv of wd.pops) pv.y -= 22;
       wd.pops.push({
         x: clamp(xScreen, boxX - boxW * 0.34, boxX + boxW * 0.34),
         y: boxY - boxH * 0.5,
         life: 1,
-        texto: gratis ? "GRATIS" : ing.precio > 0 ? `+${formatCOP(ing.precio)}` : ing.nombre,
+        texto: ing.categoria === "salsa" ? "INCLUIDA" : gratis ? "GRATIS" : ing.precio > 0 ? `+${formatCOP(ing.precio)}` : ing.nombre,
         gratis,
       });
       // seguidilla: emplatar rápido sube el tono (pequeña celebración musical)
@@ -5539,7 +5561,7 @@ export default function EmplataGame(props: {
         ctx.shadowBlur = 0;
         // precio / GRATIS chip (oro sobre bandeja oscura — legible; el espresso desaparecería)
         const idxT = sel.current.toppingIds.indexOf(ing.id);
-        const esGratis = ing.categoria === "topping" && idxT >= 0 && idxT < incluidos;
+        const esGratis = ing.categoria === "salsa" || sel.current.gratis.has(ing.id);
         ctx.font = fontB(12, 800);
         if (esGratis && !ing.agotado) {
           ctx.fillStyle = "#C69A5B";
@@ -5547,7 +5569,7 @@ export default function EmplataGame(props: {
           ctx.roundRect(-26, cardHd / 2 - 9, 52, 16, 8);
           ctx.fill();
           ctx.fillStyle = "#2A1C0E";
-          ctx.fillText("GRATIS", 0, cardHd / 2 - 0.5);
+          ctx.fillText(ing.categoria === "salsa" ? "INCLUIDA" : "GRATIS", 0, cardHd / 2 - 0.5);
         } else {
           ctx.shadowColor = "rgba(18,9,3,0.7)";
           ctx.shadowBlur = 4;
@@ -5565,7 +5587,7 @@ export default function EmplataGame(props: {
           ing.categoria === "topping" &&
           !ing.agotado &&
           !esGratis &&
-          sel.current.toppingIds.length < incluidos
+          sel.current.toppingIds.filter((id) => find(id)?.categoria !== "salsa").length < incluidos
         ) {
           ctx.font = fontB(9, 800);
           ctx.fillStyle = "#C69A5B";
@@ -6333,9 +6355,20 @@ export default function EmplataGame(props: {
           )}
           <b>{negocio.toUpperCase()}</b>
           {/* en web el ← ya ocupa espacio: la marca sola respira mejor que "· ENREDA TU PLATO" */}
-          {!esWeb && <span>· MESA {mesa}</span>}
+          {!esWeb && referencia && <span>· {referencia.toUpperCase()}</span>}
         </div>
         <div className="emp-top__actions">
+          {/* Los platos que ya vienen hechos. Sin esto, media carta —y los tickets
+              más altos— no existían para quien pide desde el teléfono. */}
+          {platos.length > 0 && (
+            <button
+              type="button"
+              className="emp-mini emp-mini--carta"
+              onClick={() => setVerCarta(true)}
+            >
+              Platos listos
+            </button>
+          )}
           <button type="button" className="emp-mini" onClick={s.toggleMute} aria-label={s.mute ? "Activar sonido" : "Silenciar"}>
             {s.mute ? <IcoMute /> : <IcoSonido />}
           </button>
@@ -6376,9 +6409,11 @@ export default function EmplataGame(props: {
                 ? desdeBase
                   ? `Arma tu caja · desde ${desdeBase}`
                   : "Sin bases disponibles hoy"
-                : tops.length > incluidos
-                  ? `${incluidos} gratis · ${tops.length - incluidos} con precio`
-                  : `${tops.length}/${incluidos} de cortesía`}
+                : cobrables.length > incluidos
+                  ? `${incluidos} gratis · ${cobrables.length - incluidos} con precio`
+                  : `${cobrables.length}/${incluidos} de cortesía${
+                      tops.length > cobrables.length ? " · salsas incluidas" : ""
+                    }`}
               {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
             </small>
             <div className="emp-total__row">
@@ -6436,26 +6471,52 @@ export default function EmplataGame(props: {
         </footer>
       )}
 
+      {/* LA CARTA DE PLATOS LISTOS: capa DOM encima del canvas, cero riesgo para el
+          loop de render. El pedido sale por el mismo enviarPedido con enredoId. */}
+      {verCarta && (
+        <PlatosCarta
+          platos={platos}
+          ingredientes={[...bases, ...proteinas, ...toppings]}
+          abierto={abierto}
+          referenciaInicial={referencia}
+          onCerrar={() => setVerCarta(false)}
+          onPedido={(id, total) => {
+            setVerCarta(false);
+            setPedido({ id, total });
+            setEstado("recibido");
+            estadoRef.current = "recibido";
+            faseRef.current = "espera";
+          }}
+        />
+      )}
+
       {/* MODO WEB — último paso: servicio + contacto. Se pide DESPUÉS de jugar (primero la diversión),
           y se manda por el mismo flujo existente (enviarPedido, canal "web"). */}
       {pidiendoDatos && (
         <div className="emp-datos" role="dialog" aria-modal="true" aria-label="Servicio y contacto">
           <div className="emp-datos__panel">
             <p className="emp-datos__k">ÚLTIMO PASO</p>
-            <h3 className="emp-datos__h">¿Cómo quieres tu enredo?</h3>
-            <div className="emp-datos__tipos" role="group" aria-label="Tipo de servicio">
-              {TIPOS.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={`emp-datos__tipo ${tipoSel === t ? "is-on" : ""}`}
-                  aria-pressed={tipoSel === t}
-                  onClick={() => setTipoSel(t)}
-                >
-                  {tipoLabel[t]}
-                </button>
-              ))}
-            </div>
+            <h3 className="emp-datos__h">
+              {esWeb ? "¿Cómo quieres tu enredo?" : "¿Dónde te encontramos?"}
+            </h3>
+            {/* El selector de servicio solo tiene sentido en la web. Quien escanea el
+                QR está SENTADO: ofrecerle "domicilio" es ruido y abre la puerta a un
+                pedido sin dirección. */}
+            {esWeb && (
+              <div className="emp-datos__tipos" role="group" aria-label="Tipo de servicio">
+                {TIPOS.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`emp-datos__tipo ${tipoSel === t ? "is-on" : ""}`}
+                    aria-pressed={tipoSel === t}
+                    onClick={() => setTipoSel(t)}
+                  >
+                    {tipoLabel[t]}
+                  </button>
+                ))}
+              </div>
+            )}
             {tipoSel === "mesa" ? (
               /* Aquí no se asignan mesas: lo que hace falta es saber a quién llevarle
                  el plato. Un número era una ficción que nadie repartía. */

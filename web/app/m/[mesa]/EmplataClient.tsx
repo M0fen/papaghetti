@@ -11,7 +11,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { formatCOP, estadoLabel, type EstadoPedido, type Ingrediente } from "@/lib/menu";
+import { formatCOP, estadoLabel, type EnredoInsignia, type EstadoPedido, type Ingrediente } from "@/lib/menu";
+import PlatosCarta from "@/components/PlatosCarta";
+import { calcularTotales, idsGratis } from "@/lib/precios";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { nuevaClave } from "@/lib/idem";
 import { useSonido } from "./sonido";
@@ -95,6 +97,7 @@ export default function EmplataClient({
   bases,
   proteinas,
   toppings,
+  platos = [],
 }: {
   mesa: number;
   negocio: string;
@@ -104,6 +107,7 @@ export default function EmplataClient({
   bases: Ingrediente[];
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
+  platos?: EnredoInsignia[];
 }) {
   const disponibles = (l: Ingrediente[]) => l.filter((i) => !i.agotado);
   const [modo, setModo] = useState<Modo>("emplata");
@@ -115,6 +119,11 @@ export default function EmplataClient({
   const [pedido, setPedido] = useState<{ id: string; total: number } | null>(null);
   /** El "no" del servidor tiene que verse: antes se perdía en un catch inalcanzable. */
   const [error, setError] = useState<string | null>(null);
+  /* Dónde está el cliente y qué debemos saber. Por QR NADIE podía decirlo: el pedido
+     llegaba anónimo y sin forma de avisar de una alergia. */
+  const [referencia, setReferencia] = useState(mesa > 0 ? `Mesa ${mesa}` : "");
+  const [notas, setNotas] = useState("");
+  const [verCarta, setVerCarta] = useState(false);
   /** Idempotencia: se rellena al enviar, no en el render. Ver lib/idem.ts. */
   const idem = useRef("");
   const [estado, setEstado] = useState<EstadoPedido>("recibido");
@@ -136,15 +145,21 @@ export default function EmplataClient({
 
   const base = find(baseId);
   const proteina = find(proteinaId);
-  const tops = toppingIds.map(find).filter(Boolean) as Ingrediente[];
+  const tops = useMemo(() => toppingIds.map(find).filter(Boolean) as Ingrediente[], [toppingIds, find]);
 
-  // PRECIO — espejo exacto de crearPedido (los primeros `incluidos` toppings gratis POR ORDEN).
-  const subtotal =
-    (base?.precio ?? 0) +
-    (proteina?.precio ?? 0) +
-    tops.reduce((sum, t, i) => sum + (i < incluidos ? 0 : t.precio), 0);
-  const impuesto = Math.round((subtotal * impuestoPct) / 100);
-  const total = subtotal + impuesto;
+  /* PRECIO — la MISMA función que usa el servidor. Aquí vivía el último cálculo a
+     mano del repo: regalaba "los primeros" por orden de toque y contaba las salsas
+     como si costaran, así que la pantalla podía mostrar hasta $11.000 de más que lo
+     que cobraba la caja. */
+  const { subtotal, impuesto, total } = calcularTotales({
+    base,
+    proteinas: [proteina],
+    toppings: tops,
+    impuestoPct,
+    incluidos,
+  });
+  /** Quiénes van de cortesía, para que la etiqueta diga lo mismo que el total. */
+  const gratis = useMemo(() => idsGratis(tops, incluidos), [tops, incluidos]);
 
   // ---- juice: caída + vapor + haptic ----
   const soltar = useCallback(
@@ -198,8 +213,9 @@ export default function EmplataClient({
         toppingIds,
         canal: "qr",
         tipo: "mesa",
-        // Sin número de mesa: aquí no se asignan. Si el cliente no dejó referencia,
-        // el panel lo lista como "sin ubicar" para que el mesero la ponga.
+        // Sin número de mesa: aquí no se asignan. La referencia dice dónde está.
+        referencia: referencia.trim() || undefined,
+        notas: notas.trim() || undefined,
         idemKey: idem.current,
       });
       /* El servidor puede decir que no (se acabó un ingrediente, cerramos, mesa
@@ -279,9 +295,14 @@ export default function EmplataClient({
       <header className="emp-top">
         <div className="emp-top__brand">
           <b>{negocio.toUpperCase()}</b>
-          <span>· MESA {mesa}</span>
+          {referencia && <span>· {referencia.toUpperCase()}</span>}
         </div>
         <div className="emp-top__actions">
+          {platos.length > 0 && (
+            <button type="button" className="emp-mini emp-mini--carta" onClick={() => setVerCarta(true)}>
+              Platos listos
+            </button>
+          )}
           <button
             type="button"
             className="emp-mini"
@@ -318,7 +339,7 @@ export default function EmplataClient({
           </div>
           <h1>¡A la cocina!</h1>
           <p className="emp-exito__id">
-            Pedido <b>#{pedido.id}</b> · Mesa {mesa} · {formatCOP(pedido.total)}
+            Pedido <b>#{pedido.id}</b>{referencia ? ` · ${referencia}` : ""} · {formatCOP(pedido.total)}
           </p>
           <ol className="emp-estado" aria-label="Estado del pedido">
             {(["recibido", "cocina", "listo"] as EstadoPedido[]).map((e, k) => {
@@ -422,6 +443,30 @@ export default function EmplataClient({
             <div className="emp-espaciador" />
           </main>
 
+          {/* Dónde está y qué debemos saber: sin esto el pedido llega anónimo. */}
+          <section className="emp-donde">
+            <label>
+              <span>¿Dónde te encontramos?</span>
+              <input
+                type="text"
+                value={referencia}
+                maxLength={60}
+                onChange={(e) => setReferencia(e.target.value)}
+                placeholder="Mesa del ventanal, barra…"
+              />
+            </label>
+            <label>
+              <span>Algo que debamos saber</span>
+              <input
+                type="text"
+                value={notas}
+                maxLength={140}
+                onChange={(e) => setNotas(e.target.value)}
+                placeholder="Sin cebolla, alergias… (opcional)"
+              />
+            </label>
+          </section>
+
           {/* -------- barra fija de pulgar: total + confirmar -------- */}
           <footer className="emp-bar">
             {/* El "no" del servidor, visible. Se nos acabó algo, cerramos, la mesa no
@@ -450,6 +495,20 @@ export default function EmplataClient({
             </button>
           </footer>
         </>
+      )}
+      {verCarta && (
+        <PlatosCarta
+          platos={platos}
+          ingredientes={[...bases, ...proteinas, ...toppings]}
+          abierto={abierto}
+          referenciaInicial={referencia}
+          onCerrar={() => setVerCarta(false)}
+          onPedido={(id, total) => {
+            setVerCarta(false);
+            setPedido({ id, total });
+            setEstado("recibido");
+          }}
+        />
       )}
     </div>
   );

@@ -5806,3 +5806,56 @@ body.enreda-jugando .sticky-pedir {
 .pend-box__h::-webkit-details-marker { display: none; }
 .pend-box__caret::after { content: "▸"; opacity: 0.45; font-size: 0.8rem; }
 .pend-box[open] .pend-box__caret::after { content: "▾"; }
+
+/* Quién entra al panel (misma clave, distinto nombre en el historial) */
+.alogin__quien { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 4px; }
+.alogin__u { position: relative; }
+.alogin__u input { position: absolute; opacity: 0; pointer-events: none; }
+.alogin__u span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(30, 22, 17, 0.16);
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.alogin__u input:checked + span {
+  border-color: var(--pg-pomodoro, #d1381f);
+  background: rgba(209, 56, 31, 0.1);
+}
+.alogin__u input:focus-visible + span { outline: 2px solid var(--pg-oro, #f2a516); outline-offset: 2px; }
+
+/* Gastos de un toque: lo que se repite igual cada semana */
+.gasto-rapido { margin-bottom: 10px; }
+.gasto-rapido__k {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  opacity: 0.5;
+  margin-bottom: 6px;
+}
+.gasto-rapido__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.gasto-rapido__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(30, 22, 17, 0.16);
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+.gasto-rapido__chip:hover { border-color: var(--pg-oro, #f2a516); background: rgba(242, 165, 22, 0.1); }
+.gasto-rapido__chip.is-on { border-color: var(--pg-pomodoro, #d1381f); background: rgba(209, 56, 31, 0.1); font-weight: 800; }
+.gasto-rapido__nota { margin: 7px 0 0; font-size: 0.74rem; opacity: 0.55; }

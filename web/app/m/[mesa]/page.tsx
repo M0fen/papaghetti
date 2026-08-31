@@ -1,52 +1,12 @@
-import type { Metadata } from "next";
-import { getCatalog } from "@/lib/catalog";
-import { TOPPINGS_INCLUIDOS } from "@/lib/menu";
-import EmplataSwitch from "./EmplataSwitch";
-import "./emplata.css";
+import { redirect } from "next/navigation";
 
 /**
- * EMPLATA — la capa de pedido del cliente por QR en mesa (mobile-first, una mano).
+ * Los QR viejos (/m/1, /m/2…) siguen funcionando: llevan al menú único.
  *
- * Server component: lee EL CEREBRO (getCatalog — Supabase o archivo, da igual aquí) y le pasa al
- * cliente SOLO lo que necesita. Cero data hardcodeada: menú, precios, impuesto y estado de negocio
- * salen del catálogo vivo. El pedido entra por el MISMO flujo existente (enviarPedido → crearPedido,
- * canal "qr") y aparece solo en el KDS de cocina.
+ * Aquí ya no se asignan mesas, así que un menú por número era una ficción que
+ * obligaba a imprimir un código distinto para cada mesa. Ahora hay UNA dirección
+ * —/pedir— y el cliente escribe dónde está al pedir.
  */
-
-export const metadata: Metadata = {
-  title: "Papaghetti · Emplata tu caja",
-  description: "Arma tu caja Papaghetti desde la mesa y pídela a cocina.",
-};
-
-// El menú cambia con el inventario (agotados) → siempre fresco.
-export const dynamic = "force-dynamic";
-
-export default async function MesaPage({
-  params,
-}: {
-  params: Promise<{ mesa: string }>;
-}) {
-  const { mesa: mesaRaw } = await params;
-  const cat = await getCatalog();
-
-  /* El número del QR ya no es una mesa asignada: aquí no se reparten mesas. Solo
-     identifica el código, así que se acepta cualquiera y no se recorta contra
-     `numMesas` — con ese ajuste en 0, TODO pedido por QR se rechazaba. */
-  let mesa = parseInt(mesaRaw, 10);
-  if (!Number.isFinite(mesa) || mesa < 1) mesa = 1;
-
-  const activos = (list: typeof cat.bases) => list.filter((i) => i.activo);
-
-  return (
-    <EmplataSwitch
-      mesa={mesa}
-      negocio={cat.ajustes.negocio || "Papaghetti"}
-      abierto={cat.ajustes.abierto ?? true}
-      impuestoPct={cat.ajustes.impuestoPct ?? 0}
-      incluidos={TOPPINGS_INCLUIDOS}
-      bases={activos(cat.bases)}
-      proteinas={activos(cat.proteinas)}
-      toppings={activos(cat.toppings)}
-    />
-  );
+export default function MesaLegacy() {
+  redirect("/pedir");
 }

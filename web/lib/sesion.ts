@@ -17,6 +17,12 @@ import { cookies } from "next/headers";
 const COOKIE = "pg_admin";
 const DURACION_MS = 8 * 60 * 60 * 1000; // 8 h de turno
 
+export { USUARIOS } from "./usuarios";
+import { USUARIOS } from "./usuarios";
+
+/** Normaliza para que quepa en la cookie sin romper el separador. */
+const limpiar = (u: string) => u.replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 24);
+
 /** En local (next dev) hace falta poder entrar sin configurar nada. En producción, no. */
 const ES_DEV = process.env.NODE_ENV !== "production";
 const CLAVE_DEV = "papaghetti-dev";
@@ -37,8 +43,8 @@ function secreto(): string | null {
   return ES_DEV ? CLAVE_DEV : null;
 }
 
-function firmar(vence: number, key: string): string {
-  return crypto.createHmac("sha256", key).update(`v1.${vence}`).digest("hex");
+function firmar(vence: number, key: string, usuario: string): string {
+  return crypto.createHmac("sha256", key).update(`v2.${vence}.${usuario}`).digest("hex");
 }
 
 /** Compara en tiempo constante (evita distinguir un HMAC casi-correcto por el tiempo). */
@@ -49,24 +55,32 @@ function igual(a: string, b: string): boolean {
 }
 
 /** ¿La petición trae una sesión válida y vigente? */
-export async function haySesion(): Promise<boolean> {
+/** Devuelve el usuario de la sesión válida, o null si no la hay. */
+export async function usuarioSesion(): Promise<string | null> {
   const key = secreto();
-  if (!key) return false;
+  if (!key) return null;
   const raw = (await cookies()).get(COOKIE)?.value;
-  if (!raw) return false;
-  const [venceStr, mac] = raw.split(".");
+  if (!raw) return null;
+  const partes = raw.split(".");
+  if (partes.length < 3) return null;
+  const [venceStr, usuario, mac] = partes;
   const vence = Number(venceStr);
-  if (!Number.isFinite(vence) || !mac) return false;
-  if (vence < Date.now()) return false; // caducada
-  return igual(mac, firmar(vence, key));
+  if (!Number.isFinite(vence) || !mac) return null;
+  if (vence < Date.now()) return null; // caducada
+  return igual(mac, firmar(vence, key, usuario)) ? usuario : null;
+}
+
+export async function haySesion(): Promise<boolean> {
+  return (await usuarioSesion()) !== null;
 }
 
 /** Abre sesión (tras validar la contraseña) o la RENUEVA en cada acción exitosa. */
-export async function abrirSesion(): Promise<void> {
+export async function abrirSesion(usuario = USUARIOS[0]): Promise<void> {
   const key = secreto();
   if (!key) return;
+  const u = limpiar(usuario) || USUARIOS[0];
   const vence = Date.now() + DURACION_MS;
-  (await cookies()).set(COOKIE, `${vence}.${firmar(vence, key)}`, {
+  (await cookies()).set(COOKIE, `${vence}.${u}.${firmar(vence, key, u)}`, {
     httpOnly: true,
     sameSite: "lax",
     // `secure` solo donde la conexión ES https. En Vercel siempre lo es; en local

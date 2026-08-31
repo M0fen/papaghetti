@@ -15,6 +15,7 @@ import logo from "@/public/logo-papaghetti.webp";
 import { useSearchParams } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { login } from "@/app/admin/actions";
+import { USUARIOS } from "@/lib/usuarios";
 
 const MENSAJES: Record<string, { txt: string; ayuda?: string }> = {
   "1": { txt: "Esa contraseña no es." },
@@ -50,6 +51,19 @@ export default function Login() {
         <p className="alogin__sub">Pedidos, cocina, despensa y caja.</p>
 
         <form action={login} className="alogin__form">
+          {/* QUIÉN entra. La contraseña es la misma para los tres: esto no es una
+              barrera entre ellos, es que el historial pueda decir quién cobró, quién
+              canceló y quién tocó la despensa. */}
+          {USUARIOS.length > 1 && (
+            <div className="alogin__quien" role="radiogroup" aria-label="¿Quién eres?">
+              {USUARIOS.map((u, i) => (
+                <label key={u} className="alogin__u">
+                  <input type="radio" name="usuario" value={u} defaultChecked={i === 0} />
+                  <span>{u}</span>
+                </label>
+              ))}
+            </div>
+          )}
           <label className="alogin__campo">
             <span className="visually-hidden">Contraseña</span>
             <input

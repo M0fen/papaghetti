@@ -90,8 +90,31 @@ export interface Totales {
  * selección, igual en el cliente y en el servidor, y defendible en el mostrador.
  */
 export function cobroToppings(toppings: Ingrediente[], incluidos: number): number {
-  const precios = toppings.map((t) => t.precio).sort((a, b) => b - a);
+  const precios = soloCobrables(toppings)
+    .map((t) => t.precio)
+    .sort((a, b) => b - a);
   return precios.slice(incluidos).reduce((s, p) => s + p, 0);
+}
+
+/** Las salsas van incluidas: ni cuestan ni gastan cupo de cortesía. */
+export const soloCobrables = (toppings: Ingrediente[]) =>
+  (toppings ?? []).filter((t) => t && t.categoria !== "salsa");
+
+/**
+ * QUIÉNES van de cortesía, por id. Una sola respuesta para toda la interfaz.
+ *
+ * Las etiquetas "GRATIS" del juego y del armador se calculaban aparte, por orden de
+ * toque y contando las salsas: decían una cosa mientras el TOTAL que tenían al lado
+ * decía otra. Ahora la etiqueta y el precio salen de la misma función.
+ */
+export function idsGratis(toppings: Ingrediente[], incluidos = TOPPINGS_INCLUIDOS): Set<string> {
+  return new Set(
+    soloCobrables(toppings)
+      .slice()
+      .sort((a, b) => b.precio - a.precio)
+      .slice(0, incluidos)
+      .map((t) => t.id),
+  );
 }
 
 export function calcularTotales(opts: {
@@ -108,7 +131,7 @@ export function calcularTotales(opts: {
   const prots = (opts.proteinas ?? []).filter(Boolean) as Ingrediente[];
   // Las SALSAS van incluidas: ni se cobran ni gastan un cupo de cortesía. Si
   // contaran, elegir dos salsas dejaría al cliente pagando todos sus acompañantes.
-  const tops = (opts.toppings ?? []).filter((t) => t && t.categoria !== "salsa");
+  const tops = soloCobrables(opts.toppings ?? []);
 
   const subtotal =
     (opts.base?.precio ?? 0) +

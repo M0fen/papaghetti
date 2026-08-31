@@ -22,6 +22,7 @@ import {
 } from "@/lib/menu";
 import { diaNegocio } from "@/lib/precios";
 import { crearGastoAction, eliminarMovimientoAction } from "../actions";
+import GastoRapido from "@/components/admin/GastoRapido";
 import type { CSSVars } from "@/lib/cssVars";
 
 export const dynamic = "force-dynamic";
@@ -312,6 +313,7 @@ export default async function FinanzasPage({
           )}
           <form action={crearGastoAction} className="gasto-form">
             <strong className="gasto-form__t">➕ Registrar gasto</strong>
+            <GastoRapido />
             <div className="gasto-form__grid">
               <input className="admin-input" name="concepto" placeholder="Concepto (ej: recibo de luz)" required />
               <input className="admin-input" type="number" name="monto" placeholder="Monto COP" min={0} step={500} required />
