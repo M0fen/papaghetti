@@ -10,11 +10,20 @@
  * o una resolución de numeración: imitar un documento fiscal sin serlo es peor que
  * no entregar nada. El consecutivo es interno y así lo dice.
  *
- * IMPRIMIR SALÍA EN BLANCO. Hay un `@media print` global que oculta todo
- * (`body * { visibility: hidden }`) y solo deja ver lo que lleva la clase
- * `printable`. El comprobante no la llevaba, así que el papel salía vacío: 38 de sus
- * 38 elementos en `visibility: hidden`. Ahora la lleva, y el bloque de impresión
- * propio decide el tamaño de papel.
+ * IMPRIMIR SALÍA EN BLANCO, y por partida doble.
+ *
+ * Primero: hay un `@media print` global que apaga TODO el body
+ * (`body * { visibility: hidden }`) y solo devuelve la visibilidad a lo que lleva la
+ * clase `printable`. El comprobante no la llevaba — 38 de sus 38 elementos salían en
+ * `visibility: hidden`.
+ *
+ * Y aun con la clase puesta, ese patrón es frágil: depende de que el navegador
+ * respete la excepción a través de toda la cadena de ancestros apagados, y basta un
+ * `transform`, un `contain` o un Safari para que se caiga. Siguió saliendo en blanco.
+ *
+ * Por eso ya no se imprime ESTA página. Se imprime un IFRAME que contiene únicamente
+ * el comprobante: sin cromo que ocultar, no hay excepción que pueda fallar. Ningún
+ * navegador puede sacar en blanco un documento en el que solo está el tiquete.
  *
  * DOS PAPELES, porque hay dos realidades: la térmica de 80mm de un POS y la hoja
  * normal de una impresora de oficina, que es con lo que se abre el primer día. El
@@ -113,17 +122,81 @@ export default function Comprobante({
    */
   const imprimir = () => {
     const el = hoja.current;
-    const est = document.getElementById("pg-page") as HTMLStyleElement | null;
-    if (el && est) {
-      if (papel === "termica") {
-        // px → mm a 96dpi, más el colchón que se come la cuchilla al cortar.
-        const mm = Math.ceil((el.offsetHeight / 96) * 25.4) + 14;
-        est.textContent = `@page { size: 80mm ${mm}mm; margin: 0; }`;
-      } else {
-        est.textContent = "@page { size: auto; margin: 12mm; }";
-      }
+    if (!el) return;
+
+    /* La altura del papel: una térmica imprime sobre ROLLO CONTINUO, no sobre hojas.
+       Con una altura fija cada tiquete de 14cm se llevaba otros 15cm en blanco antes
+       del corte. `+14mm` es el colchón que se come la cuchilla. */
+    const mm = Math.ceil((el.offsetHeight / 96) * 25.4) + 14;
+    const page =
+      papel === "termica"
+        ? `@page { size: 80mm ${mm}mm; margin: 0; }`
+        : "@page { size: auto; margin: 12mm; }";
+
+    /* Las MISMAS hojas de estilo de la página, para que el tiquete del iframe se
+       vea exactamente igual que el de la pantalla. */
+    const hojas = [...document.querySelectorAll('link[rel="stylesheet"]')]
+      .map((l) => `<link rel="stylesheet" href="${(l as HTMLLinkElement).href}">`)
+      .join("");
+
+    const marco = document.createElement("iframe");
+    marco.setAttribute("aria-hidden", "true");
+    marco.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    document.body.appendChild(marco);
+
+    const doc = marco.contentDocument;
+    if (!doc) {
+      marco.remove();
+      window.print(); // si el navegador no deja iframes, al menos que imprima algo
+      return;
     }
-    window.print();
+    doc.open();
+    doc.write(
+      `<!doctype html><html lang="es"><head><meta charset="utf-8">${hojas}` +
+        `<style>${page}
+         html,body{margin:0;padding:0;background:#fff}
+         /* El bloque global de impresión apaga TODO el body con \`visibility\` y solo
+            revive lo que lleva \`printable\`. Aquí dentro no hay nada más que el
+            tiquete, así que se anula entero: es justo la regla que lo dejaba en
+            blanco cuando el navegador no aplicaba bien la excepción. */
+         @media print { body, body * { visibility: visible !important; } }
+         .cbte { border:0 !important; border-radius:0 !important; box-shadow:none !important; }
+        </style></head><body>${el.outerHTML}</body></html>`,
+    );
+    doc.close();
+
+    /* Hay que esperar a que las hojas de estilo del iframe carguen: si se imprime
+       antes, sale el tiquete sin estilos (que es otra forma de salir mal). */
+    const lanzar = () => {
+      try {
+        marco.contentWindow?.focus();
+        marco.contentWindow?.print();
+      } finally {
+        // Se quita DESPUÉS del diálogo; en Chrome print() es bloqueante, en otros no.
+        setTimeout(() => marco.remove(), 1500);
+      }
+    };
+    const links = [...doc.querySelectorAll("link")];
+    let faltan = links.length;
+    if (!faltan) {
+      lanzar();
+      return;
+    }
+    const listo = () => {
+      faltan -= 1;
+      if (faltan <= 0) setTimeout(lanzar, 60);
+    };
+    for (const l of links) {
+      l.addEventListener("load", listo, { once: true });
+      l.addEventListener("error", listo, { once: true });
+    }
+    // Red lenta o una hoja que nunca resuelve: se imprime igual, no se cuelga.
+    setTimeout(() => {
+      if (faltan > 0) {
+        faltan = 0;
+        lanzar();
+      }
+    }, 2500);
   };
 
   useEffect(() => {

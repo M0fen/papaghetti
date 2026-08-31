@@ -6043,6 +6043,15 @@ body.enreda-jugando .sticky-pedir {
   /* Fuera del flujo, no solo invisibles: si solo se ocultan siguen ocupando alto. */
   .adminx__side, .adminx__topbar, .adminx__alarma, .adminx__aviso,
   .ghettia, .ghettia-fab, .no-print { display: none !important; }
+  /* Y por ESTRUCTURA, no por nombre de clase: en la página del comprobante se apaga
+     todo hermano que no contenga el tiquete. Así el día que alguien añada un bloque
+     nuevo al panel no vuelve a colarse en el papel, y quien imprima con Ctrl+P en vez
+     del botón obtiene lo mismo. (El botón imprime un iframe con SOLO el comprobante;
+     esto es el cinturón por si se llega por otro camino.) */
+  body:has(.cbte) > *:not(:has(.cbte)),
+  body:has(.cbte) .adminx > *:not(:has(.cbte)),
+  body:has(.cbte) .adminx__main > *:not(:has(.cbte)) { display: none !important; }
+  body:has(.cbte), body:has(.cbte) * { visibility: visible !important; }
   .cbte.printable {
     position: static !important;
     border: 0;
