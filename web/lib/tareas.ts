@@ -111,6 +111,28 @@ export function tareasDelDia(cat: Catalog): ResumenTareas {
     });
   }
 
+  /* 4b. EL CONTROL DE INVENTARIO, APAGADO. Es una decisión legítima —permite abrir
+     vendiendo mientras se cuenta la despensa— pero tiene que RECORDARSE: apagado, la
+     carta no se agota nunca sola, así que el sitio y el QR siguen ofreciendo lo que
+     ya no hay y el inventario se va a números negativos de la realidad sin que nadie
+     lo note. Es la clase de interruptor que se apaga "un rato" y sigue apagado en
+     marzo. Por eso vive aquí y no se puede marcar como hecho: desaparece solo el día
+     que se vuelve a encender. */
+  if (a.controlarStock === false) {
+    const conStock = cat.insumos.filter((i) => (i.stock ?? 0) > 0).length;
+    t.push({
+      id: "control-inventario",
+      momento: "servicio",
+      texto: "El control de inventario está apagado",
+      porque:
+        conStock === 0
+          ? "Se puede vender todo aunque la despensa esté en cero. Cuando la cuentes, vuelve a encenderlo para que la carta se agote sola."
+          : `${conStock} insumos tienen existencias cargadas. Enciéndelo para que la carta deje de ofrecer lo que ya no hay.`,
+      href: "/admin/ajustes",
+      tono: "normal",
+    });
+  }
+
   // 5. Promociones heredadas anunciándose en el sitio público.
   const promosActivas = (a.promos ?? []).filter((p) => p.activo);
   if (promosActivas.length > 0) {

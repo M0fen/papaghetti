@@ -1227,10 +1227,13 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   const controla = controlaStock(cat);
   for (const [id, veces] of necesarias) {
     const ing = buscar(id)!;
-    // Sacado de la carta a mano: eso bloquea SIEMPRE, controle o no la despensa.
+    /* Lo que se decidió A MANO bloquea SIEMPRE, se controle la despensa o no: sacar
+       algo de la carta, o marcar "se acabó el pollo", es la acción más frecuente de
+       un servicio y no puede depender de un ajuste. Lo único que el interruptor
+       desactiva es la ARITMÉTICA de la despensa. */
     if (ing.activo === false) throw new Error(`"${ing.nombre}" ya no está en la carta.`);
-    if (!controla) continue; // sin control de inventario no hay nada que impida vender
     if (ing.agotado) throw new Error(`Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`);
+    if (!controla) continue; // sin control de inventario, la receta no bloquea
     if (!alcanzaPara(ing, byId, veces)) {
       throw new Error(
         veces > 1
@@ -1563,7 +1566,10 @@ export async function updateAjustes(patch: Partial<Ajustes>): Promise<Catalog> {
   /* Encender o apagar el control de despensa tiene que notarse EN EL ACTO: si no se
      recalcula aquí, el operario apaga el control para poder vender y la carta sigue
      apareciendo agotada hasta que algo más la toque. */
-  if (controlaStock(cat) !== antes) recalcularDisponibilidad(cat);
+  if (controlaStock(cat) !== antes) {
+    // Al APAGARLO se limpia lo que agotó la despensa; al encenderlo se recalcula.
+    recalcularDisponibilidad(cat, !controlaStock(cat));
+  }
   await commit(cat, "Actualizó los ajustes");
   return cat;
 }
@@ -1615,14 +1621,22 @@ function reactivarPreparables(cat: Catalog, insumoId?: string): void {
  * plato de la carta al instante — antes solo existía el camino de reactivar, así que
  * bajar un insumo a mano no agotaba nada y el sitio seguía vendiéndolo.
  */
-function recalcularDisponibilidad(cat: Catalog): void {
+function recalcularDisponibilidad(cat: Catalog, limpiarAuto = false): void {
   const byId = insumosPorId(cat);
   const controla = controlaStock(cat);
   for (const g of ["bases", "proteinas", "toppings"] as const) {
     for (const it of cat[g]) {
       if (!it.receta || it.receta.length === 0) continue;
-      // Sin control de despensa nada se agota solo: la carta queda entera disponible.
-      it.agotado = controla ? !puedePreparar(it, byId) : false;
+      if (controla) {
+        it.agotado = !puedePreparar(it, byId);
+      } else if (limpiarAuto) {
+        /* SOLO al apagar el interruptor. Es el único momento en que se puede borrar
+           el agotado sin pensar, porque todo lo que hay marcado en ese instante lo
+           puso la aritmética de la despensa. Después NO se vuelve a tocar: con el
+           control apagado nada agota solo, así que cualquier `agotado` que aparezca
+           lo marcó una persona diciendo "se acabó" — y eso tiene que sobrevivir. */
+        it.agotado = false;
+      }
     }
   }
 }
