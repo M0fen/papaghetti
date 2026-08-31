@@ -201,11 +201,32 @@ async function write(cat: Catalog, sinCondicion = false): Promise<void> {
   return writeFile(cat);
 }
 
+/**
+ * Reintenta una operación de red. Un parpadeo de conexión de 200ms no puede dejar
+ * la pantalla de cocina en blanco a mitad del servicio; tres intentos con una
+ * espera corta cubren de sobra los cortes transitorios.
+ */
+async function conReintento<T>(fn: () => Promise<T>, intentos = 3): Promise<T> {
+  let ultimo: unknown;
+  for (let i = 0; i < intentos; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      ultimo = e;
+      // Un "no existe" o un conflicto de ETag no se arregla reintentando.
+      const n = (e as Error)?.name ?? "";
+      if (n === "BlobNotFoundError" || n === "BlobPreconditionFailedError") throw e;
+      if (i < intentos - 1) await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+    }
+  }
+  throw ultimo;
+}
+
 /* --- Backend: Vercel Blob (durable, privado, con escritura condicional) --- */
 async function readBlob(): Promise<Catalog> {
   const { get } = await import("@vercel/blob");
   try {
-    const b = await get(RUTA_BLOB, { access: "private", useCache: false });
+    const b = await conReintento(() => get(RUTA_BLOB, { access: "private", useCache: false }));
     if (!b || b.statusCode !== 200 || !b.stream) {
       // Todavía no existe el documento: primer arranque legítimo → siembra.
       const seed = structuredClone(SEED_CATALOG);
@@ -236,15 +257,20 @@ async function readBlob(): Promise<Catalog> {
 async function writeBlob(cat: Catalog, sinCondicion = false): Promise<void> {
   const { put } = await import("@vercel/blob");
   const cuerpo = JSON.stringify(cat);
-  const r = await put(RUTA_BLOB, cuerpo, {
-    access: "private",
-    contentType: "application/json",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    cacheControlMaxAge: 0,
-    // Compare-and-swap: solo escribe si nadie tocó el documento desde que lo leímos.
-    ...(etagActual && !sinCondicion ? { ifMatch: etagActual } : {}),
-  });
+  // Reintento seguro: el put sube el documento COMPLETO, así que repetirlo es
+  // idempotente. Si otra instancia escribió en medio, el ifMatch lo corta y de eso
+  // se encarga el bucle de commit().
+  const r = await conReintento(() =>
+    put(RUTA_BLOB, cuerpo, {
+      access: "private",
+      contentType: "application/json",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      cacheControlMaxAge: 0,
+      // Compare-and-swap: solo escribe si nadie tocó el documento desde que lo leímos.
+      ...(etagActual && !sinCondicion ? { ifMatch: etagActual } : {}),
+    }),
+  );
   etagActual = (r.etag ?? "").replace(/^W\//, "") || null;
   void respaldoDelDia(cuerpo);
 }
