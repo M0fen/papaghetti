@@ -177,6 +177,9 @@ export default function NuevoPedido({
   const alternar = (lista: string[], set: (v: string[]) => void, id: string) =>
     set(lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id]);
 
+  /** Ni una base ni una proteína: con esto no se puede armar absolutamente nada. */
+  const sinNada = basesD.length === 0 || protsD.length === 0;
+
   const porGrupo = GRUPOS_PLATO.map((g) => ({
     g,
     items: platosD.filter((e) => (e.grupo ?? "combo") === g),
@@ -325,9 +328,29 @@ export default function NuevoPedido({
       </div>
 
       {/* ---------- EL ARMADOR de una caja, renglón a renglón ---------- */}
+      {/* SIN DESPENSA NO HAY NADA QUE ELEGIR, y callárselo es peor que el problema:
+          el mesero abría "Nueva comanda", veía tres títulos con cero opciones debajo
+          y no tenía forma de saber por qué solo le dejaba pedir platos de carta.
+          Aquí se dice qué pasa y las dos salidas que hay. */}
+      {sinNada && (
+        <div className="npedido__vacio" role="status">
+          <b>No hay ingredientes disponibles para armar</b>
+          <p>
+            Todos los componentes están agotados porque la despensa está en cero. Los
+            platos de carta sí se pueden pedir (tienen precio cerrado y no gastan
+            despensa).
+          </p>
+          <p>
+            <a href="/admin/inventario">Cargar la despensa →</a>
+            {"  ·  "}
+            <a href="/admin/ajustes">Vender sin controlar inventario →</a>
+          </p>
+        </div>
+      )}
       <fieldset className="npedido__grupo">
         <legend>Base</legend>
         <div className="npedido__chips">
+          {basesD.length === 0 && <em className="npedido__nada">Ninguna disponible hoy</em>}
           {basesD.map((b) => (
             <label key={b.id} className={`chipbtn ${baseId === b.id ? "is-on" : ""}`}>
               <input
@@ -347,6 +370,7 @@ export default function NuevoPedido({
       <fieldset className="npedido__grupo">
         <legend>Proteína (una o varias)</legend>
         <div className="npedido__chips">
+          {protsD.length === 0 && <em className="npedido__nada">Ninguna disponible hoy</em>}
           {protsD.map((pr) => (
             <label key={pr.id} className={`chipbtn ${protIds.includes(pr.id) ? "is-on" : ""}`}>
               <input
@@ -366,6 +390,7 @@ export default function NuevoPedido({
       <fieldset className="npedido__grupo">
         <legend>Acompañantes · cada uno se cobra a su precio · las salsas van con el plato</legend>
         <div className="npedido__chips">
+          {topsD.length === 0 && <em className="npedido__nada">Ninguno disponible hoy</em>}
           {topsD.map((t) => (
             <label key={t.id} className={`chipbtn ${topIds.includes(t.id) ? "is-on" : ""}`}>
               <input

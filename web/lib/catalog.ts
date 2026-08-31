@@ -985,6 +985,15 @@ const insumosPorId = (cat: Catalog): Map<string, Insumo> =>
   new Map(cat.insumos.map((i) => [i.id, i]));
 
 /** ¿Alcanza la despensa para preparar una porción de este componente? */
+/**
+ * ¿Manda la despensa sobre lo que se puede vender?
+ *
+ * Cuando está apagado, la carta no se agota sola: se sigue descontando el inventario
+ * (para que el día que se encienda los números tengan sentido) pero nada se bloquea.
+ * Es lo que permite abrir el negocio antes de haber contado la despensa.
+ */
+export const controlaStock = (cat: Catalog): boolean => cat.ajustes.controlarStock !== false;
+
 function puedePreparar(ing: Ingrediente, byId: Map<string, Insumo>): boolean {
   if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) > 0;
   return ing.receta.every((r) => {
@@ -1215,9 +1224,12 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
       necesarias.set(id, (necesarias.get(id) ?? 0) + r.item.cantidad);
     }
   }
+  const controla = controlaStock(cat);
   for (const [id, veces] of necesarias) {
     const ing = buscar(id)!;
+    // Sacado de la carta a mano: eso bloquea SIEMPRE, controle o no la despensa.
     if (ing.activo === false) throw new Error(`"${ing.nombre}" ya no está en la carta.`);
+    if (!controla) continue; // sin control de inventario no hay nada que impida vender
     if (ing.agotado) throw new Error(`Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`);
     if (!alcanzaPara(ing, byId, veces)) {
       throw new Error(
@@ -1253,10 +1265,11 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
     const it = buscar(id)!;
     if (it.receta && it.receta.length > 0) {
       consumirReceta(it, byId); // ← descuenta despensa real
-      it.agotado = !puedePreparar(it, byId); // agota si ya no da para otra
+      // Solo se auto-agota si la despensa manda; si no, el inventario baja y ya.
+      if (controla) it.agotado = !puedePreparar(it, byId);
     } else if (typeof it.stock === "number") {
       it.stock = Math.max(0, it.stock - 1); // legado: unidades abstractas
-      if (it.stock === 0) it.agotado = true;
+      if (controla && it.stock === 0) it.agotado = true;
     }
   };
   const componentes: string[] = [];
@@ -1545,7 +1558,12 @@ export async function asignarReferencia(id: string, referencia: string): Promise
 /** Ajustes del negocio (los lee el sitio y el panel). */
 export async function updateAjustes(patch: Partial<Ajustes>): Promise<Catalog> {
   const cat = await read();
+  const antes = controlaStock(cat);
   cat.ajustes = { ...cat.ajustes, ...patch };
+  /* Encender o apagar el control de despensa tiene que notarse EN EL ACTO: si no se
+     recalcula aquí, el operario apaga el control para poder vender y la carta sigue
+     apareciendo agotada hasta que algo más la toque. */
+  if (controlaStock(cat) !== antes) recalcularDisponibilidad(cat);
   await commit(cat, "Actualizó los ajustes");
   return cat;
 }
@@ -1599,10 +1617,12 @@ function reactivarPreparables(cat: Catalog, insumoId?: string): void {
  */
 function recalcularDisponibilidad(cat: Catalog): void {
   const byId = insumosPorId(cat);
+  const controla = controlaStock(cat);
   for (const g of ["bases", "proteinas", "toppings"] as const) {
     for (const it of cat[g]) {
       if (!it.receta || it.receta.length === 0) continue;
-      it.agotado = !puedePreparar(it, byId);
+      // Sin control de despensa nada se agota solo: la carta queda entera disponible.
+      it.agotado = controla ? !puedePreparar(it, byId) : false;
     }
   }
 }

@@ -49,6 +49,23 @@ export default async function AjustesPage() {
               <span>Impuesto % (impoconsumo)</span>
               <input className="admin-input" type="number" name="impuestoPct" min={0} max={30} defaultValue={ajustes.impuestoPct} />
             </label>
+            {/* EL INTERRUPTOR QUE DESBLOQUEA EL PRIMER DÍA. Con la despensa sin
+                contar, todo sale agotado y el armador aparece vacío: el mesero solo
+                puede pedir platos de carta y no sabe por qué. */}
+            <label className="field field--check">
+              <span>Controlar el inventario</span>
+              <span className="admin-check">
+                <input
+                  type="checkbox"
+                  name="controlarStock"
+                  defaultChecked={ajustes.controlarStock !== false}
+                />
+                <em>
+                  Encendido, un plato se agota solo cuando su receta ya no alcanza.
+                  Apágalo para poder vender mientras cuentas la despensa.
+                </em>
+              </span>
+            </label>
             <label className="field">
               <span>Número de mesas</span>
               <input className="admin-input" type="number" name="numMesas" min={0} max={60} defaultValue={ajustes.numMesas} />

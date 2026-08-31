@@ -613,6 +613,21 @@ export interface Ajustes {
   rappi?: string;
   costoDomicilio: number; // COP
   pedidoMinimo: number; // COP
+  /**
+   * ¿La despensa manda sobre lo que se puede vender?
+   *
+   * Encendido (lo normal), un componente se agota solo cuando su receta ya no
+   * alcanza: el sitio y el QR dejan de ofrecerlo al instante y no se vende humo.
+   *
+   * Pero un restaurante que todavía no ha contado su despensa se queda SIN PODER
+   * VENDER NADA armado: todo sale agotado y el armador aparece vacío. Eso pasó de
+   * verdad — el mesero abrió "Nueva comanda" y solo le dejaba elegir platos de
+   * carta. Apagándolo, el POS vende igual y el inventario se lleva después.
+   *
+   * `undefined` = encendido, para no cambiarle el comportamiento a nadie por
+   * actualizar.
+   */
+  controlarStock?: boolean;
   /** Promos que el operador enciende/apaga; se reflejan en el sitio. */
   promos: Promo[];
 }

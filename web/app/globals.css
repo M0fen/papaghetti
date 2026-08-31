@@ -6627,3 +6627,27 @@ body.enreda-jugando .sticky-pedir {
 .arqueo__res.is-ok { background: #dff0e2; color: #235c31; }
 .arqueo__res.is-falta { background: #fbe3df; color: #8c2415; }
 .arqueo__res.is-sobra { background: #fdeec9; color: #7a4f00; }
+
+/* ── Cuando no hay nada que armar, decirlo ──
+   El silencio era el problema: tres títulos con cero opciones debajo y ninguna pista
+   de que faltaba cargar la despensa. */
+.npedido__vacio {
+  border: 2px dashed var(--pg-pomodoro, #d1381f);
+  border-radius: 14px;
+  padding: 13px 15px;
+  background: rgba(209, 56, 31, 0.06);
+  display: grid;
+  gap: 6px;
+}
+.npedido__vacio b { font-size: 0.95rem; }
+.npedido__vacio p { margin: 0; font-size: 0.86rem; line-height: 1.45; opacity: 0.85; }
+.npedido__vacio a { font-weight: 700; color: var(--pg-pomodoro, #d1381f); }
+.npedido__nada { font-style: normal; font-size: 0.85rem; opacity: 0.6; }
+/* El interruptor de inventario, con su explicación debajo del nombre. */
+.field--check .admin-check { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; }
+.field--check .admin-check em {
+  font-style: normal;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  opacity: 0.7;
+}

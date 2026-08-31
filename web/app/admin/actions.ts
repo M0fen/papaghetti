@@ -223,6 +223,7 @@ export async function saveAjustes(formData: FormData) {
     rappi: String(formData.get("rappi") ?? "").trim(),
     costoDomicilio: Math.max(0, Number(formData.get("costoDomicilio") ?? 0)),
     pedidoMinimo: Math.max(0, Number(formData.get("pedidoMinimo") ?? 0)),
+    controlarStock: formData.get("controlarStock") === "on",
   });
   revalidatePath("/", "layout"); // afecta sitio y panel
 }
