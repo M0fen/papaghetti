@@ -19,6 +19,7 @@
 import { useEffect } from "react";
 import {
   formatCOP,
+  lineasDe,
   metodoLabel,
   tipoLabel,
   type Ajustes,
@@ -81,14 +82,21 @@ export default function Comprobante({
      mismo número, mismo total, ni una palabra de que estaba anulado. En una caja eso
      es un papel que se puede entregar, reclamar o cuadrar por error. */
   const anulado = p.estado === "cancelado";
+  const devuelto = p.pago === "devuelto";
 
   const texto = [
     `*${a.negocio || "Papaghetti"}* — comprobante N° ${p.consecutivo ?? p.id}`,
-    anulado ? "*** PEDIDO ANULADO — NO ES UN CONSUMO ***" : "",
+    devuelto
+      ? `*** DINERO DEVUELTO (${formatCOP(p.devolucion?.monto ?? p.total)}) ***`
+      : anulado
+        ? "*** PEDIDO ANULADO — NO ES UN CONSUMO ***"
+        : "",
     hora(p.creadoEn),
     "",
-    `${p.base}${p.proteina && p.proteina !== "—" ? ` · ${p.proteina}` : ""}`,
-    p.toppings.length ? `+ ${p.toppings.join(", ")}` : "",
+    ...lineasDe(p).flatMap((l) => [
+      `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}  ${formatCOP(l.precio * l.cantidad)}`,
+      l.detalle ? `   ${l.detalle}` : "",
+    ]),
     "",
     ...lineas.map((l) => `${l.k}: ${formatCOP(l.v)}`),
     `TOTAL: ${formatCOP(totalConsumo)}`,
@@ -130,10 +138,21 @@ export default function Comprobante({
       <article className={`cbte ${anulado ? "cbte--anulado" : ""}`}>
         {anulado && (
           <div className="cbte__anulado" role="alert">
-            PEDIDO ANULADO
+            {devuelto ? "DINERO DEVUELTO" : "PEDIDO ANULADO"}
             <em>
-              Este pedido se canceló{p.motivoCancelacion ? `: ${p.motivoCancelacion}` : ""}. No
-              corresponde a un consumo y no debe cobrarse.
+              {devuelto ? (
+                <>
+                  Se devolvieron {formatCOP(p.devolucion?.monto ?? p.total)}
+                  {p.devolucion?.motivo ? ` — ${p.devolucion.motivo}` : ""}. Este pedido ya no
+                  es un consumo.
+                </>
+              ) : (
+                <>
+                  Este pedido se canceló
+                  {p.motivoCancelacion ? `: ${p.motivoCancelacion}` : ""}. No corresponde a un
+                  consumo y no debe cobrarse.
+                </>
+              )}
             </em>
           </div>
         )}
@@ -174,12 +193,20 @@ export default function Comprobante({
 
         <hr className="cbte__sep" />
 
-        <div className="cbte__item">
-          <span>{p.base}</span>
-          <b>{formatCOP(p.subtotal)}</b>
-        </div>
-        {p.proteina && p.proteina !== "—" && <div className="cbte__sub">con {p.proteina}</div>}
-        {p.toppings.length > 0 && <div className="cbte__sub">+ {p.toppings.join(", ")}</div>}
+        {/* RENGLÓN A RENGLÓN. Antes el papel ponía el nombre de la base con el subtotal
+            ENTERO al lado y los extras debajo sin precio: el cliente leía "$34.400" como
+            si fuera el precio de la papa criolla. Con varios platos ya era ilegible. */}
+        {lineasDe(p).map((l, i) => (
+          <div key={i}>
+            <div className="cbte__item">
+              <span>
+                {l.cantidad > 1 && <b className="cbte__x">{l.cantidad}×</b>} {l.nombre}
+              </span>
+              <b>{formatCOP(l.precio * l.cantidad)}</b>
+            </div>
+            {l.detalle && <div className="cbte__sub">{l.detalle}</div>}
+          </div>
+        ))}
         {p.notas && <div className="cbte__sub">Nota: {p.notas}</div>}
 
         <hr className="cbte__sep" />
@@ -212,7 +239,15 @@ export default function Comprobante({
         <hr className="cbte__sep" />
         <div className="cbte__meta">
           <span>Pago</span>
-          <b>{p.pago === "pagado" ? (p.metodoPago ? metodoLabel[p.metodoPago] : "Pagado") : "PENDIENTE"}</b>
+          <b>
+            {p.pago === "devuelto"
+              ? "DEVUELTO"
+              : p.pago === "pagado"
+                ? p.metodoPago
+                  ? metodoLabel[p.metodoPago]
+                  : "Pagado"
+                : "PENDIENTE"}
+          </b>
         </div>
 
         <footer className="cbte__pie">

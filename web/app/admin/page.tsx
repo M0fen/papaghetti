@@ -1,4 +1,4 @@
-import { getCatalog } from "@/lib/catalog";
+import { getCatalog, arqueoAbierto } from "@/lib/catalog";
 import {
   formatCOP,
   formatCantidad,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/menu";
 import { diaNegocio } from "@/lib/precios";
 import TurnoReportes from "@/components/admin/TurnoReportes";
+import ArqueoCaja from "@/components/admin/ArqueoCaja";
 import Pendientes from "@/components/admin/Pendientes";
 import { tareasDelDia } from "@/lib/tareas";
 import { toggleAbiertoAction } from "./actions";
@@ -124,6 +125,14 @@ export default async function Dashboard() {
 
       {/* Lo que falta por hacer, calculado del estado real: se marca solo. */}
       <Pendientes resumen={pendientesDelDia} />
+
+      {/* La caja: se abre con su fondo y se cierra CONTANDO A CIEGAS. */}
+      <div style={{ marginBottom: 18 }}>
+        <ArqueoCaja
+          abierto={arqueoAbierto(cat)}
+          ultimo={(cat.arqueos ?? []).find((a) => a.cerradoEn)}
+        />
+      </div>
 
       <div style={{ marginBottom: 18 }}>
         <TurnoReportes catalog={cat} />

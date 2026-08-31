@@ -6315,3 +6315,120 @@ body.enreda-jugando .sticky-pedir {
   .nav__links { gap: 10px; }
   .nav__links a { font-size: 0.8rem; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LA COMANDA — varios platos en un solo pedido
+   ══════════════════════════════════════════════════════════════════════════ */
+.comanda {
+  border: 1px dashed rgba(242, 165, 22, 0.6);
+  background: rgba(242, 165, 22, 0.07);
+  border-radius: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+.comanda__h { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.comanda__h b { font-size: 0.95rem; }
+.comanda__add {
+  border: 2px solid var(--pg-pomodoro, #d1381f);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.comanda__vacia { margin: 0; font-size: 0.86rem; opacity: 0.65; }
+.comanda__lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.comanda__ren {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border-radius: 11px;
+  padding: 8px 10px;
+}
+/* El paso de cantidad: lo que convierte "cuatro pedidos" en "4×". */
+.comanda__cant { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.comanda__cant button {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid rgba(30, 22, 17, 0.18);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.comanda__cant b { min-width: 1.4ch; text-align: center; font-variant-numeric: tabular-nums; }
+.comanda__txt { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.comanda__txt b { font-size: 0.92rem; line-height: 1.2; }
+.comanda__txt em { font-style: normal; font-size: 0.76rem; opacity: 0.6; line-height: 1.3; }
+.comanda__precio { font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.comanda__sumar { justify-self: start; }
+
+/* La carta dentro del formulario: media carta era invendible desde el mostrador. */
+.comanda__carta { display: grid; gap: 10px; max-height: 320px; overflow-y: auto; }
+.comanda__carta h4 {
+  margin: 0 0 4px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.55;
+}
+.comanda__platos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.comanda__plato {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 11px;
+  border: 1px solid rgba(30, 22, 17, 0.14);
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.comanda__plato:hover { border-color: var(--pg-oro, #f2a516); }
+.comanda__platoart { width: 38px; height: 38px; object-fit: contain; flex: none; }
+.comanda__plato span { display: grid; gap: 1px; min-width: 0; }
+.comanda__plato b { font-size: 0.82rem; line-height: 1.15; }
+.comanda__plato em { font-style: normal; font-size: 0.78rem; font-weight: 800; opacity: 0.75; }
+
+/* Los renglones, en la caja y en la cocina. */
+.ocard__lineas { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 3px; }
+.ocard__lineas li { display: flex; gap: 6px; font-size: 0.86rem; line-height: 1.3; }
+.ocard__lineas em { font-style: normal; opacity: 0.6; }
+.ocard__x, .ticket-card__x, .cbte__x { font-weight: 800; color: var(--pg-pomodoro, #d1381f); }
+.ticket-card__plato + .ticket-card__plato { margin-top: 5px; }
+
+/* ── El arqueo de caja ── */
+.arqueo__form { display: grid; gap: 10px; }
+.arqueo__ayuda { margin: 0; font-size: 0.86rem; opacity: 0.75; line-height: 1.45; }
+/* El aviso de contar a ciegas se lee ANTES que el campo, no después. */
+.arqueo__ciego {
+  background: rgba(242, 165, 22, 0.14);
+  border-left: 3px solid var(--pg-oro, #f2a516);
+  border-radius: 0 10px 10px 0;
+  padding: 9px 11px;
+  opacity: 1;
+}
+.arqueo__botones { display: flex; gap: 8px; flex-wrap: wrap; }
+.arqueo__res {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  display: grid;
+  gap: 2px;
+  font-size: 0.85rem;
+}
+.arqueo__res span { opacity: 0.75; font-size: 0.8rem; }
+.arqueo__res em { font-style: normal; opacity: 0.7; font-size: 0.8rem; }
+.arqueo__res.is-ok { background: #dff0e2; color: #235c31; }
+.arqueo__res.is-falta { background: #fbe3df; color: #8c2415; }
+.arqueo__res.is-sobra { background: #fdeec9; color: #7a4f00; }

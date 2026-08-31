@@ -254,7 +254,14 @@ export const tipoIcon: Record<TipoServicio, string> = {
   domicilio: "🛵",
 };
 
-export type EstadoPago = "pendiente" | "pagado";
+/**
+ * "devuelto" existe porque antes NO HABÍA SALIDA. Un pedido ya cobrado no se podía
+ * anular: `cancelarPedido` lo rechazaba diciendo "hay que registrar la devolución del
+ * dinero" y esa función no existía en ninguna parte. El plato salió mal, el cliente
+ * se fue, el cobro se hizo dos veces — y el operario se quedaba con un pedido cobrado
+ * que no podía deshacer y una caja que no iba a cuadrar.
+ */
+export type EstadoPago = "pendiente" | "pagado" | "devuelto";
 /**
  * Métodos de pago reales de Colombia 2026.
  *
@@ -296,6 +303,59 @@ export const metodoEmoji: Record<MetodoPago, string> = {
   transferencia: "🏦",
 };
 
+/**
+ * UN RENGLÓN DE LA COMANDA: un plato, con su cantidad y su precio unitario.
+ *
+ * El precio va CONGELADO en el renglón, no se recalcula al leer: si mañana sube el
+ * churrasco, el pedido de ayer sigue diciendo lo que se cobró de verdad.
+ */
+export interface ItemPedido {
+  /** Lo que se lee en la comanda y en el papel: "Churrasco", "Papa criolla". */
+  nombre: string;
+  /** La letra pequeña del renglón: "con Carne molida · + Tocineta, Parmesano". */
+  detalle?: string;
+  cantidad: number;
+  /** Precio de UNA unidad, sin impuesto. */
+  precio: number;
+  /** Ids de los componentes de UNA unidad, para devolver despensa al cancelar. */
+  componentes?: string[];
+  /** Si el renglón es un plato de precio cerrado, su id. */
+  enredoId?: string;
+  /** COGS de UNA unidad, congelado al crear. */
+  costo?: number;
+}
+
+/**
+ * LOS RENGLONES DE UN PEDIDO, venga de donde venga.
+ *
+ * Los pedidos guardados antes de que existiera `items` siguen ahí y hay que poder
+ * pintarlos igual. En vez de un `if` en cada pantalla, se sintetiza aquí el renglón
+ * único que aquellos pedidos siempre fueron.
+ */
+export function lineasDe(p: Pedido): ItemPedido[] {
+  if (p.items?.length) return p.items;
+  return [
+    {
+      nombre: p.base,
+      detalle: [
+        p.proteina && p.proteina !== "—" ? `con ${p.proteina}` : "",
+        p.toppings.length ? `+ ${p.toppings.join(", ")}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      cantidad: 1,
+      precio: p.subtotal,
+      componentes: p.componentes,
+      enredoId: p.enredoId,
+      costo: p.costo,
+    },
+  ];
+}
+
+/** Cuántos platos salen de la cocina para este pedido (no cuántos renglones). */
+export const platosDe = (p: Pedido): number =>
+  lineasDe(p).reduce((s, l) => s + Math.max(1, l.cantidad), 0);
+
 export interface Pedido {
   id: string;
   /**
@@ -327,13 +387,30 @@ export interface Pedido {
   motivoCancelacion?: string;
   pago: EstadoPago;
   metodoPago?: MetodoPago;
+  /**
+   * La devolución del dinero, si la hubo: cuánto salió de la caja, por qué y cuándo.
+   * La FECHA importa aparte de la del pedido: si se devuelve al día siguiente, el
+   * cuadre de caja de hoy tiene un faltante que solo se explica mirando esto.
+   */
+  devolucion?: { monto: number; motivo: string; fecha: string };
+  /**
+   * LO QUE SE PIDIÓ, RENGLÓN A RENGLÓN. Cuando existe, MANDA sobre base/proteina/
+   * toppings, que se conservan como resumen para que nada de lo escrito antes deje
+   * de funcionar (hay pedidos guardados desde antes de que esto existiera).
+   *
+   * Antes un pedido era exactamente UN plato: una mesa de cuatro eran cuatro
+   * pedidos, cuatro comandas y cuatro papeles. Ahora una comanda lleva lo que pida
+   * la mesa entera y se cobra y se imprime una sola vez.
+   */
+  items?: ItemPedido[];
+  /** Resumen del pedido para todo lo que aún no lee `items` (WhatsApp, listados). */
   base: string;
   proteina: string;
   toppings: string[];
   /**
-   * Los IDS de los componentes (base, proteínas, toppings), en orden.
-   * `base`/`proteina`/`toppings` guardan NOMBRES para el ticket; sin los ids no se
-   * podía devolver la despensa al cancelar ni saber qué se vendió de verdad.
+   * Los IDS de los componentes de TODO el pedido, repetidos tantas veces como
+   * porciones haya. `base`/`proteina`/`toppings` guardan NOMBRES para el ticket; sin
+   * los ids no se podía devolver la despensa al cancelar ni saber qué se vendió.
    */
   componentes?: string[];
   /** Clave de idempotencia del cliente: el mismo envío repetido es un solo pedido. */
@@ -606,6 +683,38 @@ export interface HistItem {
 }
 
 /** Forma del catálogo completo (lo que vive en el "cerebro"). */
+/**
+ * UN ARQUEO DE CAJA. Se abre con un fondo y se cierra CONTANDO A CIEGAS.
+ *
+ * A ciegas no es una manía: si la pantalla enseña primero cuánto debería haber, el
+ * que cuenta encuentra justo esa cifra. Contar antes de ver es la única forma de que
+ * un faltante aparezca — y un faltante que nadie ve es un faltante que se repite.
+ *
+ * Antes el cierre de turno era un informe de solo lectura: decía lo que el sistema
+ * esperaba por cada método y nada más. No había dónde anotar lo contado, así que la
+ * diferencia no existía en ninguna parte y no se podía preguntar por ella.
+ */
+export interface Arqueo {
+  id: string;
+  /** Día de negocio (YYYY-MM-DD, hora de Pereira). */
+  dia: string;
+  abiertoEn: string;
+  /** El fondo con el que arrancó la caja. */
+  base: number;
+  usuarioAbre?: string;
+  cerradoEn?: string;
+  /** Lo que se contó de verdad, tecleado ANTES de ver lo esperado. */
+  contado?: number;
+  /** Plata que salió de esta caja durante el turno (pagos a proveedor, vueltos…). */
+  salidas?: number;
+  /** Lo que el sistema esperaba en el instante del cierre (se congela aquí). */
+  esperado?: number;
+  /** contado − esperado. Negativo = falta plata. */
+  diferencia?: number;
+  notas?: string;
+  usuarioCierra?: string;
+}
+
 export interface Catalog {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
@@ -616,6 +725,8 @@ export interface Catalog {
   movimientos: Movimiento[];
   leads: Lead[];
   ajustes: Ajustes;
+  /** Arqueos de caja, el más reciente primero. */
+  arqueos?: Arqueo[];
   /** Bitácora de acciones (más reciente primero). */
   historial?: HistItem[];
   /** Pilas de snapshots para deshacer/rehacer (sin sus propias pilas). */

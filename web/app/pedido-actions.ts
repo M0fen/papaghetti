@@ -4,6 +4,9 @@ import { cookies, headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import {
   crearPedido,
+  crearComanda,
+  devolverPedido,
+  type LineaComanda,
   avanzarPedido,
   retrocederPedido,
   cobrarPedido,
@@ -191,6 +194,19 @@ export async function cancelarAction(formData: FormData) {
   await operar(() => cancelarPedido(id, motivo || undefined), `Pedido #${id} cancelado`);
 }
 
+/** Admin: devuelve el dinero de un pedido ya cobrado, con el motivo obligatorio. */
+export async function devolverAction(formData: FormData) {
+  if (!(await authed())) return;
+  const id = String(formData.get("id") ?? "");
+  const motivo = String(formData.get("motivo") ?? "").trim();
+  if (!id) return;
+  if (!motivo) {
+    await avisar("Escribe por qué se devuelve el dinero: queda en el historial.");
+    return;
+  }
+  await operar(() => devolverPedido(id, motivo), `Devuelto el dinero de #${id}`);
+}
+
 /** Admin: anota DÓNDE está el cliente (texto libre, no un número de mesa). */
 export async function asignarReferenciaAction(formData: FormData) {
   if (!(await authed())) return;
@@ -242,23 +258,37 @@ export async function cobrarMesaAction(formData: FormData) {
 }
 
 /** Admin: crea un pedido desde el mostrador o el teléfono (canal "salon"). */
-export async function crearPedidoPanelAction(formData: FormData) {
+/**
+ * LA COMANDA DEL MOSTRADOR: lo que pide la mesa entera, de una vez.
+ *
+ * Los renglones viajan en un solo campo JSON en vez de en campos sueltos del
+ * formulario. No es pereza: un renglón es una estructura (plato o caja armada, con
+ * su cantidad y sus toppings), y repartirla en `baseId[]`/`toppingId[]` planos hacía
+ * imposible saber qué topping era de qué plato en cuanto había dos.
+ *
+ * Y el panel ya puede vender los PLATOS DE PRECIO CERRADO: antes solo sabía armar
+ * cajas, así que un churrasco de $52.000 —el ticket más alto del negocio— no se
+ * podía cobrar desde el mostrador ni por teléfono.
+ */
+export async function crearComandaPanelAction(formData: FormData) {
   if (!(await authed())) return;
-  const baseId = String(formData.get("baseId") ?? "");
-  const proteinaIds = formData.getAll("proteinaId").map(String).filter(Boolean);
-  const toppingIds = formData.getAll("toppingId").map(String).filter(Boolean);
   const tipo = String(formData.get("tipo") ?? "llevar") as NuevoPedido["tipo"];
-  if (!baseId || proteinaIds.length === 0) {
-    await avisar("Elige al menos una base y una proteína.");
+  let lineas: LineaComanda[] = [];
+  try {
+    const crudo = JSON.parse(String(formData.get("lineas") ?? "[]"));
+    if (Array.isArray(crudo)) lineas = crudo;
+  } catch {
+    await avisar("No se entendió la comanda. Vuelve a armarla.");
+    return;
+  }
+  if (!lineas.length) {
+    await avisar("La comanda está vacía: agrega al menos un plato.");
     return;
   }
   await operar(
     () =>
-      crearPedido({
-        baseId,
-        proteinaId: proteinaIds[0],
-        proteinaIds,
-        toppingIds,
+      crearComanda({
+        lineas,
         canal: "salon",
         tipo,
         referencia: String(formData.get("referencia") ?? "").trim() || undefined,
@@ -268,6 +298,6 @@ export async function crearPedidoPanelAction(formData: FormData) {
         notas: String(formData.get("notas") ?? "").trim() || undefined,
         idemKey: String(formData.get("idemKey") ?? "").trim() || undefined,
       }),
-    "Pedido creado",
+    "Comanda enviada a cocina",
   );
 }

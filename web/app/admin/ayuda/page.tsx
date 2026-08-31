@@ -44,7 +44,7 @@ export default async function AyudaPage() {
         <li>
           <b>Recibir pedidos.</b> Entran por tres puertas y todas caen en el mismo sitio:
           el <b>QR de la mesa</b>, el <b>sitio web</b>, y el botón{" "}
-          <a href="/admin/pedidos">+ Nuevo pedido</a> del panel (para el teléfono y el
+          <a href="/admin/pedidos">+ Nueva comanda</a> del panel (para el teléfono y el
           mostrador).
         </li>
         <li>
@@ -58,8 +58,9 @@ export default async function AyudaPage() {
           manda por WhatsApp.
         </li>
         <li>
-          <b>Cerrar.</b> En <a href="/admin">Resumen</a> → <b>Cierre de caja</b>: lo cobrado
-          por cada método para cuadrar contra el cajón y el datáfono.
+          <b>Cerrar.</b> En <a href="/admin">Resumen</a>, <b>Cerrar caja y contar</b>: cuentas
+          el cajón a ciegas y el sistema te dice la diferencia. Debajo, <b>Cierre de
+          caja</b> desglosa lo cobrado por cada método para cuadrar el datáfono.
         </li>
       </ol>
 
@@ -95,6 +96,30 @@ export default async function AyudaPage() {
             <br />
             <b>El cliente se arrepintió:</b> <b>Cancelar</b> pide el motivo y, si no había
             entrado a cocina, devuelve los ingredientes a la despensa.
+            <br />
+            <b>Ya estaba cobrado y hay que devolver la plata:</b> <b>Devolver dinero</b>.
+            Pide el motivo, saca la venta de los reportes y lo deja escrito en el
+            historial y en el cuadre de caja.
+          </p>
+        </article>
+
+        <article className="ayuda-card">
+          <h3>Una comanda, varios platos</h3>
+          <p>
+            En Pedidos, <b>+ Nueva comanda</b>. Vas agregando: platos de la carta con
+            <b> + Plato de la carta</b>, o cajas armadas con <b>+ Agregar esta caja</b>.
+            El <b>+</b> y el <b>−</b> de cada renglón cambian la cantidad. Una mesa de
+            cuatro es <b>una</b> comanda: una sola cuenta, un solo cobro y un solo papel.
+          </p>
+        </article>
+
+        <article className="ayuda-card">
+          <h3>Abrir y cerrar la caja</h3>
+          <p>
+            En el tablero: <b>Abrir caja</b> con el fondo con el que arrancas. Al cerrar,
+            <b> cuentas primero</b> y solo después te decimos cuánto debería haber. Es a
+            propósito: si ves la cifra antes, la encuentras. La diferencia queda
+            guardada, así que un faltante se puede mirar al día siguiente.
           </p>
         </article>
 

@@ -42,6 +42,10 @@ next-env.d.ts
 
 # cerebro — estado local del catálogo (se regenera desde la semilla)
 /data/catalog.json
+# Respaldos del catalogo: son estado local, no codigo.
+/data/respaldo-*.json
+/data/*.antes-de-la-carta
+/data/*.qa-*
 
 .vercel
 .env*

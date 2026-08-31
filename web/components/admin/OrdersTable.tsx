@@ -11,6 +11,7 @@ import {
   METODOS,
   metodoLabel,
   metodoEmoji,
+  lineasDe,
   type Pedido,
   type EstadoPedido,
 } from "@/lib/menu";
@@ -19,6 +20,7 @@ import {
   retrocederPedidoAction,
   cobrarAction,
   cancelarAction,
+  devolverAction,
 } from "@/app/pedido-actions";
 import { esVenta } from "@/lib/menu";
 
@@ -35,8 +37,10 @@ function waComprobante(p: Pedido): string {
   const txt = [
     `*Papaghetti* — comprobante N° ${p.consecutivo ?? p.id}`,
     "",
-    `${p.base}${p.proteina && p.proteina !== "—" ? ` · ${p.proteina}` : ""}`,
-    p.toppings.length ? `+ ${p.toppings.join(", ")}` : "",
+    ...lineasDe(p).flatMap((l) => [
+      `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}  ${formatCOP(l.precio * l.cantidad)}`,
+      l.detalle ? `   ${l.detalle}` : "",
+    ]),
     "",
     linea("Consumo", p.subtotal),
     p.descuento ? linea("Descuento", -p.descuento) : "",
@@ -170,17 +174,32 @@ function OrderCard({ p }: { p: Pedido }) {
         </p>
       )}
 
-      <p className="ocard__detail">
-        {p.base} · {p.proteina}
-        {p.toppings.length ? ` · ${p.toppings.join(", ")}` : ""}
-      </p>
+      {/* Renglón a renglón: una comanda de mesa puede llevar cuatro platos y el
+          resumen de una línea los volvía ilegibles. */}
+      <ul className="ocard__lineas">
+        {lineasDe(p).map((l, i) => (
+          <li key={i}>
+            {l.cantidad > 1 && <b className="ocard__x">{l.cantidad}×</b>}
+            <span>
+              {l.nombre}
+              {l.detalle ? <em> {l.detalle}</em> : null}
+            </span>
+          </li>
+        ))}
+      </ul>
 
       <div className="ocard__badges">
         <span className={`badge badge--${p.estado}`}>{estadoLabel[p.estado]}</span>
-        <span className={`badge ${p.pago === "pagado" ? "badge--ok" : "badge--warn"}`}>
-          {p.pago === "pagado"
-            ? `Pagado · ${p.metodoPago ? metodoLabel[p.metodoPago] : ""}`
-            : "Pendiente por pagar"}
+        <span
+          className={`badge ${
+            p.pago === "devuelto" ? "badge--danger" : p.pago === "pagado" ? "badge--ok" : "badge--warn"
+          }`}
+        >
+          {p.pago === "devuelto"
+            ? "Dinero devuelto"
+            : p.pago === "pagado"
+              ? `Pagado · ${p.metodoPago ? metodoLabel[p.metodoPago] : ""}`
+              : "Pendiente por pagar"}
         </span>
         <span className="ocard__total">{formatCOP(p.total)}</span>
       </div>
@@ -273,6 +292,32 @@ function OrderCard({ p }: { p: Pedido }) {
             <input type="hidden" name="motivo" defaultValue="" />
             <button className="ocard__cancel" type="submit">
               Cancelar
+            </button>
+          </form>
+        )}
+
+        {/* LA SALIDA QUE NO EXISTÍA. Un pedido ya cobrado no se podía anular: había que
+            arreglarlo por fuera del sistema, que es como se pierde el cuadre. */}
+        {p.pago === "pagado" && p.estado !== "cancelado" && (
+          <form
+            action={devolverAction}
+            style={{ marginLeft: "auto" }}
+            onSubmit={(e) => {
+              const motivo = window.prompt(
+                `Devolver ${formatCOP(p.total)} del pedido #${p.id}.\n\n` +
+                  `¿Por qué? (queda en el historial y en el cuadre de caja)`,
+              );
+              if (motivo === null || !motivo.trim()) {
+                e.preventDefault();
+                return;
+              }
+              (e.currentTarget.elements.namedItem("motivo") as HTMLInputElement).value = motivo;
+            }}
+          >
+            <input type="hidden" name="id" value={p.id} />
+            <input type="hidden" name="motivo" defaultValue="" />
+            <button className="ocard__cancel" type="submit">
+              Devolver dinero
             </button>
           </form>
         )}

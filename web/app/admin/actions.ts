@@ -18,6 +18,8 @@ import {
   updateIngrediente,
   updateEnredo,
   resetCatalog,
+  abrirCaja,
+  cerrarCaja,
   restock,
   updateLead,
   updateAjustes,
@@ -475,6 +477,44 @@ export async function crearEnredoAction(formData: FormData) {
   });
   reflejar();
   revalidatePath("/admin/menu");
+}
+
+/* ------- Arqueo de caja ------- */
+
+export async function abrirCajaAction(formData: FormData) {
+  if (!(await guard())) return;
+  const base = Number(formData.get("base") ?? 0);
+  if (!Number.isFinite(base) || base < 0) {
+    await avisar("La base de caja tiene que ser un número.");
+    return;
+  }
+  const quien = (await usuarioSesion()) ?? undefined;
+  const ok = await intentar(
+    () => abrirCaja(base, quien),
+    "Caja abierta. Que sea un buen turno.",
+  );
+  if (ok) revalidatePath("/admin");
+}
+
+export async function cerrarCajaAction(formData: FormData) {
+  if (!(await guard())) return;
+  const quien = (await usuarioSesion()) ?? undefined;
+  const contado = Number(formData.get("contado") ?? NaN);
+  if (!Number.isFinite(contado) || contado < 0) {
+    await avisar("Escribe cuánto contaste en el cajón.");
+    return;
+  }
+  const ok = await intentar(
+    () =>
+      cerrarCaja({
+        contado,
+        salidas: Number(formData.get("salidas") ?? 0) || 0,
+        notas: String(formData.get("notas") ?? ""),
+        usuario: quien,
+      }),
+    "Caja cerrada.",
+  );
+  if (ok) revalidatePath("/admin");
 }
 
 /* ------- Precios al vuelo, desde la pantalla de Pedidos ------- */

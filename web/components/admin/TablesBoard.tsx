@@ -19,6 +19,7 @@ import {
   METODOS,
   metodoLabel,
   metodoEmoji,
+  lineasDe,
   type Pedido,
 } from "@/lib/menu";
 import { cobrarMesaAction, asignarReferenciaAction } from "@/app/pedido-actions";
@@ -116,8 +117,12 @@ export default function TablesBoard({ pedidos }: { pedidos: Pedido[] }) {
                     <li key={p.id}>
                       <span className={`dot dot--${p.estado}`} aria-hidden />
                       <span className="cuenta__plato">
-                        <b>#{p.consecutivo ?? p.id}</b> {p.base}
-                        {p.proteina && p.proteina !== "—" ? ` · ${p.proteina}` : ""}
+                        <b>#{p.consecutivo ?? p.id}</b>{" "}
+                        {/* Una comanda de mesa puede llevar varios platos: se nombran
+                            todos, que es justo lo que el mesero viene a buscar aquí. */}
+                        {lineasDe(p)
+                          .map((l) => (l.cantidad > 1 ? `${l.cantidad}× ${l.nombre}` : l.nombre))
+                          .join(" · ")}
                       </span>
                       <span className={`badge badge--${p.estado}`}>{estadoLabel[p.estado]}</span>
                     </li>

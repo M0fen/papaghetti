@@ -26,6 +26,9 @@ import {
   type Ingrediente,
   type EnredoInsignia,
   type Pedido,
+  type ItemPedido,
+  type Arqueo,
+  esVenta,
   type Lead,
   type EstadoLead,
   type TipoServicio,
@@ -591,7 +594,7 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
 async function commit(
   cat: Catalog,
   texto?: string,
-  opciones?: { autoritativo?: boolean },
+  opciones?: { autoritativo?: boolean; sinDeshacer?: boolean },
 ): Promise<void> {
   return enFila(async () => {
     for (let intento = 0; intento < 3; intento++) {
@@ -600,10 +603,20 @@ async function commit(
       // Con el documento ya fusionado y dentro del candado: aquí y solo aquí se
       // decide qué número de comprobante lleva cada pedido.
       asegurarConsecutivos(doc.pedidos ?? []);
-      doc.undo = [...(actual.undo ?? []), stripSnap(actual)].slice(-UNDO_CAP);
-      doc.redo = [];
+      /* `sinDeshacer` es para el borrón y cuenta nueva. El resto del tiempo guardar
+         la foto anterior es lo correcto, pero al poner el negocio en cero esa foto
+         contiene justo lo que se quiso borrar: un "Deshacer" devolvería la despensa
+         inventada. No hay nada que deshacer en el punto de partida. */
+      if (opciones?.sinDeshacer) {
+        doc.undo = [];
+        doc.redo = [];
+      } else {
+        doc.undo = [...(actual.undo ?? []), stripSnap(actual)].slice(-UNDO_CAP);
+        doc.redo = [];
+      }
       if (texto) {
-        doc.historial = [nuevaEntrada(texto, false, await quien()), ...(actual.historial ?? [])].slice(0, HIST_CAP);
+        const previo = opciones?.sinDeshacer ? [] : (actual.historial ?? []);
+        doc.historial = [nuevaEntrada(texto, false, await quien()), ...previo].slice(0, HIST_CAP);
       }
       try {
         // Último intento: se escribe SIN condición. Ya venimos de releer y fusionar,
@@ -872,6 +885,30 @@ export async function deleteEnredo(id: string): Promise<Catalog> {
 /* PEDIDOS + INVENTARIO (Fase 3)                                      */
 /* ------------------------------------------------------------------ */
 
+/** Un renglón de la comanda: o un plato de carta (enredoId) o una caja armada. */
+export interface LineaComanda {
+  /** Plato de precio cerrado. Manda sobre lo que venga armado. */
+  enredoId?: string;
+  baseId?: string;
+  proteinaIds?: string[];
+  toppingIds?: string[];
+  /** Cuántas porciones de ESTE renglón (1 por defecto). */
+  cantidad?: number;
+}
+
+/** Lo que pide una mesa: N renglones, un solo pedido, un solo cobro. */
+export interface NuevaComanda {
+  lineas: LineaComanda[];
+  canal?: Pedido["canal"];
+  tipo?: TipoServicio;
+  cliente?: string;
+  telefono?: string;
+  direccion?: string;
+  referencia?: string;
+  notas?: string;
+  idemKey?: string;
+}
+
 export interface NuevoPedido {
   baseId: string;
   proteinaId: string;
@@ -971,6 +1008,11 @@ function alcanzaPara(ing: Ingrediente, byId: Map<string, Insumo>, veces: number)
 /** Máximos que la propia interfaz permite; el servidor no acepta más. */
 const MAX_TOPPINGS = 12;
 const MAX_PROTEINAS = 4;
+/* Topes de cordura de una comanda. Una mesa larga cabe de sobra en 20 renglones y
+   nadie pide 30 veces el mismo plato: por encima de eso es un error de tecleo o
+   alguien probando el formulario, y el coste lo paga la despensa real. */
+const MAX_LINEAS = 20;
+const MAX_POR_LINEA = 30;
 
 /**
  * Tope de pedidos guardados. Antes era 200 a secas y el corte se hacía sin mirar el
@@ -1002,78 +1044,22 @@ function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>): void {
 }
 
 /**
- * Un plato de precio cerrado SIN componentes: ensaladas, a la carta, especiales.
+ * UNA COMANDA: lo que pide una mesa, en un solo pedido.
  *
- * Comparte todo el resto del flujo (servicio, mínimo a domicilio, idempotencia,
- * estado, cobro) pero no resuelve ni consume componentes: es un plato que sale de
- * la cocina, no una caja que se arma. Su COGS queda en 0 hasta que tenga ficha
- * técnica, y el panel lo pide como tarea pendiente.
+ * Antes un pedido era exactamente UN plato. Una mesa de cuatro eran cuatro pedidos,
+ * cuatro comandas para la cocina, cuatro cobros y cuatro papeles — y si el mesero
+ * escribía la referencia distinta ("mesa ventanal" vs "Mesa del ventanal"), ni
+ * siquiera se podían cobrar juntos. Ahora una comanda lleva N renglones.
+ *
+ * `crearPedido` (el camino del QR y de la web, que usan los clientes) es EL CASO DE
+ * UN RENGLÓN de esta misma función. Una sola verdad: si cambia la regla de precios o
+ * de despensa, cambia aquí y se entera todo el negocio a la vez.
+ *
+ * ORDEN SAGRADO, igual que antes: resolver TODO → VALIDAR TODO → recién entonces
+ * consumir. Con varios renglones importa más: si el tercer plato no alcanza, los dos
+ * primeros no pueden haber descontado ya la despensa.
  */
-async function crearPedidoSuelto(
-  cat: Catalog,
-  plato: EnredoInsignia,
-  input: NuevoPedido,
-  idemKey?: string,
-): Promise<Pedido> {
-  const impuestoPct = cat.ajustes.impuestoPct ?? 0;
-  const { subtotal, impuesto } = desglosarPrecioFinal(plato.precio, impuestoPct);
-  const tipo = input.tipo ?? (input.mesa ? "mesa" : "llevar");
-  const direccion = input.direccion?.trim() || undefined;
-  if (tipo === "domicilio" && !direccion) {
-    throw new Error("Necesitamos la dirección de entrega para llevártelo.");
-  }
-  const domicilio = tipo === "domicilio" ? cat.ajustes.costoDomicilio ?? 0 : 0;
-  const falta = faltaParaMinimo(subtotal, tipo, cat.ajustes.pedidoMinimo);
-  if (falta > 0) {
-    throw new Error(
-      `El pedido mínimo a domicilio es ${formatCOP(cat.ajustes.pedidoMinimo)}. Te faltan ${formatCOP(falta)}.`,
-    );
-  }
-  const pedido: Pedido = {
-    id: crypto.randomUUID().slice(0, 8).toUpperCase(),
-    consecutivo: siguienteConsecutivo(cat),
-    creadoEn: new Date().toISOString(),
-    canal: input.canal ?? "web",
-    tipo,
-    mesa: undefined,
-    referencia: input.referencia?.trim().slice(0, 60) || undefined,
-    cliente: input.cliente?.trim() || undefined,
-    telefono: input.telefono?.trim() || undefined,
-    direccion,
-    notas: input.notas?.trim().slice(0, 200) || undefined,
-    estado: "recibido",
-    pago: "pendiente",
-    base: plato.nombre,
-    proteina: "—",
-    toppings: [],
-    componentes: [],
-    subtotal,
-    impuesto,
-    domicilio,
-    propina: 0,
-    descuento: 0,
-    total: totalDe({ subtotal, impuesto, domicilio }),
-    costo: 0,
-    enredoId: plato.id,
-    idemKey,
-  };
-  cat.pedidos = recortarPedidos([pedido, ...cat.pedidos]);
-  await commit(cat, `Nuevo pedido #${pedido.id} · ${plato.nombre} (${formatCOP(pedido.total)})`);
-  return pedido;
-}
-
-/**
- * Crea un pedido, descuenta insumos por receta y auto-agota lo que ya no alcanza.
- *
- * ORDEN SAGRADO: resolver → VALIDAR TODO → recién entonces consumir. Antes se
- * consumía mientras se resolvía, así que un pedido que luego era rechazado (por el
- * mínimo a domicilio) ya había descontado la despensa, y un id inexistente producía
- * un ticket "Base: —" con subtotal 0 que la cocina recibía como pedido real.
- *
- * Es la ÚNICA función pública que muta el cerebro (`enviarPedido` no pide sesión,
- * a propósito: la usan los clientes). Por eso valida como si el que llama fuera hostil.
- */
-export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
+export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   const cat = await read();
   const byId = insumosPorId(cat);
 
@@ -1091,6 +1077,9 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     );
   }
 
+  const lineas = (input.lineas ?? []).slice(0, MAX_LINEAS);
+  if (!lineas.length) throw new Error("La comanda está vacía.");
+
   const buscar = (id: string): Ingrediente | undefined => {
     for (const grupo of ["bases", "proteinas", "toppings"] as const) {
       const it = cat[grupo].find((x) => x.id === id);
@@ -1099,50 +1088,133 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     return undefined;
   };
 
-  // Un enredo insignia manda sobre lo que venga: sus componentes son los suyos.
-  const insignia = input.enredoId
-    ? cat.enredos.find((e) => e.id === input.enredoId)
-    : undefined;
-  if (input.enredoId && !insignia) throw new Error("Ese plato ya no está en la carta.");
-  if (insignia && insignia.activo === false) {
-    throw new Error(`Hoy no tenemos "${insignia.nombre}".`);
+  const impuestoPct = cat.ajustes.impuestoPct ?? 0;
+
+  /* — 2. RESOLVER cada renglón. Todavía no se toca nada: solo se averigua qué es
+         cada uno, cuánto vale una unidad y qué componentes consume. */
+  type Resuelto = {
+    item: ItemPedido;
+    /** Ids a consumir por CADA unidad (vacío en los platos de cocina). */
+    consume: string[];
+  };
+  const resueltos: Resuelto[] = [];
+
+  for (const l of lineas) {
+    const cantidad = Math.max(1, Math.min(MAX_POR_LINEA, Math.round(l.cantidad ?? 1)));
+
+    const insignia = l.enredoId ? cat.enredos.find((e) => e.id === l.enredoId) : undefined;
+    if (l.enredoId && !insignia) throw new Error("Ese plato ya no está en la carta.");
+    if (insignia && insignia.activo === false) {
+      throw new Error(`Hoy no tenemos "${insignia.nombre}".`);
+    }
+
+    /* PLATO DE COCINA (ensaladas, a la carta, especiales): precio cerrado y SIN
+       componentes. No se arma por partes, así que no hay nada que resolver ni que
+       descontar — se cobra tal cual. Sin este camino, media carta sería invendible. */
+    if (insignia && !insignia.baseId && !insignia.proteinaId) {
+      const { subtotal } = desglosarPrecioFinal(insignia.precio, impuestoPct);
+      resueltos.push({
+        item: {
+          nombre: insignia.nombre,
+          detalle: insignia.gancho || undefined,
+          cantidad,
+          precio: subtotal,
+          componentes: [],
+          enredoId: insignia.id,
+          costo: 0,
+        },
+        consume: [],
+      });
+      continue;
+    }
+
+    // Topes y deduplicación. La UI nunca permite más; el servidor tampoco.
+    const protIdsCrudos = insignia
+      ? [insignia.proteinaId]
+      : l.proteinaIds && l.proteinaIds.length
+        ? l.proteinaIds
+        : [];
+    const protIds = protIdsCrudos.filter(Boolean).slice(0, MAX_PROTEINAS);
+    /* Los toppings NO se deduplican (pedir doble aguacate es legítimo y se cobra
+       doble), pero sí se topan: sin límite, un pedido con 5.000 toppings vaciaba la
+       despensa real. */
+    const topIdsCrudos = insignia ? insignia.toppingIds : l.toppingIds;
+    const topIds = (Array.isArray(topIdsCrudos) ? topIdsCrudos : []).slice(0, MAX_TOPPINGS);
+    const baseId = (insignia ? insignia.baseId : l.baseId) ?? "";
+
+    /* Dos fallos distintos que el operario vive distinto: "no elegiste base" es un
+       formulario a medio llenar, y "la base ya no existe" es que el catálogo cambió
+       debajo mientras armaba. El mensaje tiene que decir cuál de los dos es. */
+    if (!baseId) throw new Error("Falta la base del enredo.");
+    if (protIds.length === 0) throw new Error("Falta la proteína del enredo.");
+    const base = buscar(baseId);
+    if (!base) {
+      throw new Error("Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.");
+    }
+    const prots: Ingrediente[] = [];
+    const tops: Ingrediente[] = [];
+    for (const id of protIds) {
+      const ing = buscar(id);
+      if (!ing) throw new Error("Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.");
+      prots.push(ing);
+    }
+    for (const id of topIds) {
+      const ing = buscar(id);
+      if (!ing) throw new Error("Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.");
+      tops.push(ing);
+    }
+
+    /* El precio: un insignia CON componentes tiene precio de carta cerrado (todo
+       incluido) y se desglosa hacia atrás para que su subtotal sea comparable con el
+       de un armado a mano. Las SALSAS valen $0: fuera del conteo de lo que se cobra. */
+    const cobrables = tops.filter((t) => t.categoria !== "salsa");
+    const armado =
+      base.precio +
+      prots.reduce((s, p) => s + p.precio, 0) + // todas las proteínas a precio completo
+      /* MISMA función que usa el cliente (lib/precios.ts). Hoy TOPPINGS_INCLUIDOS es
+         0, o sea que suma todos; sigue pasando por aquí para que, si alguna vez hay
+         promo, el total de la pantalla no pueda separarse del que se cobra. */
+      cobroToppings(cobrables, TOPPINGS_INCLUIDOS);
+    const precio = insignia
+      ? desglosarPrecioFinal(insignia.precio, impuestoPct).subtotal
+      : armado;
+
+    const consume = [baseId, ...protIds, ...topIds];
+    resueltos.push({
+      item: {
+        nombre: insignia ? insignia.nombre : base.nombre,
+        detalle: insignia
+          ? insignia.gancho || undefined
+          : [
+              prots.length ? `con ${prots.map((p) => p.nombre).join(" + ")}` : "",
+              tops.length ? `+ ${tops.map((t) => t.nombre).join(", ")}` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined,
+        cantidad,
+        precio,
+        componentes: consume,
+        enredoId: insignia?.id,
+        costo: Math.round(
+          costoReceta(base.receta, byId) +
+            prots.reduce((s, p) => s + costoReceta(p.receta, byId), 0) +
+            tops.reduce((s, t) => s + costoReceta(t.receta, byId), 0),
+        ),
+      },
+      consume,
+    });
   }
 
-  /**
-   * PLATO DE COCINA (ensaladas, a la carta, especiales): precio cerrado y SIN
-   * componentes. No se arma por partes, así que no hay nada que resolver ni que
-   * descontar — se cobra tal cual. Sin este camino, media carta sería invendible.
-   */
-  const platoSuelto = Boolean(insignia && !insignia.baseId && !insignia.proteinaId);
-  if (platoSuelto) return crearPedidoSuelto(cat, insignia!, input, idemKey);
-
-  // — 2. Topes y deduplicación. La UI nunca permite más; el servidor tampoco.
-  const protIdsCrudos = insignia
-    ? [insignia.proteinaId]
-    : input.proteinaIds && input.proteinaIds.length
-      ? input.proteinaIds
-      : ([input.proteinaId, input.proteinaId2].filter(Boolean) as string[]);
-  const protIds = protIdsCrudos.filter(Boolean).slice(0, MAX_PROTEINAS);
-  // Los toppings NO se deduplican (pedir doble aguacate es legítimo y se cobra doble),
-  // pero sí se topan: sin límite, un pedido con 5.000 toppings vaciaba la despensa real.
-  const topIdsCrudos = insignia ? insignia.toppingIds : input.toppingIds;
-  const topIds = (Array.isArray(topIdsCrudos) ? topIdsCrudos : []).slice(0, MAX_TOPPINGS);
-  const baseId = insignia ? insignia.baseId : input.baseId;
-
-  // — 3. Resolver TODOS los componentes; ninguno puede faltar.
-  const pedidos: { id: string; ing: Ingrediente }[] = [];
-  for (const id of [baseId, ...protIds, ...topIds]) {
-    const ing = buscar(id);
-    if (!ing) throw new Error("Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.");
-    pedidos.push({ id, ing });
-  }
-  if (!buscar(baseId)) throw new Error("Falta la base del enredo.");
-  if (protIds.length === 0) throw new Error("Falta la proteína del enredo.");
-
-  // — 4. DISPONIBILIDAD: nada agotado, nada fuera de carta, y que la despensa alcance
-  //      para TODAS las porciones de este pedido (dos aguacates piden dos aguacates).
+  /* — 3. DISPONIBILIDAD, sumando TODA la comanda. Aquí está la diferencia con el
+         pedido de un plato: dos renglones que llevan aguacate piden dos aguacates, y
+         hay que saberlo ANTES de descontar el primero. Si no, la mesa se quedaba a
+         medias con la despensa ya tocada. */
   const necesarias = new Map<string, number>();
-  for (const { id } of pedidos) necesarias.set(id, (necesarias.get(id) ?? 0) + 1);
+  for (const r of resueltos) {
+    for (const id of r.consume) {
+      necesarias.set(id, (necesarias.get(id) ?? 0) + r.item.cantidad);
+    }
+  }
   for (const [id, veces] of necesarias) {
     const ing = buscar(id)!;
     if (ing.activo === false) throw new Error(`"${ing.nombre}" ya no está en la carta.`);
@@ -1156,17 +1228,28 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     }
   }
 
-  // — 5. Servicio. El default NO puede ser el que cobra: si nadie dice el tipo,
-  //      un pedido con mesa es de mesa y el resto es para llevar. Antes caía en
-  //      "domicilio" y le sumaba $5.000 a alguien que estaba sentado en el local.
+  /* — 4. Servicio. El default NO puede ser el que cobra: si nadie dice el tipo, un
+         pedido con referencia es de mesa y el resto es para llevar. Antes caía en
+         "domicilio" y le sumaba $5.000 a alguien que estaba sentado en el local. */
   const tipo = input.tipo ?? (input.referencia ? "mesa" : "llevar");
   const direccion = input.direccion?.trim() || undefined;
   if (tipo === "domicilio" && !direccion) {
     throw new Error("Necesitamos la dirección de entrega para llevártelo.");
   }
 
-  // — 6. Ya validado todo: AHORA sí se consume la despensa.
-  const consumir = (id: string): Ingrediente => {
+  // — 5. Precio de la comanda, y el mínimo a domicilio ANTES de tocar la despensa.
+  const subtotal = resueltos.reduce((s, r) => s + r.item.precio * r.item.cantidad, 0);
+  const impuesto = Math.round((subtotal * impuestoPct) / 100);
+  const domicilio = tipo === "domicilio" ? cat.ajustes.costoDomicilio ?? 0 : 0;
+  const falta = faltaParaMinimo(subtotal, tipo, cat.ajustes.pedidoMinimo);
+  if (falta > 0) {
+    throw new Error(
+      `El pedido mínimo a domicilio es ${formatCOP(cat.ajustes.pedidoMinimo)}. Te faltan ${formatCOP(falta)}.`,
+    );
+  }
+
+  // — 6. Ya validado TODO: ahora sí se consume la despensa, unidad por unidad.
+  const consumir = (id: string) => {
     const it = buscar(id)!;
     if (it.receta && it.receta.length > 0) {
       consumirReceta(it, byId); // ← descuenta despensa real
@@ -1175,42 +1258,26 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
       it.stock = Math.max(0, it.stock - 1); // legado: unidades abstractas
       if (it.stock === 0) it.agotado = true;
     }
-    return it;
   };
+  const componentes: string[] = [];
+  for (const r of resueltos) {
+    for (let n = 0; n < r.item.cantidad; n++) {
+      for (const id of r.consume) {
+        consumir(id);
+        componentes.push(id);
+      }
+    }
+  }
 
-  const base = consumir(baseId);
-  const prots = protIds.map(consumir); // todas a precio completo
-  const tops = topIds.map(consumir);
+  const items = resueltos.map((r) => r.item);
+  const costo = Math.round(items.reduce((s, i) => s + (i.costo ?? 0) * i.cantidad, 0));
 
-  const impuestoPct = cat.ajustes.impuestoPct ?? 0;
-  // El insignia tiene precio de carta CERRADO (todo incluido) → se desglosa hacia atrás
-  // para que subtotal/impuesto sigan siendo comparables con los pedidos armados a mano.
-  // Las SALSAS valen $0 en la carta: fuera del conteo de lo que se cobra.
-  const cobrables = tops.filter((t) => t.categoria !== "salsa");
-  const armado =
-    (base?.precio ?? 0) +
-    prots.reduce((s, p) => s + p.precio, 0) + // todas las proteínas a precio completo
-    // MISMA función que usa el cliente (lib/precios.ts). Hoy TOPPINGS_INCLUIDOS es 0,
-    // o sea que suma todos; sigue pasando por aquí para que, si alguna vez hay promo,
-    // el total de la pantalla no pueda separarse del que se cobra.
-    cobroToppings(cobrables, TOPPINGS_INCLUIDOS);
-  const { subtotal, impuesto } = insignia
-    ? desglosarPrecioFinal(insignia.precio, impuestoPct)
-    : { subtotal: armado, impuesto: Math.round((armado * impuestoPct) / 100) };
-
-  // Domicilio: solo cuando el servicio lo es, y con el mínimo que fijó el dueño.
-  const domicilio = tipo === "domicilio" ? cat.ajustes.costoDomicilio ?? 0 : 0;
-  const falta = faltaParaMinimo(subtotal, tipo, cat.ajustes.pedidoMinimo);
-  if (falta > 0)
-    throw new Error(
-      `El pedido mínimo a domicilio es ${formatCOP(cat.ajustes.pedidoMinimo)}. Te faltan ${formatCOP(falta)}.`
-    );
-  // Costo de insumos (COGS) congelado según receta y costos actuales.
-  const costo = Math.round(
-    costoReceta(base?.receta, byId) +
-      prots.reduce((s, p) => s + costoReceta(p.receta, byId), 0) +
-      tops.reduce((s, t) => s + costoReceta(t.receta, byId), 0)
-  );
+  /* El RESUMEN de siempre (base/proteina/toppings). No es decorativo: hay pedidos
+     guardados desde antes de que existieran los renglones, y hay pantallas y textos
+     de WhatsApp que leen estos campos. Con un solo renglón dicen exactamente lo de
+     antes; con varios, dicen cuántos platos van. */
+  const uno = items.length === 1 && items[0].cantidad === 1 ? items[0] : null;
+  const platos = items.reduce((s, i) => s + i.cantidad, 0);
 
   const pedido: Pedido = {
     id: crypto.randomUUID().slice(0, 8).toUpperCase(),
@@ -1226,11 +1293,11 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     notas: input.notas?.trim().slice(0, 200) || undefined,
     estado: "recibido",
     pago: "pendiente",
-    base: base.nombre,
-    proteina: prots.map((p) => p.nombre).join(" + "),
-    toppings: tops.map((t) => t.nombre),
-    /** Los ids, para poder devolver la despensa si el pedido se cancela. */
-    componentes: [baseId, ...protIds, ...topIds],
+    items,
+    base: uno ? uno.nombre : `${platos} platos`,
+    proteina: uno ? (uno.detalle?.match(/^con (.+?)(?: ·|$)/)?.[1] ?? "—") : "—",
+    toppings: uno ? (uno.detalle?.match(/\+ (.+)$/)?.[1]?.split(", ") ?? []) : [],
+    componentes,
     subtotal,
     impuesto,
     domicilio,
@@ -1238,13 +1305,50 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     descuento: 0,
     total: totalDe({ subtotal, impuesto, domicilio }),
     costo,
-    enredoId: insignia?.id,
+    enredoId: uno?.enredoId,
     idemKey,
   };
 
   cat.pedidos = recortarPedidos([pedido, ...cat.pedidos]);
-  await commit(cat, `Nuevo pedido #${pedido.id} (${formatCOP(pedido.total)})`);
+  await commit(
+    cat,
+    `Nuevo pedido #${pedido.id}${platos > 1 ? ` · ${platos} platos` : ""} (${formatCOP(pedido.total)})`,
+  );
   return pedido;
+}
+
+/**
+ * Crea un pedido de UN plato. Es la firma que usan el QR, la web y el juego desde
+ * siempre; por dentro es una comanda de un renglón, para que no haya dos motores de
+ * precios ni dos formas de descontar la despensa.
+ *
+ * Es la ÚNICA función pública que muta el cerebro sin pedir sesión (a propósito: la
+ * usan los clientes). Por eso valida como si el que llama fuera hostil.
+ */
+export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
+  const proteinaIds =
+    input.proteinaIds && input.proteinaIds.length
+      ? input.proteinaIds
+      : ([input.proteinaId, input.proteinaId2].filter(Boolean) as string[]);
+  return crearComanda({
+    lineas: [
+      {
+        enredoId: input.enredoId,
+        baseId: input.baseId,
+        proteinaIds,
+        toppingIds: input.toppingIds,
+        cantidad: 1,
+      },
+    ],
+    canal: input.canal,
+    tipo: input.tipo,
+    cliente: input.cliente,
+    telefono: input.telefono,
+    direccion: input.direccion,
+    referencia: input.referencia,
+    notas: input.notas,
+    idemKey: input.idemKey,
+  });
 }
 
 /**
@@ -1324,6 +1428,63 @@ export async function cobrarPedido(
  * caja sin rastro), los insumos consumidos no volvían nunca (merma invisible que se
  * acumulaba día a día), y no quedaba constancia de por qué.
  */
+/**
+ * DEVOLVER EL DINERO DE UN PEDIDO YA COBRADO. La salida que no existía.
+ *
+ * `cancelarPedido` se niega a tocar un pedido pagado —y hace bien: borrarlo sin más
+ * dejaría el efectivo en la caja sin rastro— pero remitía a "registrar la devolución
+ * del dinero", una función que no estaba escrita. El operario se quedaba encerrado:
+ * plato mal salido, cobro duplicado o cliente que se arrepiente después de pagar, y
+ * ninguna forma de deshacerlo. Se acababa arreglando por fuera del sistema, que es
+ * como se pierde el cuadre.
+ *
+ * Qué hace exactamente:
+ *  · deja constancia de CUÁNTO salió, POR QUÉ y CUÁNDO (la fecha es propia: devolver
+ *    al día siguiente descuadra la caja de hoy, y hay que poder explicarlo);
+ *  · marca el pedido como cancelado, así que `esVenta` lo saca de los reportes y la
+ *    venta desaparece igual que desapareció el dinero;
+ *  · devuelve la despensa solo si el plato nunca entró a cocina. Si ya se cocinó, el
+ *    insumo se gastó de verdad y fingir que volvió sería mentirle al inventario.
+ */
+export async function devolverPedido(id: string, motivo: string): Promise<Catalog> {
+  const cat = await read();
+  const p = cat.pedidos.find((x) => x.id === id);
+  if (!p) throw new Error(`No existe el pedido #${id}.`);
+  if (p.pago !== "pagado") {
+    throw new Error(`El pedido #${id} no está cobrado: para anularlo usa "Cancelar".`);
+  }
+  const razon = motivo.trim();
+  if (!razon) throw new Error("Escribe por qué se devuelve el dinero.");
+
+  const seCocino = p.estado !== "recibido";
+  if (!seCocino && p.componentes?.length) {
+    const byId = insumosPorId(cat);
+    for (const compId of p.componentes) {
+      for (const g of ["bases", "proteinas", "toppings"] as const) {
+        const it = cat[g].find((x) => x.id === compId);
+        if (!it) continue;
+        if (it.receta?.length) {
+          for (const r of it.receta) {
+            const ins = byId.get(r.insumoId);
+            if (ins) ins.stock = Number((ins.stock + r.cantidad).toFixed(3));
+          }
+        } else if (typeof it.stock === "number") {
+          it.stock += 1;
+        }
+        it.agotado = false;
+        break;
+      }
+    }
+  }
+
+  p.devolucion = { monto: p.total, motivo: razon.slice(0, 200), fecha: new Date().toISOString() };
+  p.pago = "devuelto";
+  p.estado = "cancelado";
+  p.motivoCancelacion = `Devolución: ${razon.slice(0, 160)}`;
+  await commit(cat, `Devolvió #${id} (${formatCOP(p.devolucion.monto)}) · ${razon.slice(0, 60)}`);
+  return cat;
+}
+
 export async function cancelarPedido(id: string, motivo?: string): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
@@ -1631,6 +1792,156 @@ export interface NuevoGasto {
   monto: number;
   categoria: GastoCategoria;
   fecha?: string; // ISO; por defecto ahora
+}
+
+/**
+ * DEJAR EL NEGOCIO EN CERO PARA ABRIR DE VERDAD.
+ *
+ * Todo lo transaccional que hay guardado antes de abrir es de desarrollo: pedidos de
+ * prueba, los movimientos que nacieron de ellos y una despensa con cantidades
+ * inventadas para poder probar el flujo. Salir a operar con eso encima significa que
+ * el primer reporte real viene contaminado y que el inventario jura tener cosas que
+ * no existen — que es justo el error que hace que nadie vuelva a confiar en el número.
+ *
+ * BORRA lo transaccional y PONE EN CERO la despensa. NO toca la carta, las recetas,
+ * las fichas de insumo (su unidad, su par, su costo) ni los ajustes: eso es trabajo
+ * real que costó escribir. Los leads del Club tampoco, que pueden ser gente de verdad.
+ *
+ * Deja la carta marcada como agotada, que es la verdad: sin despensa no hay nada que
+ * preparar. Al cargar el inventario, `reactivarPreparables` la enciende sola.
+ */
+export async function ponerACero(): Promise<Catalog> {
+  const cat = await read();
+  cat.pedidos = [];
+  cat.movimientos = [];
+  cat.arqueos = [];
+  cat.historial = [];
+  /* Las pilas de deshacer guardan documentos ENTEROS: si se dejan, un "deshacer"
+     resucitaría los pedidos de prueba que acabamos de borrar. */
+  cat.undo = [];
+  cat.redo = [];
+  for (const i of cat.insumos) i.stock = 0;
+  for (const g of ["bases", "proteinas", "toppings"] as const) {
+    for (const it of cat[g]) {
+      // El stock de LEGADO (unidades abstractas, sin receta) también arranca vacío.
+      if (typeof it.stock === "number") it.stock = 0;
+    }
+  }
+  recalcularDisponibilidad(cat);
+  // Lo que no tiene receta se agota por su propio stock, que acabamos de vaciar.
+  for (const g of ["bases", "proteinas", "toppings"] as const) {
+    for (const it of cat[g]) {
+      if (!it.receta?.length) it.agotado = (it.stock ?? 0) <= 0;
+    }
+  }
+  /* AUTORITATIVO. `fusionar` une pedidos, movimientos y leads con lo que ya hay —está
+     para que un pedido que entró mientras alguien editaba un precio no se pierda— así
+     que un commit normal RESUCITA justo lo que se acaba de borrar. Un vaciado
+     deliberado es el único caso en que mi documento tiene que mandar tal cual. */
+  await commit(cat, "Puso el negocio en cero para abrir", {
+    autoritativo: true,
+    sinDeshacer: true,
+  });
+  return cat;
+}
+
+/* ------------------------------------------------------------------ */
+/* ARQUEO DE CAJA                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * LO QUE DEBERÍA HABER EN EL CAJÓN, y de dónde sale cada peso.
+ *
+ * Solo EFECTIVO: lo que entró por datáfono o transferencia no está en el cajón y
+ * meterlo aquí haría que el arqueo nunca cuadre.
+ *
+ * La resta de devoluciones tiene una trampa que conviene dejar escrita: una
+ * devolución del MISMO día ya se descuenta sola, porque al devolver el pedido deja
+ * de estar "pagado". La que hay que restar a mano es la de un pedido de OTRO día:
+ * el dinero sale del cajón de hoy aunque la venta fuera de ayer.
+ */
+export function esperadoEnCaja(cat: Catalog, dia: string, base: number, salidas = 0) {
+  const enEfectivo = (p: Pedido) => (p.metodoPago ?? "efectivo") === "efectivo";
+  const ventas = cat.pedidos.filter(
+    (p) =>
+      diaNegocio(p.creadoEn) === dia && p.pago === "pagado" && enEfectivo(p) && esVenta(p),
+  );
+  const cobrado = ventas.reduce((s, p) => s + p.total, 0);
+  const devueltoDeOtrosDias = cat.pedidos
+    .filter(
+      (p) =>
+        p.pago === "devuelto" &&
+        enEfectivo(p) &&
+        p.devolucion &&
+        diaNegocio(p.devolucion.fecha) === dia &&
+        diaNegocio(p.creadoEn) !== dia,
+    )
+    .reduce((s, p) => s + (p.devolucion?.monto ?? 0), 0);
+  return {
+    base,
+    cobrado,
+    devoluciones: devueltoDeOtrosDias,
+    salidas,
+    total: base + cobrado - devueltoDeOtrosDias - salidas,
+    pedidos: ventas.length,
+  };
+}
+
+/** El arqueo abierto de hoy, si lo hay. */
+export function arqueoAbierto(cat: Catalog, dia = diaNegocio()): Arqueo | undefined {
+  return (cat.arqueos ?? []).find((a) => a.dia === dia && !a.cerradoEn);
+}
+
+export async function abrirCaja(base: number, usuario?: string): Promise<Catalog> {
+  const cat = await read();
+  const dia = diaNegocio();
+  cat.arqueos = cat.arqueos ?? [];
+  if (arqueoAbierto(cat, dia)) throw new Error("La caja de hoy ya está abierta.");
+  const arqueo: Arqueo = {
+    id: crypto.randomUUID().slice(0, 8).toUpperCase(),
+    dia,
+    abiertoEn: new Date().toISOString(),
+    base: Math.max(0, Math.round(base)),
+    usuarioAbre: usuario,
+  };
+  cat.arqueos = [arqueo, ...cat.arqueos].slice(0, 400);
+  await commit(cat, `Abrió caja con ${formatCOP(arqueo.base)}`);
+  return cat;
+}
+
+/**
+ * Cierra la caja con lo CONTADO. El esperado se calcula aquí, en el servidor, y se
+ * congela en el arqueo: si se calculara al leer, un cobro tardío cambiaría mañana la
+ * diferencia de un turno que ya se cerró y firmó.
+ */
+export async function cerrarCaja(input: {
+  contado: number;
+  salidas?: number;
+  notas?: string;
+  usuario?: string;
+}): Promise<Catalog> {
+  const cat = await read();
+  const dia = diaNegocio();
+  const arqueo = arqueoAbierto(cat, dia);
+  if (!arqueo) throw new Error("No hay una caja abierta hoy. Ábrela primero con su base.");
+  const salidas = Math.max(0, Math.round(input.salidas ?? 0));
+  const contado = Math.max(0, Math.round(input.contado));
+  const { total } = esperadoEnCaja(cat, dia, arqueo.base, salidas);
+  arqueo.cerradoEn = new Date().toISOString();
+  arqueo.contado = contado;
+  arqueo.salidas = salidas;
+  arqueo.esperado = total;
+  arqueo.diferencia = contado - total;
+  arqueo.notas = input.notas?.trim().slice(0, 300) || undefined;
+  arqueo.usuarioCierra = input.usuario;
+  const señal =
+    arqueo.diferencia === 0
+      ? "cuadró"
+      : arqueo.diferencia > 0
+        ? `sobran ${formatCOP(arqueo.diferencia)}`
+        : `faltan ${formatCOP(-arqueo.diferencia)}`;
+  await commit(cat, `Cerró caja: contó ${formatCOP(contado)} · ${señal}`);
+  return cat;
 }
 
 export async function crearGasto(input: NuevoGasto): Promise<Catalog> {

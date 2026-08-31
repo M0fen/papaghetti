@@ -8,6 +8,7 @@ import {
   formatCOP,
   tipoLabel,
   tipoIcon,
+  lineasDe,
   type Pedido,
   type EstadoPedido,
 } from "@/lib/menu";
@@ -148,12 +149,18 @@ export default function KitchenBoard({ pedidos }: { pedidos: Pedido[] }) {
                           {p.telefono ? ` · ${p.telefono}` : ""}
                         </p>
                       )}
-                      <p className="ticket-card__line">
-                        <b>{p.base}</b> · {p.proteina}
-                      </p>
-                      {p.toppings.length > 0 && (
-                        <p className="ticket-card__tops">+ {p.toppings.join(", ")}</p>
-                      )}
+                      {/* CADA PLATO, SU RENGLÓN. En la cocina esto es lo único que
+                          importa: si la comanda lleva cuatro platos, se cocinan cuatro,
+                          y la cantidad va delante y grande para que no se pase por alto. */}
+                      {lineasDe(p).map((l, i) => (
+                        <div key={i} className="ticket-card__plato">
+                          <p className="ticket-card__line">
+                            {l.cantidad > 1 && <b className="ticket-card__x">{l.cantidad}×</b>}
+                            <b>{l.nombre}</b>
+                          </p>
+                          {l.detalle && <p className="ticket-card__tops">{l.detalle}</p>}
+                        </div>
+                      ))}
                       {/* La nota del cliente NO puede ir en gris pequeño: aquí viven
                           las alergias. */}
                       {p.notas && <p className="ticket-card__nota">📝 {p.notas}</p>}
