@@ -6048,9 +6048,17 @@ body.enreda-jugando .sticky-pedir {
      nuevo al panel no vuelve a colarse en el papel, y quien imprima con Ctrl+P en vez
      del botón obtiene lo mismo. (El botón imprime un iframe con SOLO el comprobante;
      esto es el cinturón por si se llega por otro camino.) */
-  body:has(.cbte) > *:not(:has(.cbte)),
-  body:has(.cbte) .adminx > *:not(:has(.cbte)),
-  body:has(.cbte) .adminx__main > *:not(:has(.cbte)) { display: none !important; }
+  /* El `:not(.cbte)` de cada línea NO es redundante: `:has(.cbte)` mira DESCENDIENTES,
+     así que el propio tiquete —que ES .cbte pero no contiene otro— daba negativo y la
+     regla LO OCULTABA A ÉL cuando era hijo directo del body… que es exactamente la
+     estructura del iframe de impresión. El cinturón dejaba el rollo en blanco. */
+  /* `:not(.cbte-print-frame)` porque `:has()` no ve dentro de un iframe: sin la
+     exclusión, el marco de impresión cuenta como "hijo sin tiquete" y se oculta —
+     y un iframe oculto pierde la maquetación de su documento: altura 0, rollo en
+     blanco en cualquier motor que aplique print al padre durante la impresión. */
+  body:has(.cbte) > *:not(:has(.cbte)):not(.cbte):not(.cbte-print-frame),
+  body:has(.cbte) .adminx > *:not(:has(.cbte)):not(.cbte):not(.cbte-print-frame),
+  body:has(.cbte) .adminx__main > *:not(:has(.cbte)):not(.cbte):not(.cbte-print-frame) { display: none !important; }
   body:has(.cbte), body:has(.cbte) * { visibility: visible !important; }
   .cbte.printable {
     position: static !important;

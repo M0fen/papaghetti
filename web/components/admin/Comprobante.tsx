@@ -140,8 +140,22 @@ export default function Comprobante({
       .join("");
 
     const marco = document.createElement("iframe");
+    /* La clase importa: `:has(.cbte)` NO puede mirar dentro de un iframe, así que para
+       la regla estructural de impresión este marco es un hijo más del body sin tiquete
+       — y lo ocultaría, dejando su documento sin maquetar (altura 0 = rollo en
+       blanco) en cualquier motor que aplique el medio print al padre. Se excluye por
+       nombre en el CSS global. */
+    marco.className = "cbte-print-frame";
     marco.setAttribute("aria-hidden", "true");
-    marco.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    marco.setAttribute("tabindex", "-1");
+    /* CON TAMAÑO REAL, aparcado fuera de la pantalla — no 0×0. Un iframe de 0×0 tiene
+       una vista de 0×0, y aunque la impresión de verdad re-maqueta contra el tamaño
+       de @page, cualquier motor (o emulación, o versión vieja) que use la vista de la
+       ventana para maquetar imprime un documento de altura cero: rollo en blanco.
+       Con 340×700 aparcado a -10000px no hay caso posible en que el contenido mida 0,
+       y lo que se mide en las pruebas es lo mismo que sale por la impresora. */
+    marco.style.cssText =
+      "position:fixed;left:-10000px;top:0;width:340px;height:700px;border:0;opacity:0;pointer-events:none";
     document.body.appendChild(marco);
 
     const doc = marco.contentDocument;
@@ -159,7 +173,14 @@ export default function Comprobante({
             revive lo que lleva \`printable\`. Aquí dentro no hay nada más que el
             tiquete, así que se anula entero: es justo la regla que lo dejaba en
             blanco cuando el navegador no aplicaba bien la excepción. */
-         @media print { body, body * { visibility: visible !important; } }
+         @media print {
+           body, body * { visibility: visible !important; }
+           /* La clase repetida sube la especificidad por encima de cualquier regla
+              global de ocultar (las de \`body:has(...) > *\` pesan (0,2,1); esto pesa
+              (0,3,1)). Este documento SOLO contiene el tiquete: aquí nada tiene
+              permiso para esconderlo, hoy ni cuando alguien toque el CSS global. */
+           body > .cbte.cbte.cbte { display: block !important; }
+         }
          .cbte { border:0 !important; border-radius:0 !important; box-shadow:none !important; }
         </style></head><body>${el.outerHTML}</body></html>`,
     );
