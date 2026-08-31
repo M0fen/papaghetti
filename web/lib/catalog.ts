@@ -597,6 +597,9 @@ async function commit(
     for (let intento = 0; intento < 3; intento++) {
       const actual = await readFresco(); // fija el etag para la escritura condicional
       const doc = opciones?.autoritativo ? { ...cat } : fusionar(actual, cat);
+      // Con el documento ya fusionado y dentro del candado: aquí y solo aquí se
+      // decide qué número de comprobante lleva cada pedido.
+      asegurarConsecutivos(doc.pedidos ?? []);
       doc.undo = [...(actual.undo ?? []), stripSnap(actual)].slice(-UNDO_CAP);
       doc.redo = [];
       if (texto) {
@@ -902,11 +905,42 @@ export interface NuevoPedido {
 }
 
 /**
- * Siguiente número de comprobante. Sube de uno en uno sobre el mayor que exista, y
- * como toda escritura pasa por el candado y por el compare-and-swap, no se repite.
+ * Número de comprobante PROVISIONAL. El definitivo lo pone `asegurarConsecutivos`
+ * dentro del candado: aquí todavía no lo es.
  */
 function siguienteConsecutivo(cat: Catalog): number {
   return (cat.pedidos ?? []).reduce((m, p) => Math.max(m, p.consecutivo ?? 0), 0) + 1;
+}
+
+/**
+ * NUMERACIÓN ÚNICA, decidida dentro del candado.
+ *
+ * `crearPedido` lee el catálogo ANTES de entrar en la cola de escritura, así que dos
+ * pedidos casi simultáneos leían el mismo estado y ambos se adjudicaban el mismo
+ * consecutivo: dos clientes con el mismo número de comprobante, y una numeración con
+ * saltos imposible de auditar. Aquí, ya con el documento fusionado y en exclusiva, se
+ * reparan los repetidos y los que falten — en orden de creación, que es el que un
+ * consecutivo debe respetar.
+ *
+ * Muta los objetos en su sitio a propósito: el pedido que se devolvió al cliente es el
+ * MISMO objeto, así que la pantalla de confirmación y el comprobante ven el número bueno.
+ */
+function asegurarConsecutivos(pedidos: Pedido[]): void {
+  const usados = new Set<number>();
+  const porFecha = [...pedidos].sort((a, b) => a.creadoEn.localeCompare(b.creadoEn));
+  let siguiente = 1;
+  for (const p of porFecha) {
+    const n = p.consecutivo;
+    if (typeof n === "number" && n > 0 && !usados.has(n)) {
+      usados.add(n);
+      if (n >= siguiente) siguiente = n + 1;
+      continue;
+    }
+    while (usados.has(siguiente)) siguiente++;
+    p.consecutivo = siguiente;
+    usados.add(siguiente);
+    siguiente++;
+  }
 }
 
 /** Índice de insumos por id (referencias vivas dentro del catálogo). */

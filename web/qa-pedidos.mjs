@@ -195,6 +195,24 @@ try {
     `${Math.round(fs.statSync(FILE).size / 1024)}KB`,
   );
 
+  console.log("\n═══ CADA COMPROBANTE CON SU NÚMERO, AUNQUE ENTREN A LA VEZ ═══");
+  {
+    // crearPedido lee ANTES de entrar en la cola de escritura: dos pedidos casi
+    // simultáneos leían el mismo estado y se adjudicaban el mismo consecutivo.
+    const lote = await Promise.all(
+      [1, 2, 3, 4].map(() =>
+        cat.crearPedido({ baseId, proteinaId: protId, toppingIds: [], tipo: "llevar" }),
+      ),
+    );
+    const d = JSON.parse(fs.readFileSync(FILE, "utf8"));
+    const nums = lote.map((p) => d.pedidos.find((x) => x.id === p.id)?.consecutivo);
+    check("4 pedidos simultáneos = 4 números distintos", new Set(nums).size === 4, nums.join(", "));
+    check("ninguno se queda sin número", nums.every((n) => typeof n === "number" && n > 0));
+    const todos = d.pedidos.map((p) => p.consecutivo).filter((n) => typeof n === "number");
+    check("no hay repetidos en TODO el documento", new Set(todos).size === todos.length, `${todos.length} pedidos`);
+    for (const p of lote) await cat.cancelarPedido(p.id, "QA");
+  }
+
   console.log("\n═══ ENTRADA DE MERCANCÍA CON DINERO REAL ═══");
   {
     const ins0 = JSON.parse(fs.readFileSync(FILE, "utf8")).insumos[0];

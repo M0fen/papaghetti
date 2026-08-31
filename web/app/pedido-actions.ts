@@ -1,6 +1,6 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import {
   crearPedido,
@@ -43,28 +43,56 @@ async function operar(fn: () => Promise<unknown>, exito?: string) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Freno de pedidos por origen. `enviarPedido` es la ÚNICA acción pública que muta el
- * cerebro y no tenía límite alguno: en bucle vaciaba la despensa real (marcando toda la
- * carta como agotada para los clientes de verdad) y empujaba los pedidos reales fuera
- * del tope del documento. En memoria de la instancia — no es una defensa distribuida,
- * pero corta el abuso desde un solo origen, que es el ataque realista aquí.
+ * FRENO DE PEDIDOS — por dispositivo primero, por origen solo contra el abuso.
+ *
+ * `enviarPedido` es la única acción pública que muta el cerebro: sin límite, en bucle
+ * vacía la despensa real y deja la carta agotada para los clientes de verdad.
+ *
+ * Pero el límite ANTERIOR era de 5 por minuto POR IP, y todo el local sale por el
+ * mismo WiFi: en hora pico, el sexto pedido del minuto —de un cliente real, en otra
+ * mesa— se rechazaba. Un freno antiabuso que le cuesta ventas al negocio está mal
+ * puesto.
+ *
+ * Ahora el freno real es POR DISPOSITIVO (cookie anónima): una mesa no pide cuatro
+ * cajas en un minuto, pero doce mesas sí pueden pedir doce. El techo por IP queda muy
+ * por encima de cualquier servicio real y solo existe para cortar un script.
  */
 const ultimos = new Map<string, number[]>();
 const VENTANA_MS = 60_000;
-const MAX_POR_MINUTO = 5;
+const MAX_POR_DISPOSITIVO = 4;
+const MAX_POR_ORIGEN = 60; // un local lleno no llega ni de lejos; un bucle, en segundos
 
 async function origen(): Promise<string> {
   const h = await headers();
   return h.get("x-forwarded-for")?.split(",")[0]?.trim() || "desconocido";
 }
 
-function demasiados(ip: string): boolean {
+/**
+ * Identidad anónima del teléfono que pide. No lleva ningún dato personal: es un número
+ * al azar que solo sirve para no dejar que UN aparato inunde la cocina.
+ */
+async function dispositivo(): Promise<string> {
+  const c = await cookies();
+  const previo = c.get("pg_cliente")?.value;
+  if (previo && previo.length >= 8) return previo;
+  const id = crypto.randomUUID();
+  c.set("pg_cliente", id, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: Boolean(process.env.VERCEL),
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  return id;
+}
+
+function demasiados(clave: string, max: number): boolean {
   const ahora = Date.now();
-  const previos = (ultimos.get(ip) ?? []).filter((t) => ahora - t < VENTANA_MS);
+  const previos = (ultimos.get(clave) ?? []).filter((t) => ahora - t < VENTANA_MS);
   previos.push(ahora);
-  ultimos.set(ip, previos);
-  if (ultimos.size > 1000) ultimos.clear(); // techo de memoria
-  return previos.length > MAX_POR_MINUTO;
+  ultimos.set(clave, previos);
+  if (ultimos.size > 2000) ultimos.clear(); // techo de memoria
+  return previos.length > max;
 }
 
 /**
@@ -83,8 +111,13 @@ export async function enviarPedido(input: NuevoPedido) {
     error,
   });
   try {
-    if (demasiados(await origen())) {
-      return fallo("Vas muy rápido. Espera un momento y vuelve a intentarlo.");
+    /* El freno de verdad es el del aparato; el del origen solo corta un bucle. Así
+       doce mesas pueden pedir doce veces desde el mismo WiFi sin tropezarse. */
+    if (demasiados(`d:${await dispositivo()}`, MAX_POR_DISPOSITIVO)) {
+      return fallo("Ya enviaste varios pedidos seguidos. Espera un minuto y vuelve a intentarlo.");
+    }
+    if (demasiados(`ip:${await origen()}`, MAX_POR_ORIGEN)) {
+      return fallo("Hay demasiados pedidos entrando a la vez. Intenta en un momento.");
     }
     const pedido = await crearPedido(input);
     revalidatePath("/"); // el stock/agotado pudo cambiar
