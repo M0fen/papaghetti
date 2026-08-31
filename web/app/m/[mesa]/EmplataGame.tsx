@@ -1174,7 +1174,7 @@ export default function EmplataGame(props: {
   const [tipoSel, setTipoSel] = useState<TipoServicio>(esWeb ? "domicilio" : "mesa");
   /* Prerrellenada con el código del QR para que NUNCA llegue vacía; el cliente la
      puede cambiar por algo mejor ("mesa del ventanal"). */
-  const [referencia, setReferencia] = useState(esWeb ? "" : `Mesa ${mesa}`);
+  const [referencia, setReferencia] = useState(!esWeb && mesa > 0 ? `Mesa ${mesa}` : "");
   const [cliente, setCliente] = useState("");
   const [telefono, setTelefono] = useState("");
   const [direccion, setDireccion] = useState("");

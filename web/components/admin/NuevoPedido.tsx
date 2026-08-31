@@ -26,6 +26,7 @@ import {
 } from "@/lib/menu";
 import { calcularTotales } from "@/lib/precios";
 import { crearPedidoPanelAction } from "@/app/pedido-actions";
+import IngImg from "@/components/IngImg";
 import { nuevaClave } from "@/lib/idem";
 
 /** El botón se bloquea mientras se envía: sin esto, el segundo toque son dos platos. */
@@ -163,7 +164,7 @@ export default function NuevoPedido({
                 onChange={() => setBaseId(b.id)}
                 className="visually-hidden"
               />
-              {b.emoji} {b.nombre} · {formatCOP(b.precio)}
+              <IngImg ing={b} className="chipbtn__img" /> {b.nombre} · {formatCOP(b.precio)}
             </label>
           ))}
         </div>
@@ -182,14 +183,14 @@ export default function NuevoPedido({
                 onChange={() => alternar(protIds, setProtIds, p.id)}
                 className="visually-hidden"
               />
-              {p.emoji} {p.nombre} · {formatCOP(p.precio)}
+              <IngImg ing={p} className="chipbtn__img" /> {p.nombre} · {formatCOP(p.precio)}
             </label>
           ))}
         </div>
       </fieldset>
 
       <fieldset className="npedido__grupo">
-        <legend>Toppings · los primeros {TOPPINGS_INCLUIDOS} van por cuenta de la casa</legend>
+        <legend>Acompañantes · los {TOPPINGS_INCLUIDOS} más caros van por cuenta de la casa · las salsas son gratis</legend>
         <div className="npedido__chips">
           {topsD.map((t) => (
             <label key={t.id} className={`chipbtn ${topIds.includes(t.id) ? "is-on" : ""}`}>
@@ -201,8 +202,8 @@ export default function NuevoPedido({
                 onChange={() => alternar(topIds, setTopIds, t.id)}
                 className="visually-hidden"
               />
-              {t.emoji} {t.nombre}
-              {t.precio > 0 ? ` · ${formatCOP(t.precio)}` : ""}
+              <IngImg ing={t} className="chipbtn__img" /> {t.nombre}
+              {t.categoria === "salsa" ? " · incluida" : t.precio > 0 ? ` · ${formatCOP(t.precio)}` : ""}
             </label>
           ))}
         </div>

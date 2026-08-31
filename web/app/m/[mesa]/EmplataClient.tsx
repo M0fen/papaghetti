@@ -121,7 +121,7 @@ export default function EmplataClient({
   const [error, setError] = useState<string | null>(null);
   /* Dónde está el cliente y qué debemos saber. Por QR NADIE podía decirlo: el pedido
      llegaba anónimo y sin forma de avisar de una alergia. */
-  const [referencia, setReferencia] = useState(mesa > 0 ? `Mesa ${mesa}` : "");
+  const [referencia, setReferencia] = useState("");
   const [notas, setNotas] = useState("");
   const [verCarta, setVerCarta] = useState(false);
   /** Idempotencia: se rellena al enviar, no en el render. Ver lib/idem.ts. */

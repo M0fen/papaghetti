@@ -1130,3 +1130,12 @@
   background: #fff;
   color: inherit;
 }
+
+/* La barra superior con el botón de la carta: la marca cede espacio antes que
+   nada se salga de pantalla en un teléfono de 360px. */
+.emp-top__brand { min-width: 0; overflow: hidden; }
+.emp-top__brand b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emp-top__brand span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 420px) {
+  .emp-top__brand span { display: none; } /* la ubicación ya se pide en la hoja */
+}
