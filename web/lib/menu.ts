@@ -677,5 +677,10 @@ export const findIn = (
     (i) => i.id === id
   );
 
+/**
+ * Dinero en pesos. El signo va DELANTE del símbolo, no en medio: un descuento se
+ * imprimía "$-1.200" en el comprobante del cliente, que se lee como un precio raro
+ * en vez de como una resta.
+ */
 export const formatCOP = (valor: number) =>
-  "$" + valor.toLocaleString("es-CO", { maximumFractionDigits: 0 });
+  (valor < 0 ? "-$" : "$") + Math.abs(valor).toLocaleString("es-CO", { maximumFractionDigits: 0 });

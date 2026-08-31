@@ -25,15 +25,28 @@ import {
   type Pedido,
 } from "@/lib/menu";
 
+/**
+ * La fecha, ARMADA A MANO a partir de las piezas.
+ *
+ * `toLocaleString` completo mete literales que dependen de la versión de ICU: el
+ * servidor (Node) escribía "07:15 a. m." con un espacio normal y el navegador con un
+ * espacio fino, así que React descartaba el HTML del servidor y volvía a pintar el
+ * comprobante entero (error 418 de hidratación). Tomando solo los valores y poniendo
+ * nosotros los separadores, las dos mitades escriben exactamente lo mismo.
+ */
+const PARTES = new Intl.DateTimeFormat("es-CO", {
+  timeZone: "America/Bogota",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 function hora(iso: string) {
-  return new Date(iso).toLocaleString("es-CO", {
-    timeZone: "America/Bogota",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const p: Record<string, string> = {};
+  for (const x of PARTES.formatToParts(new Date(iso))) p[x.type] = x.value;
+  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
 }
 
 export default function Comprobante({
@@ -63,8 +76,15 @@ export default function Comprobante({
   ];
   const totalConsumo = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);
 
+  /* UN PEDIDO CANCELADO NO PUEDE IMPRIMIR UN PAPEL QUE PAREZCA UN CONSUMO VÁLIDO.
+     Se cancelaba un pedido, se abría su comprobante y salía idéntico a los demás:
+     mismo número, mismo total, ni una palabra de que estaba anulado. En una caja eso
+     es un papel que se puede entregar, reclamar o cuadrar por error. */
+  const anulado = p.estado === "cancelado";
+
   const texto = [
     `*${a.negocio || "Papaghetti"}* — comprobante N° ${p.consecutivo ?? p.id}`,
+    anulado ? "*** PEDIDO ANULADO — NO ES UN CONSUMO ***" : "",
     hora(p.creadoEn),
     "",
     `${p.base}${p.proteina && p.proteina !== "—" ? ` · ${p.proteina}` : ""}`,
@@ -107,7 +127,16 @@ export default function Comprobante({
         </a>
       </div>
 
-      <article className="cbte">
+      <article className={`cbte ${anulado ? "cbte--anulado" : ""}`}>
+        {anulado && (
+          <div className="cbte__anulado" role="alert">
+            PEDIDO ANULADO
+            <em>
+              Este pedido se canceló{p.motivoCancelacion ? `: ${p.motivoCancelacion}` : ""}. No
+              corresponde a un consumo y no debe cobrarse.
+            </em>
+          </div>
+        )}
         <header className="cbte__h">
           <b className="cbte__negocio">{a.negocio || "Papaghetti"}</b>
           {a.razonSocial && <span>{a.razonSocial}</span>}

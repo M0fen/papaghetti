@@ -5806,6 +5806,29 @@ body.enreda-jugando .sticky-pedir {
   font-size: 12.5px;
   line-height: 1.42;
 }
+/* El sello de anulado: negro sobre el papel, imposible de no ver, y se imprime igual
+   (los navegadores respetan `border` y `color` aunque quiten fondos). */
+.cbte__anulado {
+  border: 2px solid #111;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  font-size: 14px;
+}
+.cbte__anulado em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.cbte--anulado .cbte__total,
+.cbte--anulado .cbte__item b { text-decoration: line-through; }
 .cbte__h { display: grid; text-align: center; gap: 1px; margin-bottom: 10px; }
 .cbte__negocio { font-size: 16px; letter-spacing: 0.04em; }
 .cbte__h span { font-size: 11px; opacity: 0.75; }
