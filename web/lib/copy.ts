@@ -34,8 +34,20 @@ const POR_CATEGORIA: Record<string, string> = {
   base: "La cama de tu caja.",
   proteina: "Lo que la vuelve comida de verdad.",
   topping: "El detalle que la termina.",
+  salsa: "Incluida, elige la que quieras.",
 };
 
+/**
+ * La nota que acompaña a cada ingrediente en la carta.
+ *
+ * ORDEN: primero lo que dice el CATÁLOGO (la descripción real que escribió el dueño,
+ * con sus gramajes), luego la nota de autor, y solo al final el relleno por categoría.
+ * Estaba al revés: "400 gr de tu elección favorita" perdía contra "La cama de tu caja",
+ * así que la carta enseñaba un texto genérico teniendo el bueno a mano.
+ */
 export function notaDe(ing: Ingrediente): string {
+  const propia = ing.descripcion?.trim();
+  if (propia) return ing.gramaje && !propia.includes(ing.gramaje) ? `${ing.gramaje} · ${propia}` : propia;
+  if (ing.gramaje) return `${ing.gramaje}. ${NOTAS[ing.id] ?? POR_CATEGORIA[ing.categoria] ?? ""}`.trim();
   return NOTAS[ing.id] ?? POR_CATEGORIA[ing.categoria] ?? "";
 }

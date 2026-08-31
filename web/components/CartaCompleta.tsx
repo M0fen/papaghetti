@@ -62,7 +62,8 @@ export default function CartaCompleta({
             Todo lo que puede entrar en tu caja
           </h2>
           <p className="lead">
-            Precios por ingrediente. Los primeros {TOPPINGS_INCLUIDOS} toppings van por cuenta
+            Precios por ingrediente. Las salsas van incluidas y los{" "}
+            {TOPPINGS_INCLUIDOS} acompañantes más caros van por cuenta
             de la casa, siempre.
           </p>
         </Reveal>
