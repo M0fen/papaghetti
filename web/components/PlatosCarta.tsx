@@ -22,6 +22,7 @@ import {
 } from "@/lib/menu";
 import { nuevaClave } from "@/lib/idem";
 import { enviarPedido } from "@/app/pedido-actions";
+import PlatoImg from "./PlatoImg";
 
 export default function PlatosCarta({
   platos,
@@ -113,6 +114,9 @@ export default function PlatosCarta({
                           disabled={no}
                           onClick={() => setSel(p)}
                         >
+                          {/* Con la ilustración al lado esto deja de ser una lista de
+                              precios y vuelve a ser una CARTA: se pide por antojo. */}
+                          <PlatoImg enredo={p} className="pcarta__art" />
                           <span className="pcarta__txt">
                             <b>{p.nombre}</b>
                             <em>{no ? "Hoy no disponible" : p.gancho}</em>
@@ -131,6 +135,7 @@ export default function PlatosCarta({
             <button type="button" className="pcarta__volver" onClick={() => setSel(null)}>
               ← Ver todos
             </button>
+            <PlatoImg enredo={sel} className="pcarta__artbig" />
             <h3 className="pcarta__nom">{sel.nombre}</h3>
             <p className="pcarta__gancho">{sel.gancho}</p>
 

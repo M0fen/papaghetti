@@ -12,6 +12,7 @@ import type { CatalogoPublico } from "@/lib/catalog";
 import { calcularTotales } from "@/lib/precios";
 import Reveal from "./Reveal";
 import CajaMini from "./CajaMini";
+import PlatoImg from "./PlatoImg";
 import Termometro from "./Termometro";
 import IngImg from "./IngImg";
 import PedirInsignia from "./PedirInsignia";
@@ -112,14 +113,19 @@ export default function FeaturedMenu({ catalog }: { catalog: CatalogoPublico }) 
                     {ahorro > 0 && !falta && (
                       <span className="plato__ahorro">Ahorras {formatCOP(ahorro)}</span>
                     )}
-                    {e.foto ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img className="plato__foto" src={e.foto} alt={e.nombre} />
-                    ) : base && proteina ? (
-                      <CajaMini base={base} proteina={proteina} toppings={toppings} />
-                    ) : (
-                      <span className="plato__sinfoto" aria-hidden>🍽️</span>
-                    )}
+                    {/* La ilustración del plato manda; si no la hay, la caja armada
+                        (solo los combos la tienen) y, en último caso, el emoji. */}
+                    <PlatoImg
+                      enredo={e}
+                      className="plato__foto"
+                      respaldo={
+                        base && proteina ? (
+                          <CajaMini base={base} proteina={proteina} toppings={toppings} />
+                        ) : (
+                          <span className="plato__sinfoto" aria-hidden>🍽️</span>
+                        )
+                      }
+                    />
                   </div>
                   <div className="plato__body">
                     <h3>{e.nombre}</h3>
@@ -207,16 +213,17 @@ function EnredoModal({
         </button>
         <div className="modal__art">
           {enredo.destacado && <span className="plato__tag">El favorito</span>}
-          {enredo.foto ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img className="plato__foto plato__foto--big" src={enredo.foto} alt={enredo.nombre} />
-          ) : (
-            porPartes ? (
-              <CajaMini base={base!} proteina={proteina!} toppings={toppings} size="grande" />
-            ) : (
-              <span className="plato__sinfoto plato__sinfoto--big" aria-hidden>🍽️</span>
-            )
-          )}
+          <PlatoImg
+            enredo={enredo}
+            className="plato__foto plato__foto--big"
+            respaldo={
+              porPartes ? (
+                <CajaMini base={base!} proteina={proteina!} toppings={toppings} size="grande" />
+              ) : (
+                <span className="plato__sinfoto plato__sinfoto--big" aria-hidden>🍽️</span>
+              )
+            }
+          />
         </div>
         <div className="modal__body">
           <h3>{enredo.nombre}</h3>

@@ -1566,11 +1566,17 @@ body.enreda-jugando .nav {
 .carta__grupo {
   margin-top: 26px;
 }
+/* La píldora de la derecha ("suma los que quieras") es `white-space:nowrap`, así que
+   en un flex sin wrap no podía ni encoger ni bajar de línea: a 320px empujaba el
+   documento 20px y TODA la landing se arrastraba en horizontal. Con wrap la nota cae
+   debajo del título y el desbordamiento desaparece. */
 .carta__h {
   font-size: 1.15rem;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+  row-gap: 6px;
   margin: 0 0 12px;
 }
 /* título de grupo con SU hebrita dibujándose debajo, en el color del grupo
@@ -2105,6 +2111,14 @@ body.enreda-jugando .nav {
   color: var(--pg-oro);
   margin: 20px auto;
   max-width: 420px;
+}
+.footer__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  justify-content: center;
+  margin-top: 22px;
+  font-weight: 600;
 }
 .footer__meta {
   opacity: 0.6;
@@ -2986,11 +3000,30 @@ body.enreda-jugando .nav {
   .adminx__brand {
     margin-right: auto;
   }
+  /* UNA SOLA FILA QUE SE ARRASTRA, no seis que envuelven. Con `wrap`, los doce
+     enlaces del menú ocupaban 281px de alto en un teléfono: el contenido de la
+     página empezaba en y=448 de 800, o sea que el 56% de la primera pantalla era
+     cromo antes del primer dato. */
   .adminx__nav {
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     width: 100%;
+    /* `min-width:0` NO es decorativo: sin él, un hijo flex se niega a encoger por
+       debajo de su contenido, así que los doce enlaces empujaban la barra hasta
+       1413px y la página entera del panel se arrastraba en horizontal. Con esto,
+       la tira se queda en el ancho de la pantalla y el que se arrastra es su
+       propio scroll, que es justo lo que se quería. */
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 6px;
+    padding-bottom: 2px;
   }
+  .adminx__nav::-webkit-scrollbar { display: none; }
+  .adminx__nav .adminx__link { flex: 0 0 auto; white-space: nowrap; }
   .dash-grid {
     grid-template-columns: 1fr;
   }
@@ -4100,9 +4133,14 @@ body.enreda-jugando .nav {
   display: grid;
   gap: 6px;
 }
-.entrada__fila { display: flex; gap: 6px; align-items: stretch; }
+/* ENVUELVE. Dar suelo al input de cantidad (min-width 3.25rem, más abajo) arregló que
+   la unidad "manojo" lo dejara en 8.9px, pero a cambio la fila ya no cabía en la
+   tarjeta cuando la rejilla pasa a tres columnas: 6px de más y toda la página de
+   inventario se arrastraba en horizontal. Con wrap, el botón ↵ baja de línea en la
+   tarjeta estrecha y nadie pierde nada. */
+.entrada__fila { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; }
 .entrada__campo {
-  flex: 1;
+  flex: 1 1 88px;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -4133,9 +4171,25 @@ body.enreda-jugando .nav {
 .entrada__inp::-webkit-outer-spin-button,
 .entrada__inp::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .entrada__inp[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+/* EL SUFIJO CEDE ANTES QUE EL CAMPO. Con `flex:none` el sufijo se quedaba entero
+   pase lo que pase: a 768px, donde la rejilla pasa a tres columnas, la palabra
+   "manojo" (44px) dejaba el input de cantidad en 8.9px — imposible escribir cuánto
+   entró de cilantro. Ahora el sufijo se recorta con puntos suspensivos y el campo
+   nunca baja de 3.25rem, que es lo que ocupa "1250". */
 .entrada__uni,
-.entrada__cop { font-size: 0.76rem; opacity: 0.55; font-weight: 700; flex: none; }
-.entrada__campo--money { flex: 1.1; }
+.entrada__cop {
+  font-size: 0.76rem;
+  opacity: 0.55;
+  font-weight: 700;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entrada__inp { min-width: 3.25rem; }
+/* El campo de dinero admite montos de 6 cifras ("120000") más su placeholder. */
+.entrada__campo--money { flex: 1.35 1 100px; }
 .entrada__ok {
   flex: none;
   width: 40px;
@@ -4316,7 +4370,9 @@ body.enreda-jugando .nav {
 .field--price > span { font-size: 0.8rem; opacity: 0.6; font-weight: 600; }
 .field--price .admin-input { width: 110px; }
 .mcard__checks { display: flex; gap: 12px; flex-wrap: wrap; }
-.mcard__acts { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
+/* Con wrap: el botón de eliminar se salía 2px del viewport en la última columna y
+   hacía que TODO /admin/menu se arrastrara en horizontal. */
+.mcard__acts { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 2px; }
 .mcard__recipe { font-size: 0.8rem; opacity: 0.6; }
 
 .mnew {
@@ -4614,6 +4670,28 @@ body.enreda-jugando .nav {
   display: block;
 }
 .plato__foto--big { width: 100%; min-height: 240px; border-radius: 18px; }
+/* En el modal la ficha respira: la ilustración manda y puede ser más alta. */
+.plato__foto--big.plato__foto--ilustra { height: auto; max-height: 46vh; min-height: 240px; }
+/* La ILUSTRACIÓN de la casa ya viene recortada sobre transparencia: se muestra
+   entera y sin radio. `cover` le cortaba la mitad del plato y el radio recortaba
+   una silueta que no tiene esquinas. Una foto subida por el dueño sí va a `cover`. */
+.plato__foto.plato__foto--ilustra {
+  object-fit: contain;
+  border-radius: 0;
+  padding: 0;
+  /* `align-self: stretch` NO es un detalle: `.plato__art` es un grid con
+     `place-items:center`, así que el <img> no se estira y su `height:100%` no tiene
+     contra qué resolver — caía a la altura intrínseca y una ilustración cuadrada se
+     pintaba a 310×310 dentro de una caja de 190, desbordando 136px hacia abajo y
+     tapando 118px del NOMBRE del plato. Estirándolo, el 100% ya resuelve y
+     `object-fit: contain` centra el dibujo sin deformarlo. */
+  align-self: stretch;
+  justify-self: stretch;
+  max-height: 100%;
+  min-height: 0;
+  /* La sombra la lleva el dibujo, no la caja: un drop-shadow sigue la silueta. */
+  filter: drop-shadow(0 8px 14px rgba(42, 29, 20, 0.22));
+}
 .chip__foto {
   width: 24px;
   height: 24px;
@@ -6112,4 +6190,105 @@ body.enreda-jugando .sticky-pedir {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--pg-pomodoro, #d1381f);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DEDOS, NO PUNTEROS — el suelo táctil del panel
+   ══════════════════════════════════════════════════════════════════════════
+   Una auditoría midió el panel a 320/360/390/430/768/1024/1280 px y encontró que
+   111 de 225 controles visibles quedaban por debajo de 40px: el lápiz de editar un
+   insumo (34×34), los 71 atajos de carga rápida (+1, +5, +100) a 26px de alto, los
+   botones de turno a 34px, "Ver todos →" a 21px, Deshacer/Rehacer a 37px. En un
+   restaurante eso no es una queja de accesibilidad: es el mesero errando el botón
+   con el pulgar, con la mano ocupada y la fila esperando.
+
+   Va por `pointer: coarse` y NO por ancho: la tablet de la cocina puede ser de
+   1024px y se sigue tocando con el dedo, mientras que el portátil del mostrador no
+   necesita que le inflen los botones. 44px es el mínimo de WCAG 2.5.5 (AAA).
+
+   Los `margin` negativos existen para que crecer el área de toque NO mueva el
+   diseño: el botón ocupa más, la caja que lo contiene mide igual. */
+@media (pointer: coarse) {
+  .iconbtn { min-width: 44px; min-height: 44px; }
+  .undobtn { min-width: 44px; min-height: 44px; justify-content: center; }
+  .btnmini { padding: 11px 14px; min-height: 44px; }
+  .entrada__at {
+    padding: 8px 12px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+  }
+  /* Los que se quedaban a uno o dos píxeles del suelo: los filtros de Pedidos (18
+     chips a 39px), los avisos del tablero (39px), los campos de la despensa (38px)
+     y la franja de salsas del menú del QR (38px). Un píxel de menos se nota igual
+     cuando el dedo va rápido. */
+  .fbtn,
+  .pend,
+  .entrada__inp,
+  .salsas-franja,
+  .imgup__btn,
+  .linkbtn { min-height: 44px; }
+  /* Los chips (ingredientes del pedido nuevo, métodos de cobro) y los campos de
+     propina/descuento: se tocan en mitad de un cobro, con el cliente delante.
+     `.npedido__chips .chipbtn` gana por especificidad, así que hay que nombrarlo. */
+  .chipbtn,
+  .npedido__chips .chipbtn,
+  .ocard__pd input,
+  .ocard__cancel,
+  .entrada__ok { min-height: 44px; }
+  .ocard__tel { display: inline-flex; align-items: center; min-height: 44px; }
+  .imgup__btn { min-width: 44px; }
+  .linkbtn { display: inline-flex; align-items: center; }
+  .nav__brand { display: inline-flex; align-items: center; min-height: 44px; }
+  .card__h a,
+  .adminx__viewsite,
+  .alogin__volver,
+  .footer__links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 6px;
+    margin-block: -11px;
+    margin-inline: -6px;
+  }
+  .alogin__volver { margin-block: 9px -11px; }
+  /* La casilla que da de baja un insumo medía 13×13: el tamaño nativo del navegador. */
+  .admin-check { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; }
+  .admin-check input[type="checkbox"] { width: 20px; height: 20px; }
+  /* El menú de la landing: enlaces de 21px dentro de una tira que además se arrastra. */
+  .nav__links a { display: inline-flex; align-items: center; min-height: 44px; }
+}
+
+/* ── La FAB de Ghett-IA deja de tapar botones ──
+   Con etiqueta mide 138px de ancho y se planta sobre la esquina inferior derecha:
+   tapaba el 60% de "+ Nuevo insumo" en un iPhone con el teclado abierto y el 92% del
+   lápiz de la última tarjeta a 768px, interceptando el clic (elementFromPoint lo
+   confirmó). En pantalla estrecha o baja se queda solo con el icono: 56px de círculo
+   caben en el hueco que ya se respeta. */
+@media (max-width: 560px), (max-height: 720px) {
+  .ghettia-fab {
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+  }
+  .ghettia-fab__txt { display: none; }
+}
+
+/* ── El pie ya no queda debajo de la barra fija de "Arma tu enredo" ──
+   La barra es `fixed` y el documento no reservaba su alto, así que la última línea
+   del pie quedaba tapada en el fondo real de la página: 95% del párrafo oculto, y sin
+   más scroll para destaparlo. 55px de barra + 14px de su `bottom` + aire. */
+@media (max-width: 860px) {
+  .footer { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ── El menú de la landing cabe entero en un teléfono estrecho ──
+   A 360px el cuarto enlace ("Ubicación") quedaba 0.9px visible: había que arrastrar
+   la tira para descubrir que existía. Con menos hueco y un punto menos de letra los
+   cuatro entran. */
+@media (max-width: 400px) {
+  .nav__links { gap: 10px; }
+  .nav__links a { font-size: 0.8rem; }
 }

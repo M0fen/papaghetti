@@ -1053,6 +1053,20 @@
 }
 .pcarta__item:hover { border-color: var(--emp-oro, #f2a516); }
 .pcarta__item.is-no { opacity: 0.45; cursor: default; }
+/* La ilustración del plato: cuadrada, sin recorte, y con `flex-shrink:0` para que el
+   nombre largo de una ensalada no se la coma en una pantalla de 320px. */
+.pcarta__art {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 54px;
+  object-fit: contain;
+}
+.pcarta__artbig {
+  width: min(220px, 60vw);
+  height: min(220px, 60vw);
+  object-fit: contain;
+  justify-self: center;
+}
 .pcarta__txt { flex: 1; display: grid; gap: 2px; min-width: 0; }
 .pcarta__txt b { font-size: 0.98rem; line-height: 1.25; }
 .pcarta__txt em { font-style: normal; font-size: 0.78rem; opacity: 0.62; line-height: 1.35; }

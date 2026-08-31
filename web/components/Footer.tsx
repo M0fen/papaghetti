@@ -12,15 +12,9 @@ export default function Footer() {
           <p style={{ opacity: 0.8, maxWidth: "34ch", margin: "0 auto" }}>
             Enrédate rico. Comfort food premium para armar a tu gusto, en Pereira.
           </p>
-          <div
-            style={{
-              display: "flex",
-              gap: 18,
-              justifyContent: "center",
-              marginTop: 22,
-              fontWeight: 600,
-            }}
-          >
+          {/* Con clase y no con estilo en línea: los tres enlaces medían 26px de alto
+              y sin una clase no había dónde darles área de toque en móvil. */}
+          <div className="footer__links">
             <a href="#arma">Arma tu enredo</a>
             <a href="#menu">Menú</a>
             <a href="#ubicacion">Ubicación</a>

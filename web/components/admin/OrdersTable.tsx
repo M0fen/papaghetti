@@ -155,7 +155,10 @@ function OrderCard({ p }: { p: Pedido }) {
           {p.telefono && (
             <>
               {" · "}
+              {/* Con clase: es el atajo para llamar al cliente de un domicilio que no
+                  aparece, y medía 18px de alto. Se toca con prisa y con una mano. */}
               <a
+                className="ocard__tel"
                 href={`https://wa.me/${p.telefono.replace(/\D/g, "")}`}
                 target="_blank"
                 rel="noopener noreferrer"

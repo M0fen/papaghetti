@@ -9,7 +9,7 @@
  * al emoji del catálogo sin romper nada.
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { Ingrediente } from "@/lib/menu";
 
 export default function IngImg({
@@ -23,6 +23,15 @@ export default function IngImg({
 }) {
   const [falla, setFalla] = useState(false);
 
+  /* POR QUÉ UN REF Y NO SOLO onError: la página llega del servidor con el <img> ya
+     escrito, así que el navegador puede intentar la descarga —y fallar— ANTES de que
+     React hidrate y enganche el manejador. Ese error no se vuelve a emitir nunca, y
+     el respaldo al emoji no llegaba a dispararse: quedaba el icono de imagen rota
+     para siempre. Al montar se mira el estado REAL del elemento y se decide. */
+  const alMontar = useCallback((el: HTMLImageElement | null) => {
+    if (el && el.complete && el.naturalWidth === 0) setFalla(true);
+  }, []);
+
   if (falla)
     return (
       <span className={claseEmoji} aria-hidden>
@@ -33,6 +42,7 @@ export default function IngImg({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
+      ref={alMontar}
       className={className}
       src={ing.foto || `/food/${ing.id}.webp`}
       alt=""

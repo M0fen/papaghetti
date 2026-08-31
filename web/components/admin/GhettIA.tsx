@@ -121,7 +121,10 @@ export default function GhettIA() {
         aria-label="Abrir Ghett-IA, tu asistente de negocio"
         aria-expanded={open}
       >
-        <span aria-hidden>🤖</span> Ghett-IA
+        {/* El nombre va en su propio <span> para poder esconderlo en pantalla
+            estrecha: con etiqueta la FAB mide 138px y se plantaba encima del botón
+            "+ Nuevo insumo" y del lápiz de la última tarjeta, robándoles el clic. */}
+        <span aria-hidden>🤖</span> <span className="ghettia-fab__txt">Ghett-IA</span>
       </button>
 
       {open && (
