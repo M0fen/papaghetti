@@ -8,7 +8,7 @@ import {
   retrocederPedido,
   cobrarPedido,
   cancelarPedido,
-  asignarMesa,
+  asignarReferencia,
   type NuevoPedido,
 } from "@/lib/catalog";
 import { haySesion } from "@/lib/sesion";
@@ -158,13 +158,13 @@ export async function cancelarAction(formData: FormData) {
   await operar(() => cancelarPedido(id, motivo || undefined), `Pedido #${id} cancelado`);
 }
 
-/** Admin: asigna una mesa a un pedido. */
-export async function asignarMesaAction(formData: FormData) {
+/** Admin: anota DÓNDE está el cliente (texto libre, no un número de mesa). */
+export async function asignarReferenciaAction(formData: FormData) {
   if (!(await authed())) return;
   const id = String(formData.get("id") ?? "");
-  const mesa = Number(formData.get("mesa") ?? 0);
-  if (!id || !mesa) return;
-  await operar(() => asignarMesa(id, mesa), `#${id} → mesa ${mesa}`);
+  const referencia = String(formData.get("referencia") ?? "").trim();
+  if (!id || !referencia) return;
+  await operar(() => asignarReferencia(id, referencia), `#${id} está en "${referencia}"`);
 }
 
 /**
@@ -174,16 +174,24 @@ export async function asignarMesaAction(formData: FormData) {
  */
 export async function cobrarMesaAction(formData: FormData) {
   if (!(await authed())) return;
-  const mesa = Number(formData.get("mesa") ?? 0);
+  const referencia = String(formData.get("referencia") ?? "").trim();
   const metodo = String(formData.get("metodo") ?? "efectivo") as MetodoPago;
-  if (!mesa) return;
+  if (!referencia) return;
   const { getCatalog } = await import("@/lib/catalog");
+  const { diaNegocio } = await import("@/lib/precios");
   const cat = await getCatalog();
+  const hoy = diaNegocio();
+  // SOLO los de HOY: cobrar "la mesa" arrastraba deudas viejas de otros días que
+  // habían quedado con la misma referencia y se las cargaba al grupo de ahora.
   const pendientes = cat.pedidos.filter(
-    (p) => p.tipo === "mesa" && p.mesa === mesa && p.pago === "pendiente" && p.estado !== "cancelado",
+    (p) =>
+      p.referencia === referencia &&
+      diaNegocio(p.creadoEn) === hoy &&
+      p.pago === "pendiente" &&
+      p.estado !== "cancelado",
   );
   if (!pendientes.length) {
-    await avisar("Esa mesa no tiene nada por cobrar.");
+    await avisar("Ahí no hay nada por cobrar.");
     refrescarPanel();
     return;
   }
@@ -196,7 +204,7 @@ export async function cobrarMesaAction(formData: FormData) {
       await avisar(e instanceof Error ? e.message : "No se pudo cobrar un pedido.");
     }
   }
-  await avisar(`Mesa ${mesa} cobrada: ${pendientes.length} pedido(s) · $${total.toLocaleString("es-CO")}`, "ok");
+  await avisar(`Cobrado "${referencia}": ${pendientes.length} pedido(s) · $${total.toLocaleString("es-CO")}`, "ok");
   refrescarPanel();
 }
 
@@ -220,11 +228,12 @@ export async function crearPedidoPanelAction(formData: FormData) {
         toppingIds,
         canal: "salon",
         tipo,
-        mesa: tipo === "mesa" ? Number(formData.get("mesa") ?? 0) : undefined,
+        referencia: String(formData.get("referencia") ?? "").trim() || undefined,
         cliente: String(formData.get("cliente") ?? "").trim() || undefined,
         telefono: String(formData.get("telefono") ?? "").trim() || undefined,
         direccion: String(formData.get("direccion") ?? "").trim() || undefined,
         notas: String(formData.get("notas") ?? "").trim() || undefined,
+        idemKey: String(formData.get("idemKey") ?? "").trim() || undefined,
       }),
     "Pedido creado",
   );

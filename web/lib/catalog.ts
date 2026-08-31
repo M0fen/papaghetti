@@ -6,7 +6,13 @@ import {
   CATALOG_TABLE,
   CATALOG_ID,
 } from "./supabase";
-import { desglosarPrecioFinal, faltaParaMinimo, totalDe, diaNegocio } from "./precios";
+import {
+  desglosarPrecioFinal,
+  faltaParaMinimo,
+  totalDe,
+  diaNegocio,
+  cobroToppings,
+} from "./precios";
 import {
   SEED_CATALOG,
   SEED_AJUSTES,
@@ -42,6 +48,8 @@ const GRUPO: Record<Categoria, "bases" | "proteinas" | "toppings"> = {
   base: "bases",
   proteina: "proteinas",
   topping: "toppings",
+  // Las salsas viven con los toppings pero ni cuestan ni gastan los de cortesía.
+  salsa: "toppings",
 };
 const slugify = (s: string) =>
   s
@@ -177,15 +185,30 @@ const olvidar = () => {
   memo = null;
 };
 
+/**
+ * Snapshot del estado tal como se leyó, por cada copia entregada. Sirve para saber
+ * QUÉ cambió el que llama y poder aplicarlo sobre lo que otra instancia haya escrito
+ * mientras tanto (ver fusionar). WeakMap: se libera solo con la copia.
+ */
+const origen = new WeakMap<Catalog, Catalog>();
+
 async function read(): Promise<Catalog> {
-  if (memo && memo.hasta > Date.now()) return memo.cat;
-  const cat = supabaseEnabled()
-    ? await readSupabase()
-    : blobEnabled()
-      ? await readBlob()
-      : await readFile();
-  memo = { cat, hasta: Date.now() + MEMO_MS };
-  return cat;
+  const base =
+    memo && memo.hasta > Date.now()
+      ? memo.cat
+      : supabaseEnabled()
+        ? await readSupabase()
+        : blobEnabled()
+          ? await readBlob()
+          : await readFile();
+  if (!memo || memo.hasta <= Date.now()) memo = { cat: base, hasta: Date.now() + MEMO_MS };
+  /* COPIA, nunca la referencia. El memo se entregaba tal cual y los llamadores lo
+     MUTAN (crearPedido descuenta despensa sobre el objeto que recibe): dos pedidos
+     simultáneos dentro de los mismos 2 s compartían el mismo objeto y descontaban la
+     despensa UNA sola vez, y un pedido rechazado dejaba el memo ya mordido. */
+  const copia = structuredClone(base);
+  origen.set(copia, base);
+  return copia;
 }
 
 /** Lectura SIN memo: la que se usa dentro del candado, antes de escribir. */
@@ -428,7 +451,10 @@ if (persistenciaEnRiesgo()) {
 }
 
 /* ------- Historial + deshacer/rehacer (snapshots) ------- */
-const UNDO_CAP = 12; // profundidad de deshacer/rehacer
+/* Profundidad de deshacer/rehacer. Cada nivel es una copia de la carta entera, así
+   que 12 niveles multiplicaban por 12 el peso del documento (y de cada escritura).
+   Seis pasos atrás es más de lo que nadie deshace en un turno. */
+const UNDO_CAP = 6;
 const HIST_CAP = 120; // entradas visibles del historial
 
 /**
@@ -509,8 +535,24 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
   // registrar no salía arriba en Finanzas.
   const recientes = <T>(xs: T[], fecha: (x: T) => string) =>
     [...xs].sort((a, b) => fecha(b).localeCompare(fecha(a)));
+  /* LA DESPENSA SE FUSIONA POR DELTA, no por "gana el último".
+     Si otra instancia vendió un plato mientras yo cambiaba un precio, tomar mi copia
+     entera devolvía su descuento al inventario: el pedido quedaba registrado y la
+     materia prima no. Aplicando MI cambio (mio - base) sobre lo que hay AHORA, los
+     dos movimientos sobreviven. */
+  const base = origen.get(mio);
+  const insumos = base
+    ? (mio.insumos ?? []).map((m) => {
+        const b = base.insumos?.find((x) => x.id === m.id);
+        const a = actual.insumos?.find((x) => x.id === m.id);
+        if (!b || !a) return m; // insumo nuevo o borrado: manda mi versión
+        const delta = m.stock - b.stock;
+        return delta === 0 ? { ...m, stock: a.stock } : { ...m, stock: Math.max(0, Number((a.stock + delta).toFixed(3))) };
+      })
+    : mio.insumos;
   return {
     ...mio,
+    insumos,
     pedidos: recientes(unir(actual.pedidos ?? [], mio.pedidos ?? []), (p) => p.creadoEn),
     movimientos: recientes(unir(actual.movimientos ?? [], mio.movimientos ?? []), (m) => m.fecha),
     leads: recientes(unir(actual.leads ?? [], mio.leads ?? []), (l) => l.creadoEn),
@@ -706,7 +748,12 @@ export async function updateEnredo(
 export async function resetCatalog(): Promise<Catalog> {
   const vivo = await read();
   const seed = conLoVivo(structuredClone(SEED_CATALOG), vivo);
-  await commit(seed, "Restauró la carta a la semilla (pedidos y caja intactos)");
+  /* La CARTA vuelve de fábrica; la DESPENSA y los AJUSTES no. El botón dice
+     "restaurar la carta" y antes se llevaba por delante el inventario contado a mano
+     y la configuración del negocio (WhatsApp, horarios, domicilio, promos). */
+  seed.insumos = vivo.insumos;
+  seed.ajustes = vivo.ajustes;
+  await commit(seed, "Restauró la carta de fábrica (pedidos, caja, despensa y ajustes intactos)");
   return seed;
 }
 
@@ -821,6 +868,8 @@ export interface NuevoPedido {
   enredoId?: string;
   /** Dirección de entrega — obligatoria cuando el servicio es a domicilio. */
   direccion?: string;
+  /** Dónde encontrar al cliente en el local, en palabras (no un número de mesa). */
+  referencia?: string;
   /** Nota del cliente para la cocina: "sin cebolla", alergias. */
   notas?: string;
   /**
@@ -829,6 +878,14 @@ export interface NuevoPedido {
    * pedidos y descontaba la despensa dos veces.
    */
   idemKey?: string;
+}
+
+/**
+ * Siguiente número de comprobante. Sube de uno en uno sobre el mayor que exista, y
+ * como toda escritura pasa por el candado y por el compare-and-swap, no se repite.
+ */
+function siguienteConsecutivo(cat: Catalog): number {
+  return (cat.pedidos ?? []).reduce((m, p) => Math.max(m, p.consecutivo ?? 0), 0) + 1;
 }
 
 /** Índice de insumos por id (referencias vivas dentro del catálogo). */
@@ -890,6 +947,67 @@ function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>): void {
 }
 
 /**
+ * Un plato de precio cerrado SIN componentes: ensaladas, a la carta, especiales.
+ *
+ * Comparte todo el resto del flujo (servicio, mínimo a domicilio, idempotencia,
+ * estado, cobro) pero no resuelve ni consume componentes: es un plato que sale de
+ * la cocina, no una caja que se arma. Su COGS queda en 0 hasta que tenga ficha
+ * técnica, y el panel lo pide como tarea pendiente.
+ */
+async function crearPedidoSuelto(
+  cat: Catalog,
+  plato: EnredoInsignia,
+  input: NuevoPedido,
+  idemKey?: string,
+): Promise<Pedido> {
+  const impuestoPct = cat.ajustes.impuestoPct ?? 0;
+  const { subtotal, impuesto } = desglosarPrecioFinal(plato.precio, impuestoPct);
+  const tipo = input.tipo ?? (input.mesa ? "mesa" : "llevar");
+  const direccion = input.direccion?.trim() || undefined;
+  if (tipo === "domicilio" && !direccion) {
+    throw new Error("Necesitamos la dirección de entrega para llevártelo.");
+  }
+  const domicilio = tipo === "domicilio" ? cat.ajustes.costoDomicilio ?? 0 : 0;
+  const falta = faltaParaMinimo(subtotal, tipo, cat.ajustes.pedidoMinimo);
+  if (falta > 0) {
+    throw new Error(
+      `El pedido mínimo a domicilio es ${formatCOP(cat.ajustes.pedidoMinimo)}. Te faltan ${formatCOP(falta)}.`,
+    );
+  }
+  const pedido: Pedido = {
+    id: crypto.randomUUID().slice(0, 8).toUpperCase(),
+    consecutivo: siguienteConsecutivo(cat),
+    creadoEn: new Date().toISOString(),
+    canal: input.canal ?? "web",
+    tipo,
+    mesa: undefined,
+    referencia: input.referencia?.trim().slice(0, 60) || undefined,
+    cliente: input.cliente?.trim() || undefined,
+    telefono: input.telefono?.trim() || undefined,
+    direccion,
+    notas: input.notas?.trim().slice(0, 200) || undefined,
+    estado: "recibido",
+    pago: "pendiente",
+    base: plato.nombre,
+    proteina: "—",
+    toppings: [],
+    componentes: [],
+    subtotal,
+    impuesto,
+    domicilio,
+    propina: 0,
+    descuento: 0,
+    total: totalDe({ subtotal, impuesto, domicilio }),
+    costo: 0,
+    enredoId: plato.id,
+    idemKey,
+  };
+  cat.pedidos = recortarPedidos([pedido, ...cat.pedidos]);
+  await commit(cat, `Nuevo pedido #${pedido.id} · ${plato.nombre} (${formatCOP(pedido.total)})`);
+  return pedido;
+}
+
+/**
  * Crea un pedido, descuenta insumos por receta y auto-agota lo que ya no alcanza.
  *
  * ORDEN SAGRADO: resolver → VALIDAR TODO → recién entonces consumir. Antes se
@@ -931,6 +1049,17 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
     ? cat.enredos.find((e) => e.id === input.enredoId)
     : undefined;
   if (input.enredoId && !insignia) throw new Error("Ese plato ya no está en la carta.");
+  if (insignia && insignia.activo === false) {
+    throw new Error(`Hoy no tenemos "${insignia.nombre}".`);
+  }
+
+  /**
+   * PLATO DE COCINA (ensaladas, a la carta, especiales): precio cerrado y SIN
+   * componentes. No se arma por partes, así que no hay nada que resolver ni que
+   * descontar — se cobra tal cual. Sin este camino, media carta sería invendible.
+   */
+  const platoSuelto = Boolean(insignia && !insignia.baseId && !insignia.proteinaId);
+  if (platoSuelto) return crearPedidoSuelto(cat, insignia!, input, idemKey);
 
   // — 2. Topes y deduplicación. La UI nunca permite más; el servidor tampoco.
   const protIdsCrudos = insignia
@@ -975,14 +1104,7 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
   // — 5. Servicio. El default NO puede ser el que cobra: si nadie dice el tipo,
   //      un pedido con mesa es de mesa y el resto es para llevar. Antes caía en
   //      "domicilio" y le sumaba $5.000 a alguien que estaba sentado en el local.
-  const tipo = input.tipo ?? (input.mesa ? "mesa" : "llevar");
-  if (tipo === "mesa") {
-    const n = Number(input.mesa ?? 0);
-    const max = cat.ajustes.numMesas ?? 0;
-    if (!Number.isInteger(n) || n < 1 || (max > 0 && n > max)) {
-      throw new Error("Esa mesa no existe.");
-    }
-  }
+  const tipo = input.tipo ?? (input.referencia ? "mesa" : "llevar");
   const direccion = input.direccion?.trim() || undefined;
   if (tipo === "domicilio" && !direccion) {
     throw new Error("Necesitamos la dirección de entrega para llevártelo.");
@@ -1008,10 +1130,16 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
   const impuestoPct = cat.ajustes.impuestoPct ?? 0;
   // El insignia tiene precio de carta CERRADO (todo incluido) → se desglosa hacia atrás
   // para que subtotal/impuesto sigan siendo comparables con los pedidos armados a mano.
+  // Las SALSAS van incluidas: no cuestan y NO gastan un cupo de cortesía. Si
+  // contaran, elegir dos salsas dejaría al cliente pagando todos sus acompañantes.
+  const cobrables = tops.filter((t) => t.categoria !== "salsa");
   const armado =
     (base?.precio ?? 0) +
     prots.reduce((s, p) => s + p.precio, 0) + // todas las proteínas a precio completo
-    tops.reduce((s, t, i) => s + (i < TOPPINGS_INCLUIDOS ? 0 : t.precio), 0);
+    // MISMA función que usa el cliente (lib/precios.ts): la casa regala los más
+    // caros. Antes cada lado regalaba "los primeros" de un orden distinto y el
+    // total de la pantalla no era el que se cobraba.
+    cobroToppings(cobrables, TOPPINGS_INCLUIDOS);
   const { subtotal, impuesto } = insignia
     ? desglosarPrecioFinal(insignia.precio, impuestoPct)
     : { subtotal: armado, impuesto: Math.round((armado * impuestoPct) / 100) };
@@ -1032,10 +1160,12 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
 
   const pedido: Pedido = {
     id: crypto.randomUUID().slice(0, 8).toUpperCase(),
+    consecutivo: siguienteConsecutivo(cat),
     creadoEn: new Date().toISOString(),
     canal: input.canal ?? "web",
     tipo,
-    mesa: tipo === "mesa" ? input.mesa : undefined,
+    mesa: undefined,
+    referencia: input.referencia?.trim().slice(0, 60) || undefined,
     cliente: input.cliente?.trim() || undefined,
     telefono: input.telefono?.trim() || undefined,
     direccion,
@@ -1100,21 +1230,35 @@ export async function cobrarPedido(
   id: string,
   metodo: MetodoPago,
   propina = 0,
-  descuento = 0
+  descuento = 0,
+  /** Rehace un cobro ya hecho: método, propina o descuento mal tecleados. */
+  corregir = false,
 ): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
   if (!p) throw new Error(`No existe el pedido #${id}.`);
   // Cobrar dos veces pisaba propina, descuento y método: la propina del mesero
   // desaparecía y el arqueo por método dejaba de cuadrar con el datáfono.
-  if (p.pago === "pagado") throw new Error(`El pedido #${id} ya estaba cobrado.`);
+  if (p.pago === "pagado" && !corregir) {
+    throw new Error(`El pedido #${id} ya estaba cobrado. Usa "corregir cobro" si te equivocaste.`);
+  }
   if (p.estado === "cancelado") throw new Error("No se puede cobrar un pedido cancelado.");
   p.pago = "pagado";
   p.metodoPago = metodo;
-  p.propina = Math.max(0, Math.round(propina));
+  // Topes de cordura: un cero de más en la propina era irreversible, y un descuento
+  // mayor que el plato dejaba totales imposibles.
+  p.propina = Math.max(0, Math.min(500_000, Math.round(propina)));
   p.descuento = Math.max(0, Math.min(p.subtotal, Math.round(descuento)));
+  /* El descuento BAJA LA BASE GRAVABLE. Antes se restaba después del impuesto, así que
+     una cortesía total dejaba el impoconsumo entero cobrándose sobre plata que nadie
+     facturó, y era imposible dejar un pedido en $0. */
+  const pct = cat.ajustes.impuestoPct ?? 0;
+  p.impuesto = Math.round(((p.subtotal - p.descuento) * pct) / 100);
   p.total = totalDe(p); // ← con el domicilio incluido. Ver lib/precios.ts
-  await commit(cat, `Cobró #${id} (${metodo} · ${formatCOP(p.total)})`);
+  await commit(
+    cat,
+    `${corregir ? "Corrigió el cobro de" : "Cobró"} #${id} (${metodo} · ${formatCOP(p.total)})`,
+  );
   return cat;
 }
 
@@ -1162,22 +1306,24 @@ export async function cancelarPedido(id: string, motivo?: string): Promise<Catal
   return cat;
 }
 
-/** Asigna (o cambia) la mesa de un pedido; lo marca como servicio en mesa. */
-export async function asignarMesa(id: string, mesa: number): Promise<Catalog> {
+/**
+ * Anota DÓNDE está el cliente, en palabras ("mesa del ventanal", "barra, gorra roja").
+ * Sustituye a la asignación de mesa: aquí las mesas no se reparten, pero el mesero
+ * necesita igual saber a quién le lleva el plato.
+ */
+export async function asignarReferencia(id: string, referencia: string): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
   if (!p) throw new Error(`No existe el pedido #${id}.`);
-  const max = cat.ajustes.numMesas ?? 0;
-  if (!Number.isInteger(mesa) || mesa < 1 || (max > 0 && mesa > max)) {
-    throw new Error("Esa mesa no existe.");
-  }
-  p.mesa = mesa;
+  const texto = referencia.trim().slice(0, 60);
+  if (!texto) throw new Error("Escribe dónde está el cliente.");
+  p.referencia = texto;
   p.tipo = "mesa";
   // Pasar un domicilio a mesa dejaba los $5.000 del envío dentro del total: un
   // estado internamente contradictorio ("come aquí, pero paga el domiciliario").
   p.domicilio = 0;
   if (p.pago !== "pagado") p.total = totalDe(p);
-  await commit(cat, `Asignó #${id} a mesa ${mesa}`);
+  await commit(cat, `#${id} está en "${texto}"`);
   return cat;
 }
 
@@ -1228,6 +1374,24 @@ function reactivarPreparables(cat: Catalog, insumoId?: string): void {
   }
 }
 
+/**
+ * Pone al día la disponibilidad de TODA la carta según la despensa, en los dos
+ * sentidos: agota lo que ya no alcanza y reactiva lo que volvió a haber.
+ *
+ * "Se acabó el pollo" se marca poniendo el insumo en 0, y eso tiene que sacar el
+ * plato de la carta al instante — antes solo existía el camino de reactivar, así que
+ * bajar un insumo a mano no agotaba nada y el sitio seguía vendiéndolo.
+ */
+function recalcularDisponibilidad(cat: Catalog): void {
+  const byId = insumosPorId(cat);
+  for (const g of ["bases", "proteinas", "toppings"] as const) {
+    for (const it of cat[g]) {
+      if (!it.receta || it.receta.length === 0) continue;
+      it.agotado = !puedePreparar(it, byId);
+    }
+  }
+}
+
 export interface NuevoInsumo {
   nombre: string;
   categoria?: InsumoCategoria;
@@ -1262,7 +1426,9 @@ export async function updateInsumo(id: string, patch: Partial<Insumo>): Promise<
   const cat = await read();
   const it = cat.insumos.find((x) => x.id === id);
   if (it) Object.assign(it, patch);
-  reactivarPreparables(cat, id);
+  // Recalcula EN LOS DOS SENTIDOS. Antes solo reactivaba: poner un insumo en cero a
+  // mano (que es como se marca "se acabó el pollo") dejaba el plato vendiéndose.
+  recalcularDisponibilidad(cat);
   await commit(cat, `Editó insumo "${it?.nombre ?? id}"`);
   return cat;
 }

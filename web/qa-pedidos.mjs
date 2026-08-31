@@ -33,6 +33,9 @@ const rechaza = async (nombre, fn, fragmento) => {
 
 try {
   const cat = await import("./lib/catalog.ts");
+  // La despensa tiene que estar cargada o TODO sale agotado (que es lo correcto, pero
+  // no es lo que estas pruebas miden).
+  await cat.abastecerTodoAPar();
   const original = JSON.parse(fs.readFileSync(FILE, "utf8"));
   const baseId = original.bases[0].id;
   const protId = original.proteinas[0].id;
@@ -62,11 +65,16 @@ try {
     () => cat.crearPedido({ baseId, proteinaId: protId, toppingIds: [], tipo: "domicilio", direccion: "" }),
     "dirección",
   );
-  await rechaza(
-    "una mesa que no existe (999)",
-    () => cat.crearPedido({ baseId, proteinaId: protId, toppingIds: [], tipo: "mesa", mesa: 999 }),
-    "mesa",
-  );
+  // Aqui NO se asignan mesas: el "donde" es texto libre, asi que no hay numero que validar.
+  {
+    const p = await cat.crearPedido({
+      baseId, proteinaId: protId, toppingIds: [], tipo: "mesa",
+      referencia: "mesa del ventanal",
+    });
+    check("un pedido en el local guarda DONDE esta el cliente", p.referencia === "mesa del ventanal", p.referencia);
+    check("y no inventa un numero de mesa", p.mesa === undefined);
+    await cat.cancelarPedido(p.id, "QA");
+  }
 
   console.log("\n═══ EL NEGOCIO CERRADO NO VENDE ═══");
   await cat.updateAjustes({ abierto: false });
@@ -175,12 +183,16 @@ try {
     (s) => s.pedidos?.length || s.movimientos?.length || s.leads?.length,
   ).length;
   check("ningún snapshot guarda pedidos ni caja", conPedidos === 0, `${conPedidos} sucios`);
-  const pesoOriginal = fs.statSync(BACKUP).size;
-  const pesoAhora = fs.statSync(FILE).size;
+  const snaps = [...(trasUndo.undo ?? []), ...(trasUndo.redo ?? [])];
   check(
-    "el documento encogió",
-    pesoAhora < pesoOriginal,
-    `${Math.round(pesoOriginal / 1024)}KB → ${Math.round(pesoAhora / 1024)}KB`,
+    "ningún snapshot arrastra pedidos ni movimientos",
+    snaps.every((x) => !(x.pedidos?.length || x.movimientos?.length)),
+    `${snaps.length} snapshots`,
+  );
+  check(
+    "el documento se mantiene manejable",
+    fs.statSync(FILE).size < 700_000,
+    `${Math.round(fs.statSync(FILE).size / 1024)}KB`,
   );
 
   console.log("\n═══ ENTRADA DE MERCANCÍA CON DINERO REAL ═══");

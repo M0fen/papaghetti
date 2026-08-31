@@ -1,5 +1,16 @@
 "use client";
 
+/**
+ * EL SALÓN — quién está comiendo y quién debe.
+ *
+ * Antes era una cuadrícula de mesas numeradas. Aquí las mesas NO se asignan: el
+ * número era una ficción que nadie mantenía. Lo que de verdad hace falta es ver los
+ * pedidos que están en el local AHORA, agrupados por dónde está la gente ("mesa del
+ * ventanal", "barra", "Juan"), y poder cobrarlos de un gesto.
+ *
+ * Una cuenta sigue abierta hasta que se COBRA, aunque el plato ya se haya entregado.
+ */
+
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -10,132 +21,160 @@ import {
   metodoEmoji,
   type Pedido,
 } from "@/lib/menu";
-import { cobrarMesaAction } from "@/app/pedido-actions";
+import { cobrarMesaAction, asignarReferenciaAction } from "@/app/pedido-actions";
 
-export default function TablesBoard({
-  pedidos,
-  numMesas,
-}: {
-  pedidos: Pedido[];
-  numMesas: number;
-}) {
+const SIN = "Sin ubicar";
+
+export default function TablesBoard({ pedidos }: { pedidos: Pedido[] }) {
   const router = useRouter();
   useEffect(() => {
     const id = setInterval(() => router.refresh(), 15000);
     return () => clearInterval(id);
   }, [router]);
 
-  /* Una mesa sigue OCUPADA mientras el cliente no haya pagado, aunque el plato ya se
-     haya entregado. Antes  excluía "entregado", así que la mesa se pintaba
-     LIBRE en cuanto la cocina pulsaba "Entregar ✓" — con el cliente todavía sentado y
-     sin pagar. Y el KDS empuja justo a eso: ese es el último botón del ticket. */
-  const activos = pedidos.filter(
-    (p) => p.estado !== "cancelado" && (p.estado !== "entregado" || p.pago === "pendiente")
+  /* En el local y sin cerrar: la cuenta sigue viva hasta que se cobra, aunque el
+     plato ya se haya entregado (si no, la mesa se "liberaba" con el cliente sentado). */
+  const enLocal = pedidos.filter(
+    (p) =>
+      p.tipo === "mesa" &&
+      p.estado !== "cancelado" &&
+      (p.estado !== "entregado" || p.pago === "pendiente"),
   );
-  const mesas = Array.from({ length: Math.max(1, numMesas) }, (_, i) => i + 1);
-  const enMesa = (n: number) => activos.filter((p) => p.tipo === "mesa" && p.mesa === n);
 
-  const ocupadas = mesas.filter((n) => enMesa(n).length > 0);
-  const consumoSalon = activos
-    .filter((p) => p.tipo === "mesa")
-    .reduce((s, p) => s + p.total, 0);
-  const porCobrarSalon = activos
-    .filter((p) => p.tipo === "mesa" && p.pago === "pendiente")
+  // Agrupado por dónde está la gente, con los que nadie ubicó al final.
+  const grupos = new Map<string, Pedido[]>();
+  for (const p of enLocal) {
+    const k = p.referencia?.trim() || SIN;
+    grupos.set(k, [...(grupos.get(k) ?? []), p]);
+  }
+  const lista = [...grupos.entries()].sort((a, b) =>
+    a[0] === SIN ? 1 : b[0] === SIN ? -1 : a[0].localeCompare(b[0]),
+  );
+
+  const consumo = enLocal.reduce((s, p) => s + p.total, 0);
+  const porCobrarTotal = enLocal
+    .filter((p) => p.pago === "pendiente")
     .reduce((s, p) => s + p.total, 0);
 
   return (
     <>
       <div className="salon-kpis">
         <div className="salon-kpi">
-          <b>{ocupadas.length}<span>/{mesas.length}</span></b>
-          <span>Mesas ocupadas</span>
+          <b>{lista.length}</b>
+          <span>Cuentas abiertas</span>
         </div>
         <div className="salon-kpi">
-          <b>{mesas.length - ocupadas.length}</b>
-          <span>Libres</span>
+          <b>{enLocal.length}</b>
+          <span>Platos en el salón</span>
         </div>
         <div className="salon-kpi salon-kpi--accent">
-          <b>{formatCOP(consumoSalon)}</b>
+          <b>{formatCOP(consumo)}</b>
           <span>Consumo en salón</span>
         </div>
-        <div className={`salon-kpi ${porCobrarSalon > 0 ? "salon-kpi--warn" : ""}`}>
-          <b>{formatCOP(porCobrarSalon)}</b>
+        <div className={`salon-kpi ${porCobrarTotal > 0 ? "salon-kpi--warn" : ""}`}>
+          <b>{formatCOP(porCobrarTotal)}</b>
           <span>Por cobrar</span>
         </div>
       </div>
 
-      <div className="tables">
-        {mesas.map((n) => {
-          const ped = enMesa(n).sort(
-            (a, b) => new Date(a.creadoEn).getTime() - new Date(b.creadoEn).getTime()
-          );
-          const busy = ped.length > 0;
-          const consumo = ped.reduce((s, p) => s + p.total, 0);
-          const porCobrar = ped.filter((p) => p.pago === "pendiente").reduce((s, p) => s + p.total, 0);
-          const desde = busy ? ped[0].creadoEn : null;
-          const hayListo = ped.some((p) => p.estado === "listo");
+      {lista.length === 0 ? (
+        <div className="card salon-vacio">
+          <p>
+            <b>El salón está vacío.</b>
+          </p>
+          <p className="muted">
+            Los pedidos para comer aquí aparecen agrupados por dónde está el cliente. La
+            ubicación se escribe al tomar el pedido, o aquí mismo con “¿Dónde está?”.
+          </p>
+          <a href="/admin/pedidos" className="btn btn--primary btnmini">
+            <span>Tomar un pedido →</span>
+          </a>
+        </div>
+      ) : (
+        <div className="salon">
+          {lista.map(([donde, ps]) => {
+            const total = ps.reduce((s, p) => s + p.total, 0);
+            const debe = ps.filter((p) => p.pago === "pendiente").reduce((s, p) => s + p.total, 0);
+            const desde = ps
+              .map((p) => p.creadoEn)
+              .sort()[0];
+            const hayListo = ps.some((p) => p.estado === "listo");
+            return (
+              <article
+                key={donde}
+                className={`cuenta ${hayListo ? "is-listo" : ""} ${donde === SIN ? "is-sin" : ""}`}
+              >
+                <header className="cuenta__h">
+                  <b className="cuenta__donde">{donde}</b>
+                  <span className="cuenta__time" suppressHydrationWarning>
+                    ⏱ {hace(desde)}
+                  </span>
+                </header>
 
-          return (
-            <div key={n} className={`mesa ${busy ? "is-busy" : "is-free"} ${hayListo ? "is-listo" : ""}`}>
-              <div className="mesa__head">
-                <span className="mesa__n">Mesa {n}</span>
-                {busy ? (
-                  <span className="mesa__time" suppressHydrationWarning>⏱ {hace(desde!)}</span>
-                ) : (
-                  <span className="mesa__libre">Libre</span>
+                <ul className="cuenta__lista">
+                  {ps.map((p) => (
+                    <li key={p.id}>
+                      <span className={`dot dot--${p.estado}`} aria-hidden />
+                      <span className="cuenta__plato">
+                        <b>#{p.consecutivo ?? p.id}</b> {p.base}
+                        {p.proteina && p.proteina !== "—" ? ` · ${p.proteina}` : ""}
+                      </span>
+                      <span className={`badge badge--${p.estado}`}>{estadoLabel[p.estado]}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* Ubicar un pedido que entró sin referencia (típico del QR). */}
+                {donde === SIN && (
+                  <form action={asignarReferenciaAction} className="cuenta__ubicar">
+                    <input type="hidden" name="id" value={ps[0].id} />
+                    <input
+                      type="text"
+                      name="referencia"
+                      maxLength={60}
+                      placeholder={`¿Dónde está el #${ps[0].consecutivo ?? ps[0].id}?`}
+                      aria-label="Dónde está el cliente"
+                      required
+                    />
+                    <button className="btn btn--ghost btnmini" type="submit">
+                      <span>Ubicar</span>
+                    </button>
+                  </form>
                 )}
-              </div>
 
-              {busy && (
-                <>
-                  <ul className="mesa__pedidos">
-                    {ped.map((p) => (
-                      <li key={p.id}>
-                        <span className={`dot dot--${p.estado}`} aria-hidden />
-                        <span className="mesa__dish">
-                          <b>#{p.id}</b> {p.base} · {p.proteina}
-                          {p.toppings.length ? <em> +{p.toppings.length}</em> : null}
-                        </span>
-                        <span className={`badge badge--${p.estado}`}>{estadoLabel[p.estado]}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mesa__foot">
-                    <div className="mesa__consumo">
-                      <span>Consumo</span>
-                      <b>{formatCOP(consumo)}</b>
-                    </div>
-                    <span className={`badge ${porCobrar > 0 ? "badge--warn" : "badge--ok"}`}>
-                      {porCobrar > 0 ? `Por cobrar ${formatCOP(porCobrar)}` : "Todo pagado"}
-                    </span>
-                  </div>
-                  {/* Cobrar la mesa ENTERA de un gesto: un grupo de 4 que pidió por QR
-                      son 4 pedidos que el cajero tenía que buscar y cobrar uno a uno
-                      entre todos los del día. */}
-                  {porCobrar > 0 && (
-                    <form action={cobrarMesaAction} className="tbl__cobrar-form">
-                      <input type="hidden" name="mesa" value={n} />
-                      <select name="metodo" aria-label={`Método de pago mesa ${n}`}>
-                        {METODOS.map((m) => (
-                          <option key={m} value={m}>
-                            {metodoEmoji[m]} {metodoLabel[m]}
-                          </option>
-                        ))}
-                      </select>
-                      <button className="btn btn--primary tbl__cobrar" type="submit">
-                        <span>Cobrar mesa · {formatCOP(porCobrar)}</span>
-                      </button>
-                    </form>
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                <div className="cuenta__pie">
+                  <span>
+                    Consumo <b>{formatCOP(total)}</b>
+                  </span>
+                  <span className={`badge ${debe > 0 ? "badge--warn" : "badge--ok"}`}>
+                    {debe > 0 ? `Debe ${formatCOP(debe)}` : "Todo pagado"}
+                  </span>
+                </div>
+
+                {debe > 0 && donde !== SIN && (
+                  <form action={cobrarMesaAction} className="tbl__cobrar-form">
+                    <input type="hidden" name="referencia" value={donde} />
+                    <select name="metodo" aria-label={`Método de pago de ${donde}`}>
+                      {METODOS.map((m) => (
+                        <option key={m} value={m}>
+                          {metodoEmoji[m]} {metodoLabel[m]}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="btn btn--primary tbl__cobrar" type="submit">
+                      <span>Cobrar todo · {formatCOP(debe)}</span>
+                    </button>
+                  </form>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
       <p className="muted salon-note">
-        Se actualiza solo cada 15 s. La mesa sigue ocupada hasta que se cobra, aunque el
-        plato ya se haya entregado.
+        Se actualiza solo cada 15 s. Una cuenta sigue abierta hasta que se cobra, aunque
+        el plato ya se haya entregado.
       </p>
     </>
   );

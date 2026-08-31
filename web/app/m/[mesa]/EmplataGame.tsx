@@ -1124,7 +1124,6 @@ export default function EmplataGame(props: {
   onModoRapido: () => void;
   /** "qr" = mesa por QR (flujo original). "web" = el menú principal del sitio: pide servicio+contacto. */
   canal?: "qr" | "web";
-  numMesas?: number; // para el selector de mesa en modo web
   onSalir?: () => void; // cerrar el overlay y volver al sitio (solo modo web)
   costoDomicilio?: number; // se cobra aparte cuando el servicio es a domicilio
   pedidoMinimo?: number; // mínimo para domicilio; bloquea el sellado
@@ -1163,7 +1162,7 @@ export default function EmplataGame(props: {
   const [pidiendoDatos, setPidiendoDatos] = useState(false);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [tipoSel, setTipoSel] = useState<TipoServicio>("domicilio");
-  const [mesaSel, setMesaSel] = useState(1);
+  const [referencia, setReferencia] = useState("");
   const [cliente, setCliente] = useState("");
   const [telefono, setTelefono] = useState("");
   const [direccion, setDireccion] = useState("");
@@ -1523,7 +1522,7 @@ export default function EmplataGame(props: {
         toppingIds,
         canal,
         tipo: esWeb ? tipoSel : "mesa",
-        mesa: esWeb ? (tipoSel === "mesa" ? mesaSel : undefined) : mesa,
+        referencia: tipoSel === "mesa" ? referencia.trim() || undefined : undefined,
         cliente: esWeb && tipoSel !== "mesa" ? cliente.trim() || undefined : undefined,
         telefono: esWeb && tipoSel === "domicilio" ? telefono.trim() || undefined : undefined,
         direccion: tipoSel === "domicilio" ? direccion.trim() || undefined : undefined,
@@ -1561,7 +1560,7 @@ export default function EmplataGame(props: {
       setPidiendoDatos(esWeb);
     }
     setEnviando(false);
-  }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, mesaSel, cliente, telefono, direccion, notas, enredoIntacto, mesa, s]);
+  }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, referencia, cliente, telefono, direccion, notas, enredoIntacto, mesa, s]);
 
   /**
    * PRIMER SERVICIO. Dos casos, un mismo gesto: el fideo trae la comida a la caja.
@@ -6121,6 +6120,11 @@ export default function EmplataGame(props: {
 
   // W4: al pedir otra caja, la escena canvas se reinicia sin desmontar (fase → arma)
   const otraCaja = useCallback(() => {
+    /* CLAVE NUEVA para la ronda nueva. Sin esto, el segundo pedido de la misma mesa
+       viajaba con la clave de idempotencia del primero: el cerebro lo tomaba por un
+       reintento y devolvía el pedido viejo. El cliente veía una confirmación falsa y
+       la cocina no recibía nada. */
+    idemRef.current = "";
     const wd = world.current;
     wd.pila = [];
     wd.fideos = [];
@@ -6453,15 +6457,17 @@ export default function EmplataGame(props: {
               ))}
             </div>
             {tipoSel === "mesa" ? (
+              /* Aquí no se asignan mesas: lo que hace falta es saber a quién llevarle
+                 el plato. Un número era una ficción que nadie repartía. */
               <label className="emp-datos__campo">
-                <span>Mesa</span>
-                <select value={mesaSel} onChange={(e) => setMesaSel(Number(e.target.value))} aria-label="Número de mesa">
-                  {Array.from({ length: Math.max(1, props.numMesas ?? 12) }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
+                <span>¿Dónde te encontramos?</span>
+                <input
+                  type="text"
+                  value={referencia}
+                  maxLength={60}
+                  onChange={(e) => setReferencia(e.target.value)}
+                  placeholder="Mesa del ventanal, barra, camisa azul…"
+                />
               </label>
             ) : (
               <>

@@ -83,11 +83,39 @@ console.log("\n═══ EL ESPEJO DEL CLIENTE COINCIDE CON EL SERVIDOR ══�
     costoDomicilio: 5000,
     incluidos: 2,
   });
-  // 18900 + 9000 + (2 gratis) + 4500 = 32400; imp 8% = 2592; +5000 envío
-  eq("subtotal con 2 toppings de cortesía", t.subtotal, 32400);
-  eq("impuesto", t.impuesto, 2592);
-  eq("total del espejo", t.total, 39992);
-  eq("y coincide con totalDe()", totalDe(t), 39992);
+  /* La casa regala los DOS MÁS CAROS (4.500 y 2.000) y cobra el que queda (2.000).
+     Antes regalaba "los dos primeros del array", que llegaba en el orden en que el
+     cliente los tocó: el mismo plato costaba distinto según el orden de los clics, y
+     el servidor —que los resolvía en orden de catálogo— cobraba otra cosa. */
+  eq("subtotal: se regalan los dos toppings más caros", t.subtotal, 18900 + 9000 + 2000);
+  eq("impuesto", t.impuesto, Math.round(29900 * 0.08));
+  eq("total del espejo", t.total, 29900 + 2392 + 5000);
+  eq("y coincide con totalDe()", totalDe(t), 37292);
+
+  // El orden de los clics ya NO cambia el precio.
+  const alReves = calcularTotales({
+    base,
+    proteinas: [prot],
+    toppings: [...tops].reverse(),
+    impuestoPct: 8,
+    incluidos: 2,
+  });
+  const alDerecho = calcularTotales({ base, proteinas: [prot], toppings: tops, impuestoPct: 8, incluidos: 2 });
+  eq("tocar los toppings en otro orden cuesta lo mismo", alReves.total, alDerecho.total);
+
+  // Las SALSAS van incluidas y NO gastan un cupo de cortesía.
+  const conSalsas = calcularTotales({
+    base,
+    proteinas: [prot],
+    toppings: [
+      { id: "s1", nombre: "Salsa", categoria: "salsa", precio: 0 },
+      { id: "s2", nombre: "Otra salsa", categoria: "salsa", precio: 0 },
+      ...tops,
+    ],
+    impuestoPct: 8,
+    incluidos: 2,
+  });
+  eq("dos salsas no gastan los acompañantes de cortesía", conSalsas.subtotal, alDerecho.subtotal);
 
   // Enredo insignia: precio de carta cerrado, desglosado hacia atrás.
   const d = desglosarPrecioFinal(28900, 8);

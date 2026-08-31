@@ -14,6 +14,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useFormStatus } from "react-dom";
 import {
   TIPOS,
   tipoLabel,
@@ -25,23 +26,37 @@ import {
 } from "@/lib/menu";
 import { calcularTotales } from "@/lib/precios";
 import { crearPedidoPanelAction } from "@/app/pedido-actions";
+import { nuevaClave } from "@/lib/idem";
+
+/** El botón se bloquea mientras se envía: sin esto, el segundo toque son dos platos. */
+function Mandar({ listo }: { listo: boolean }) {
+  const { pending } = useFormStatus();
+  return (
+    <button className="btn btn--primary" type="submit" disabled={!listo || pending}>
+      <span>{pending ? "Mandando…" : "Mandar a cocina →"}</span>
+    </button>
+  );
+}
 
 export default function NuevoPedido({
   bases,
   proteinas,
   toppings,
-  numMesas,
   impuestoPct,
   costoDomicilio = 0,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
-  numMesas: number;
   impuestoPct: number;
   costoDomicilio?: number;
 }) {
   const [abierto, setAbierto] = useState(false);
+  /* Clave de idempotencia: era el ÚNICO canal sin ella. Un doble toque en el
+     mostrador creaba dos platos y descontaba la despensa dos veces. Va en ESTADO,
+     no en una ref: se pinta en el formulario y React 19 prohíbe leer refs durante
+     el render. Se renueva al limpiar, para que el pedido siguiente sí sea otro. */
+  const [idem, setIdem] = useState(nuevaClave);
   const [tipo, setTipo] = useState<TipoServicio>("llevar");
   const [baseId, setBaseId] = useState("");
   const [protIds, setProtIds] = useState<string[]>([]);
@@ -82,7 +97,20 @@ export default function NuevoPedido({
   }
 
   return (
-    <form action={crearPedidoPanelAction} className="npedido card">
+    <form
+      action={crearPedidoPanelAction}
+      className="npedido card"
+      onSubmit={() => {
+        // Deja el formulario listo para el pedido siguiente, sin arrastrar la selección.
+        setTimeout(() => {
+          setBaseId("");
+          setProtIds([]);
+          setTopIds([]);
+          setIdem(nuevaClave());
+        }, 400);
+      }}
+    >
+      <input type="hidden" name="idemKey" value={idem} />
       <div className="card__h">
         <h2>Nuevo pedido</h2>
         <button type="button" className="btnmini btn btn--ghost" onClick={() => setAbierto(false)}>
@@ -109,13 +137,16 @@ export default function NuevoPedido({
       </div>
 
       {tipo === "mesa" && (
+        /* Aquí las mesas NO se asignan: un número era una ficción que nadie mantenía.
+           Lo que el mesero necesita es saber a quién llevarle el plato. */
         <label className="svc__field">
-          <span>Mesa</span>
-          <select name="mesa" defaultValue={1}>
-            {Array.from({ length: Math.max(1, numMesas) }, (_, i) => i + 1).map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
+          <span>¿Dónde está el cliente?</span>
+          <input
+            type="text"
+            name="referencia"
+            maxLength={60}
+            placeholder="Mesa del ventanal, barra, camisa azul…"
+          />
         </label>
       )}
 
@@ -204,13 +235,7 @@ export default function NuevoPedido({
           {totales.domicilio > 0 ? ` · envío ${formatCOP(totales.domicilio)}` : ""}
           <b> = {formatCOP(totales.total)}</b>
         </span>
-        <button
-          className="btn btn--primary"
-          type="submit"
-          disabled={!baseId || protIds.length === 0}
-        >
-          <span>Mandar a cocina →</span>
-        </button>
+        <Mandar listo={Boolean(baseId) && protIds.length > 0} />
       </div>
     </form>
   );

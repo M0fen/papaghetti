@@ -8,6 +8,9 @@ import {
   insumoBajo,
   esVenta,
   ventaNeta,
+  METODOS,
+  metodoLabel,
+  metodoEmoji,
   type Catalog,
   type Pedido,
 } from "@/lib/menu";
@@ -39,7 +42,12 @@ export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
   // Antes se calculaba sobre , que excluye "entregado": justo la deuda más
   // peligrosa de un restaurante (el que ya comió y no pagó) era la única que el cierre
   // de caja no mostraba, y aparecía como faltante del cajero.
-  const porCobrar = catalog.pedidos.filter((p) => esVenta(p) && p.pago === "pendiente");
+  const porCobrar = hoyPed.filter((p) => p.pago === "pendiente");
+  /* Deudas de OTROS días: existen y hay que verlas, pero no pueden mezclarse con el
+     cuadre de hoy o el cierre nunca cierra. */
+  const arrastre = catalog.pedidos.filter(
+    (p) => esVenta(p) && p.pago === "pendiente" && diaNegocio(p.creadoEn) !== hoyStr,
+  );
   const sum = (arr: Pedido[], f: (p: Pedido) => number) => arr.reduce((s, p) => s + f(p), 0);
   const metodo = (m: string) =>
     sum(validos.filter((p) => p.pago === "pagado" && p.metodoPago === m), (p) => p.total);
@@ -144,7 +152,7 @@ export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
                   <tbody>
                     <tr><td>Pedidos válidos</td><td>{validos.length}</td></tr>
                     <tr><td>Cancelados</td><td>{cancelados}</td></tr>
-                    <tr><td>Ventas (con impuesto)</td><td><b>{formatCOP(ventasHoy)}</b></td></tr>
+                    <tr><td>Ventas netas (sin impuesto)</td><td><b>{formatCOP(ventasHoy)}</b></td></tr>
                     <tr><td>Ticket promedio</td><td>{formatCOP(ticket)}</td></tr>
                     <tr><td>Impuesto recaudado</td><td>{formatCOP(sum(validos, (p) => p.impuesto))}</td></tr>
                     <tr><td>Propinas</td><td>{formatCOP(sum(validos, (p) => p.propina))}</td></tr>
@@ -153,11 +161,26 @@ export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
                 <h4>Caja por método</h4>
                 <table className="md-table">
                   <tbody>
-                    <tr><td>Efectivo</td><td>{formatCOP(metodo("efectivo"))}</td></tr>
-                    <tr><td>Tarjeta</td><td>{formatCOP(metodo("tarjeta"))}</td></tr>
-                    <tr><td>Transferencia</td><td>{formatCOP(metodo("transferencia"))}</td></tr>
+                    {/* LOS SEIS. Antes solo salían tres y Nequi, Daviplata y Bre-B
+                        —que es por donde más entra la plata hoy— no aparecían en
+                        ninguna línea: la caja no cuadraba y no se veía por qué. */}
+                    {METODOS.map((m) => {
+                      const v = metodo(m);
+                      return v > 0 ? (
+                        <tr key={m}>
+                          <td>{metodoEmoji[m]} {metodoLabel[m]}</td>
+                          <td>{formatCOP(v)}</td>
+                        </tr>
+                      ) : null;
+                    })}
                     <tr><td><b>Total cobrado</b></td><td><b>{formatCOP(cobrado)}</b></td></tr>
-                    <tr><td>Por cobrar (pendiente)</td><td>{formatCOP(sum(porCobrar, (p) => p.total))}</td></tr>
+                    <tr><td>Por cobrar (de hoy)</td><td>{formatCOP(sum(porCobrar, (p) => p.total))}</td></tr>
+                    {arrastre.length > 0 && (
+                      <tr>
+                        <td>Arrastre de días anteriores</td>
+                        <td>{formatCOP(sum(arrastre, (p) => p.total))}</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
                 <p style={{ marginTop: 8 }}>

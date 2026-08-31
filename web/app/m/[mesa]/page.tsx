@@ -29,10 +29,11 @@ export default async function MesaPage({
   const { mesa: mesaRaw } = await params;
   const cat = await getCatalog();
 
-  const numMesas = cat.ajustes.numMesas ?? 12;
+  /* El número del QR ya no es una mesa asignada: aquí no se reparten mesas. Solo
+     identifica el código, así que se acepta cualquiera y no se recorta contra
+     `numMesas` — con ese ajuste en 0, TODO pedido por QR se rechazaba. */
   let mesa = parseInt(mesaRaw, 10);
   if (!Number.isFinite(mesa) || mesa < 1) mesa = 1;
-  if (mesa > numMesas) mesa = numMesas;
 
   const activos = (list: typeof cat.bases) => list.filter((i) => i.activo);
 

@@ -162,7 +162,6 @@ export default function JuegoProvider({
             proteinas={proteinasA}
             toppings={toppingsA}
             canal="web"
-            numMesas={ajustes.numMesas}
             costoDomicilio={ajustes.costoDomicilio}
             pedidoMinimo={ajustes.pedidoMinimo}
             precargar={precarga}

@@ -18,7 +18,6 @@ export default async function PedidosPage() {
           bases={cat.bases}
           proteinas={cat.proteinas}
           toppings={cat.toppings}
-          numMesas={cat.ajustes.numMesas}
           impuestoPct={cat.ajustes.impuestoPct ?? 0}
           costoDomicilio={cat.ajustes.costoDomicilio}
         />

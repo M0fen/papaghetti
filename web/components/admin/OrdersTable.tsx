@@ -16,6 +16,7 @@ import {
 } from "@/lib/menu";
 import {
   avanzarPedidoAction,
+  retrocederPedidoAction,
   cobrarAction,
   cancelarAction,
 } from "@/app/pedido-actions";
@@ -98,12 +99,17 @@ export default function OrdersTable({ pedidos }: { pedidos: Pedido[] }) {
 
 function OrderCard({ p }: { p: Pedido }) {
   const activo = p.estado !== "entregado" && p.estado !== "cancelado";
+  /* Un pedido ENTREGADO por error (un toque de más en la cocina) no se podía ni
+     devolver ni cancelar desde ninguna pantalla: el plato desaparecía del flujo y la
+     cuenta se quedaba viva para siempre. Mientras no esté cobrado, siempre hay salida. */
+  const corregible = p.estado !== "cancelado" && p.pago === "pendiente";
   return (
     <article className={`ocard ${p.estado === "cancelado" ? "is-cancelado" : ""}`}>
       <div className="ocard__top">
         <b>#{p.id}</b>
         <span className="ocard__tipo">
-          {tipoIcon[p.tipo]} {p.tipo === "mesa" ? `Mesa ${p.mesa ?? "?"}` : tipoLabel[p.tipo]}
+          {tipoIcon[p.tipo]} {tipoLabel[p.tipo]}
+          {p.referencia ? ` · ${p.referencia}` : ""}
         </span>
         <time suppressHydrationWarning>
           {new Date(p.creadoEn).toLocaleTimeString("es-CO", {
@@ -175,9 +181,30 @@ function OrderCard({ p }: { p: Pedido }) {
             ))}
           </form>
         )}
+        {/* Devolver un paso: la única salida cuando la cocina avanzó de más. */}
+        {corregible && p.estado !== "recibido" && (
+          <form action={retrocederPedidoAction}>
+            <input type="hidden" name="id" value={p.id} />
+            <button className="btn btn--ghost btnmini" type="submit" title="Devolver al paso anterior">
+              <span>← Devolver</span>
+            </button>
+          </form>
+        )}
+
+        {/* El comprobante para el cliente. Existe cobrado o no: muchas veces se pide
+            la cuenta ANTES de pagar. */}
+        <a
+          className="btn btn--ghost btnmini"
+          href={`/admin/tiquete/${p.id}`}
+          target="_blank"
+          rel="noopener"
+        >
+          <span>🧾 Comprobante</span>
+        </a>
+
         {/* Cancelar pide MOTIVO y confirma: estaba a un mis-tap de los chips de cobro,
             sin confirmación ninguna, y el motivo ahora queda en el historial. */}
-        {activo && (
+        {corregible && (
           <form
             action={cancelarAction}
             style={{ marginLeft: "auto" }}

@@ -5,7 +5,12 @@
  * Ver PLAN-MAESTRO.md §5.2.
  */
 
-export type Categoria = "base" | "proteina" | "topping";
+/**
+ * Familias de componente. "salsa" se añadió con la carta real: las salsas se
+ * eligen libremente, NO se cobran y NO gastan los acompañantes de cortesía.
+ * Viven dentro del grupo `toppings` del catálogo para no partir el modelo.
+ */
+export type Categoria = "base" | "proteina" | "topping" | "salsa";
 export type Tag = "veggie" | "picante" | "premium" | "clasico";
 
 export interface Ingrediente {
@@ -15,6 +20,8 @@ export interface Ingrediente {
   /** Aporte al precio del bowl, en COP. Las bases traen precio de arranque. */
   precio: number;
   emoji: string;
+  /** Porción de la carta ("400 gr", "15 gr"): se muestra, no se calcula. */
+  gramaje?: string;
   /** Foto propia (URL o data URL). Si existe, manda sobre el emoji. */
   foto?: string;
   /** Color de la "blob" en el bowl (paleta Papaghetti). */
@@ -150,221 +157,60 @@ export const formatCantidad = (cantidad: number, unidad: UnidadInsumo) =>
     maximumFractionDigits: 3,
   })} ${unidadCorta[unidad]}`;
 
-export const BASES: Ingrediente[] = [
-  {
-    id: "papa-criolla",
-    nombre: "Papa criolla dorada",
-    categoria: "base",
-    precio: 18900,
-    emoji: "🥔",
-    color: "#F2A516",
-    descripcion: "La joya del Eje: dorada, cremosa por dentro.",
-    tags: ["clasico"],
-    activo: true,
-  },
-  {
-    id: "papa-francesa",
-    nombre: "Papa a la francesa",
-    categoria: "base",
-    precio: 17900,
-    emoji: "🍟",
-    color: "#E9C46A",
-    descripcion: "Crocante afuera, tierna adentro.",
-    activo: true,
-  },
-  {
-    id: "spaghetti",
-    nombre: "Spaghetti",
-    categoria: "base",
-    precio: 18900,
-    emoji: "🍝",
-    color: "#EABF6B",
-    descripcion: "La hebra hecha base. Al dente, siempre.",
-    tags: ["clasico"],
-    activo: true,
-  },
-];
 
-export const PROTEINAS: Ingrediente[] = [
-  {
-    id: "chicharron",
-    nombre: "Chicharrón carnudo",
-    categoria: "proteina",
-    precio: 9000,
-    emoji: "🥓",
-    color: "#7A1F12",
-    descripcion: "Orgullo paisa, punto crocante.",
-    activo: true,
-  },
-  {
-    id: "bolonesa",
-    nombre: "Boloñesa de res",
-    categoria: "proteina",
-    precio: 11000,
-    emoji: "🍖",
-    color: "#C8321E",
-    descripcion: "Cocción lenta, tomate reducido.",
-    tags: ["clasico"],
-    activo: true,
-  },
-  {
-    id: "pollo-crispy",
-    nombre: "Pollo crispy",
-    categoria: "proteina",
-    precio: 9000,
-    emoji: "🍗",
-    color: "#D98324",
-    descripcion: "Apanado de la casa, súper crocante.",
-    activo: true,
-  },
-  {
-    id: "mixta",
-    nombre: "Mixta (res + cerdo)",
-    categoria: "proteina",
-    precio: 13000,
-    emoji: "🍔",
-    color: "#8C2A16",
-    descripcion: "Para el que quiere todo.",
-    tags: ["premium"],
-    activo: true,
-  },
-  {
-    id: "champinon",
-    nombre: "Champiñón salteado",
-    categoria: "proteina",
-    precio: 8000,
-    emoji: "🍄",
-    color: "#4C9A5A",
-    descripcion: "Opción veggie, bien sabrosa.",
-    tags: ["veggie"],
-    activo: true,
-  },
-];
 
-export const TOPPINGS: Ingrediente[] = [
-  {
-    id: "maicitos",
-    nombre: "Maicitos con queso",
-    categoria: "topping",
-    precio: 3500,
-    emoji: "🌽",
-    color: "#F2A516",
-    activo: true,
-  },
-  {
-    id: "nuggets-pina",
-    nombre: "Nuggets calados en piña",
-    categoria: "topping",
-    precio: 5000,
-    emoji: "🍍",
-    color: "#E9B44C",
-    tags: ["premium"],
-    activo: true,
-  },
-  {
-    id: "tocineta",
-    nombre: "Tocineta crocante",
-    categoria: "topping",
-    precio: 4000,
-    emoji: "🥓",
-    color: "#8C2A16",
-    activo: true,
-  },
-  {
-    id: "hogao",
-    nombre: "Hogao de la casa",
-    categoria: "topping",
-    precio: 2000,
-    emoji: "🍅",
-    color: "#C8321E",
-    activo: true,
-  },
-  {
-    id: "parmesano",
-    nombre: "Parmesano",
-    categoria: "topping",
-    precio: 3000,
-    emoji: "🧀",
-    color: "#FBF1DE",
-    activo: true,
-  },
-  {
-    id: "aguacate",
-    nombre: "Aguacate",
-    categoria: "topping",
-    precio: 4500,
-    emoji: "🥑",
-    color: "#4C9A5A",
-    tags: ["veggie"],
-    activo: true,
-  },
-  {
-    id: "perejil",
-    nombre: "Perejil fresco",
-    categoria: "topping",
-    precio: 0,
-    emoji: "🌿",
-    color: "#4C9A5A",
-    tags: ["veggie"],
-    activo: true,
-  },
-  {
-    id: "chicharron-crocante",
-    nombre: "Chicharrón crocante",
-    categoria: "topping",
-    precio: 4000,
-    emoji: "🍘",
-    color: "#7A1F12",
-    activo: true,
-  },
-];
+
+/* ==========================================================================
+   LA CARTA vive en lib/carta.ts: precios, platos y gramajes, en un archivo que
+   se lee de corrido y se compara con la carta impresa. Aqui solo se re-exporta
+   para que nada de lo que ya importaba desde "@/lib/menu" tenga que cambiar.
+   ========================================================================== */
+export {
+  BASES,
+  PROTEINAS,
+  TOPPINGS,
+  SALSAS,
+  ACOMPANANTES,
+  PLATOS as ENREDOS_INSIGNIA,
+  INSUMOS as SEED_INSUMOS,
+  RECETAS as SEED_RECETAS,
+} from "./carta";
+import { BASES, PROTEINAS, TOPPINGS, PLATOS, INSUMOS, RECETAS } from "./carta";
 
 /** Toppings de cortesía incluidos antes de empezar a cobrar extra. */
 export const TOPPINGS_INCLUIDOS = 2;
+
+/** Familias de la carta de precio cerrado. */
+export type GrupoPlato = "combo" | "ensalada" | "carta" | "especial";
+export const GRUPOS_PLATO: GrupoPlato[] = ["combo", "ensalada", "carta", "especial"];
+export const grupoPlatoLabel: Record<GrupoPlato, string> = {
+  combo: "Combos",
+  ensalada: "Ensaladas",
+  carta: "A la carta",
+  especial: "Especiales",
+};
 
 export interface EnredoInsignia {
   id: string;
   nombre: string;
   gancho: string;
+  /**
+   * Componentes. Pueden ir VACÍOS: las ensaladas, los platos a la carta y los
+   * especiales son platos de cocina con precio cerrado que no se arman por partes.
+   * Sin componentes no se descuenta despensa (y el panel lo pide como pendiente).
+   */
   baseId: string;
   proteinaId: string;
   toppingIds: string[];
   precio: number;
+  grupo?: GrupoPlato;
+  /** Se puede sacar de la carta sin borrarlo. */
+  activo?: boolean;
   destacado?: boolean;
   /** Foto propia del plato (URL o data URL). */
   foto?: string;
 }
 
-export const ENREDOS_INSIGNIA: EnredoInsignia[] = [
-  {
-    id: "el-criollazo",
-    nombre: "El Criollazo",
-    gancho: "El Eje Cafetero en un bowl.",
-    baseId: "papa-criolla",
-    proteinaId: "chicharron",
-    toppingIds: ["maicitos", "hogao", "perejil"],
-    precio: 28900,
-    destacado: true,
-  },
-  {
-    id: "el-enredo-clasico",
-    nombre: "El Enredo Clásico",
-    gancho: "Spaghetti como Dios manda.",
-    baseId: "spaghetti",
-    proteinaId: "bolonesa",
-    toppingIds: ["parmesano", "perejil"],
-    precio: 32900,
-  },
-  {
-    id: "el-antojado",
-    nombre: "El Antojado",
-    gancho: "Dulce, salado y crocante.",
-    baseId: "papa-francesa",
-    proteinaId: "pollo-crispy",
-    toppingIds: ["nuggets-pina", "tocineta"],
-    precio: 30900,
-  },
-];
 
 /** ------- Pedidos (Fase 3 / POS) ------- */
 export type EstadoPedido =
@@ -388,7 +234,9 @@ export const nextEstado = (e: EstadoPedido): EstadoPedido =>
 export type TipoServicio = "mesa" | "llevar" | "domicilio";
 export const TIPOS: TipoServicio[] = ["mesa", "llevar", "domicilio"];
 export const tipoLabel: Record<TipoServicio, string> = {
-  mesa: "Mesa",
+  // El local NO asigna mesas: se come ahí y punto. El "dónde" lo dice la
+  // referencia libre del pedido, no un número que nadie reparte.
+  mesa: "En el local",
   llevar: "Para llevar",
   domicilio: "Domicilio",
 };
@@ -442,6 +290,12 @@ export const metodoEmoji: Record<MetodoPago, string> = {
 
 export interface Pedido {
   id: string;
+  /**
+   * Consecutivo interno del comprobante (1, 2, 3...). El `id` es un UUID cortado:
+   * sirve para buscar, pero dos tiquetes seguidos parecen no tener relación y no se
+   * puede auditar un salto. Esto NO es numeración autorizada por la DIAN.
+   */
+  consecutivo?: number;
   creadoEn: string; // ISO
   canal: "web" | "qr" | "salon";
   tipo: TipoServicio;
@@ -451,6 +305,13 @@ export interface Pedido {
   telefono?: string;
   /** A dónde se lleva. Obligatoria en domicilio: sin ella el domiciliario sale a ciegas. */
   direccion?: string;
+  /**
+   * DÓNDE ENCONTRAR AL CLIENTE dentro del local, en palabras: "mesa del ventanal",
+   * "barra, camisa azul", "para Juan". Reemplaza al número de mesa: aquí las mesas
+   * no se asignan, así que un número era una ficción que nadie mantenía — pero el
+   * mesero sigue necesitando saber a quién le lleva el plato.
+   */
+  referencia?: string;
   /** Lo que el cliente escribió para la cocina: "sin cebolla", alergias. */
   notas?: string;
   estado: EstadoPedido;
@@ -649,6 +510,11 @@ export interface Promo {
 /** ------- Ajustes del negocio (una sola fuente para sitio + panel) ------- */
 export interface Ajustes {
   negocio: string;
+  /** Razón social y NIT: se imprimen en el comprobante si están. */
+  razonSocial?: string;
+  nit?: string;
+  /** Teléfono fijo/celular del local (el del comprobante, no el de WhatsApp). */
+  telefonoLocal?: string;
   whatsapp: string; // formato 57...
   direccion: string;
   horarios: string;
@@ -665,6 +531,8 @@ export interface Ajustes {
   /** Promos que el operador enciende/apaga; se reflejan en el sitio. */
   promos: Promo[];
 }
+/* APAGADAS de fábrica: son plantillas. Una promo encendida que nadie aprobó
+   es una promesa que el local tiene que cumplir en la puerta. */
 export const SEED_PROMOS: Promo[] = [
   {
     id: "promo-2x1-martes",
@@ -672,7 +540,7 @@ export const SEED_PROMOS: Promo[] = [
     emoji: "🔥",
     tono: "pomodoro",
     banner: true,
-    activo: true,
+    activo: false,
   },
   {
     id: "promo-combo-estudiante",
@@ -680,7 +548,7 @@ export const SEED_PROMOS: Promo[] = [
     emoji: "🎓",
     tono: "oro",
     banner: false,
-    activo: true,
+    activo: false,
   },
 ];
 export const SEED_AJUSTES: Ajustes = {
@@ -714,50 +582,11 @@ export const waLink = (whatsapp: string, texto: string): string =>
   `https://wa.me/${soloDigitos(whatsapp)}?text=${encodeURIComponent(texto)}`;
 
 /** ------- Despensa: insumos reales de la semilla ------- */
-export const SEED_INSUMOS: Insumo[] = [
-  { id: "papa-criolla-lb", nombre: "Papa criolla", categoria: "carbo", unidad: "lb", stock: 40, parStock: 40, costo: 3500, emoji: "🥔", activo: true },
-  { id: "papa-francesa-lb", nombre: "Papa para francesa", categoria: "carbo", unidad: "lb", stock: 35, parStock: 35, costo: 2800, emoji: "🍟", activo: true },
-  { id: "spaghetti-paq", nombre: "Spaghetti (paq 500g)", categoria: "carbo", unidad: "paquete", stock: 4, parStock: 12, costo: 4500, emoji: "🍝", activo: true },
-  { id: "carne-res-lb", nombre: "Carne de res molida", categoria: "proteina", unidad: "lb", stock: 18, parStock: 20, costo: 14000, emoji: "🥩", activo: true },
-  { id: "cerdo-lb", nombre: "Cerdo (chicharrón)", categoria: "proteina", unidad: "lb", stock: 16, parStock: 18, costo: 12000, emoji: "🥓", activo: true },
-  { id: "pollo-lb", nombre: "Pollo pechuga", categoria: "proteina", unidad: "lb", stock: 20, parStock: 22, costo: 9000, emoji: "🍗", activo: true },
-  { id: "tocineta-paq", nombre: "Tocineta (paq)", categoria: "proteina", unidad: "paquete", stock: 2, parStock: 6, costo: 8000, emoji: "🥓", activo: true },
-  { id: "champinon-lb", nombre: "Champiñón", categoria: "vegetal", unidad: "lb", stock: 8, parStock: 10, costo: 11000, emoji: "🍄", activo: true },
-  { id: "maiz-lata", nombre: "Maíz dulce (lata)", categoria: "vegetal", unidad: "und", stock: 12, parStock: 15, costo: 4000, emoji: "🌽", activo: true },
-  { id: "pina-und", nombre: "Piña", categoria: "vegetal", unidad: "und", stock: 6, parStock: 8, costo: 3000, emoji: "🍍", activo: true },
-  { id: "tomate-lb", nombre: "Tomate", categoria: "vegetal", unidad: "lb", stock: 22, parStock: 24, costo: 3000, emoji: "🍅", activo: true },
-  { id: "cebolla-lb", nombre: "Cebolla", categoria: "vegetal", unidad: "lb", stock: 20, parStock: 20, costo: 2500, emoji: "🧅", activo: true },
-  { id: "aguacate-und", nombre: "Aguacate", categoria: "vegetal", unidad: "und", stock: 14, parStock: 16, costo: 2000, emoji: "🥑", activo: true },
-  { id: "perejil-manojo", nombre: "Perejil", categoria: "vegetal", unidad: "manojo", stock: 5, parStock: 6, costo: 1500, emoji: "🌿", activo: true },
-  { id: "parmesano-g", nombre: "Queso parmesano", categoria: "lacteo", unidad: "g", stock: 1800, parStock: 2000, costo: 60, emoji: "🧀", activo: true },
-  { id: "aceite-l", nombre: "Aceite", categoria: "otro", unidad: "l", stock: 10, parStock: 12, costo: 12000, emoji: "🫗", activo: true },
-];
 
 /**
  * Recetas semilla (BOM): cuánto insumo consume UNA porción de cada componente.
  * Es la "ficha técnica" que estandariza el plato y descuenta la despensa real.
  */
-export const SEED_RECETAS: Record<string, RecetaItem[]> = {
-  // Bases
-  "papa-criolla": [{ insumoId: "papa-criolla-lb", cantidad: 0.5 }, { insumoId: "aceite-l", cantidad: 0.05 }],
-  "papa-francesa": [{ insumoId: "papa-francesa-lb", cantidad: 0.5 }, { insumoId: "aceite-l", cantidad: 0.05 }],
-  "spaghetti": [{ insumoId: "spaghetti-paq", cantidad: 0.2 }, { insumoId: "aceite-l", cantidad: 0.02 }],
-  // Proteínas
-  "chicharron": [{ insumoId: "cerdo-lb", cantidad: 0.35 }],
-  "bolonesa": [{ insumoId: "carne-res-lb", cantidad: 0.3 }, { insumoId: "tomate-lb", cantidad: 0.15 }, { insumoId: "cebolla-lb", cantidad: 0.05 }],
-  "pollo-crispy": [{ insumoId: "pollo-lb", cantidad: 0.35 }],
-  "mixta": [{ insumoId: "carne-res-lb", cantidad: 0.2 }, { insumoId: "cerdo-lb", cantidad: 0.2 }],
-  "champinon": [{ insumoId: "champinon-lb", cantidad: 0.3 }],
-  // Toppings
-  "maicitos": [{ insumoId: "maiz-lata", cantidad: 0.25 }, { insumoId: "parmesano-g", cantidad: 15 }],
-  "nuggets-pina": [{ insumoId: "pina-und", cantidad: 0.15 }],
-  "tocineta": [{ insumoId: "tocineta-paq", cantidad: 0.1 }],
-  "hogao": [{ insumoId: "tomate-lb", cantidad: 0.1 }, { insumoId: "cebolla-lb", cantidad: 0.05 }],
-  "parmesano": [{ insumoId: "parmesano-g", cantidad: 20 }],
-  "aguacate": [{ insumoId: "aguacate-und", cantidad: 0.5 }],
-  "perejil": [{ insumoId: "perejil-manojo", cantidad: 0.1 }],
-  "chicharron-crocante": [{ insumoId: "cerdo-lb", cantidad: 0.1 }],
-};
 
 /** ------- Historial de cambios (auditoría) + deshacer/rehacer ------- */
 export interface HistItem {
@@ -791,7 +620,7 @@ const prep = (list: Ingrediente[], s: number): Ingrediente[] =>
     ...i,
     stock: i.stock ?? s,
     parStock: i.parStock ?? s,
-    receta: i.receta ?? SEED_RECETAS[i.id] ?? [],
+    receta: i.receta ?? RECETAS[i.id] ?? [],
   }));
 
 /** Semilla: estado inicial del catálogo. Se persiste y edita en Fase 2/3. */
@@ -799,8 +628,8 @@ export const SEED_CATALOG: Catalog = {
   bases: prep(BASES, 40),
   proteinas: prep(PROTEINAS, 30),
   toppings: prep(TOPPINGS, 24),
-  insumos: SEED_INSUMOS,
-  enredos: ENREDOS_INSIGNIA,
+  insumos: INSUMOS,
+  enredos: PLATOS,
   pedidos: [],
   movimientos: [],
   leads: [],

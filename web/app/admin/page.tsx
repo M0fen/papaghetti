@@ -9,6 +9,8 @@ import {
 } from "@/lib/menu";
 import { diaNegocio } from "@/lib/precios";
 import TurnoReportes from "@/components/admin/TurnoReportes";
+import Pendientes from "@/components/admin/Pendientes";
+import { tareasDelDia } from "@/lib/tareas";
 import { toggleAbiertoAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +42,7 @@ export default async function Dashboard() {
   const recientes = cat.pedidos.slice(0, 6);
 
   const abierto = cat.ajustes.abierto !== false;
+  const pendientesDelDia = tareasDelDia(cat);
   const porReponer = agotados.length + bajos.length;
   /* LO QUE PIDE ACCIÓN AHORA. Antes las siete cifras pesaban lo mismo y ninguna
      decía qué hacer: el operario tenía que interpretar el tablero. Esto solo
@@ -118,6 +121,9 @@ export default async function Dashboard() {
           <p className="hoy__limpio">Todo al día. Nada pendiente. 🎉</p>
         )}
       </div>
+
+      {/* Lo que falta por hacer, calculado del estado real: se marca solo. */}
+      <Pendientes resumen={pendientesDelDia} />
 
       <div style={{ marginBottom: 18 }}>
         <TurnoReportes catalog={cat} />

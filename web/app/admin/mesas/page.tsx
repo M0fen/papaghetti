@@ -5,42 +5,29 @@ export const dynamic = "force-dynamic";
 
 export default async function MesasPage() {
   const cat = await getCatalog();
-  const numMesas = cat.ajustes.numMesas;
   return (
     <section>
       <div className="adminx__pageh">
-        <h1>Mesas</h1>
-        <p>Ocupación del salón en vivo. La mesa se asigna al crear el pedido.</p>
-      </div>
-      <TablesBoard pedidos={cat.pedidos} numMesas={numMesas} />
-
-      {/* EMPLATA: enlaces de pedido por QR — imprime un QR por mesa apuntando a /m/N */}
-      <div className="adminx__pageh" style={{ marginTop: 28 }}>
-        <h2 style={{ fontSize: 18, margin: 0 }}>Pedido QR por mesa</h2>
-        <p style={{ margin: "4px 0 10px" }}>
-          Cada mesa tiene su enlace <code>/m/N</code> — genera el QR con ese URL y pégalo en la mesa.
-          El pedido del cliente entra solo a Cocina.
+        <h1>Salón</h1>
+        <p>
+          Quién está comiendo ahora y quién debe. Aquí no se asignan mesas: cada pedido
+          lleva escrito <b>dónde está el cliente</b>.
         </p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {Array.from({ length: numMesas }, (_, k) => (
-            <a
-              key={k + 1}
-              href={`/m/${k + 1}`}
-              target="_blank"
-              style={{
-                padding: "8px 14px",
-                borderRadius: 10,
-                border: "1.5px solid rgba(30,22,17,.18)",
-                fontWeight: 700,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "inherit",
-              }}
-            >
-              🍽️ Mesa {k + 1} → /m/{k + 1}
-            </a>
-          ))}
-        </div>
+      </div>
+      <TablesBoard pedidos={cat.pedidos} />
+
+      {/* EMPLATA: el QR de la carta. Un solo enlace basta — se puede imprimir y pegar
+          en varias mesas, porque el pedido ya no depende de un número. */}
+      <div className="adminx__pageh" style={{ marginTop: 30 }}>
+        <h2 style={{ fontSize: 18, margin: 0 }}>El QR de la carta</h2>
+        <p style={{ margin: "4px 0 10px" }}>
+          Genera un código QR con este enlace y pégalo en las mesas. Puede ser el{" "}
+          <b>mismo QR para todas</b>: el cliente escribe dónde está al pedir, y su pedido
+          entra directo a Cocina.
+        </p>
+        <a href="/m/1" target="_blank" className="btn btn--primary btnmini">
+          <span>🍽️ Abrir la carta del cliente → /m/1</span>
+        </a>
       </div>
     </section>
   );

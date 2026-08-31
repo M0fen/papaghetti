@@ -198,7 +198,8 @@ export default function EmplataClient({
         toppingIds,
         canal: "qr",
         tipo: "mesa",
-        mesa,
+        // Sin número de mesa: aquí no se asignan. Si el cliente no dejó referencia,
+        // el panel lo lista como "sin ubicar" para que el mesero la ponga.
         idemKey: idem.current,
       });
       /* El servidor puede decir que no (se acabó un ingrediente, cerramos, mesa
@@ -237,6 +238,13 @@ export default function EmplataClient({
     setCerrando(false);
     setToppingIds([]);
     setEstado("recibido");
+    setError(null);
+    /* LA CLAVE NUEVA ES OBLIGATORIA. La de idempotencia se generaba una sola vez por
+       montaje, y este botón no la limpiaba: la SEGUNDA ronda de la misma mesa llegaba
+       al servidor con la clave de la primera, el cerebro la reconocía como un reintento
+       y devolvía el pedido viejo. El cliente veía "¡a la cocina!" con el id anterior y
+       la cocina no recibía nada. Cada segunda vuelta se perdía en silencio. */
+    idem.current = "";
   };
 
   // ---------------------------------------------------------------------------

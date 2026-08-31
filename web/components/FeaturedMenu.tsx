@@ -32,7 +32,9 @@ function indice(catalog: CatalogoPublico): Map<string, Ingrediente> {
  * página se contradecía sola.
  */
 function faltante(e: EnredoInsignia, ix: Map<string, Ingrediente>): Ingrediente | null {
-  for (const id of [e.baseId, e.proteinaId, ...e.toppingIds]) {
+  // Los platos de cocina (ensaladas, a la carta, especiales) no se arman por partes:
+  // no hay componentes que comprobar, y su disponibilidad la maneja `activo`.
+  for (const id of [e.baseId, e.proteinaId, ...e.toppingIds].filter(Boolean)) {
     const ing = ix.get(id);
     if (!ing || ing.agotado || ing.activo === false) return ing ?? null;
   }
@@ -41,7 +43,6 @@ function faltante(e: EnredoInsignia, ix: Map<string, Ingrediente>): Ingrediente 
 
 export default function FeaturedMenu({ catalog }: { catalog: CatalogoPublico }) {
   const ix = indice(catalog);
-  const byId = (id: string) => ix.get(id)!;
   const [sel, setSel] = useState<EnredoInsignia | null>(null);
   const juego = useJuegoOpcional();
   // "Enredarlo a mi gusto" abre el MISMO juego con este plato ya servido en la caja,
@@ -72,17 +73,21 @@ export default function FeaturedMenu({ catalog }: { catalog: CatalogoPublico }) 
 
         <div className="menu-grid">
           {catalog.enredos.map((e, i) => {
-            const base = byId(e.baseId);
-            const proteina = byId(e.proteinaId);
-            const toppings = e.toppingIds.map(byId);
-            // ¿Sale mejor que armarlo tú mismo? Solo lo decimos cuando es verdad.
-            const suelto = calcularTotales({
-              base,
-              proteinas: [proteina],
-              toppings,
-              impuestoPct: catalog.ajustes.impuestoPct ?? 0,
-            }).total;
-            const ahorro = suelto - e.precio;
+            const base = ix.get(e.baseId);
+            const proteina = ix.get(e.proteinaId);
+            const toppings = e.toppingIds.map((id) => ix.get(id)).filter(Boolean) as Ingrediente[];
+            /* Solo los COMBOS se pueden comparar con armarlos por partes. Un churrasco
+               o una ensalada no tienen equivalente suelto, así que no se anuncia ahorro. */
+            const armable = Boolean(base && proteina);
+            const suelto = armable
+              ? calcularTotales({
+                  base,
+                  proteinas: [proteina],
+                  toppings,
+                  impuestoPct: catalog.ajustes.impuestoPct ?? 0,
+                }).total
+              : 0;
+            const ahorro = armable ? suelto - e.precio : 0;
             const falta = faltante(e, ix);
             return (
               <Reveal key={e.id} delay={i * 120}>
@@ -110,14 +115,16 @@ export default function FeaturedMenu({ catalog }: { catalog: CatalogoPublico }) 
                     {e.foto ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img className="plato__foto" src={e.foto} alt={e.nombre} />
-                    ) : (
+                    ) : base && proteina ? (
                       <CajaMini base={base} proteina={proteina} toppings={toppings} />
+                    ) : (
+                      <span className="plato__sinfoto" aria-hidden>🍽️</span>
                     )}
                   </div>
                   <div className="plato__body">
                     <h3>{e.nombre}</h3>
                     <p className="plato__gancho">{e.gancho}</p>
-                    <Termometro ings={[base, proteina, ...toppings]} />
+                    <Termometro ings={[base, proteina, ...toppings].filter(Boolean) as Ingrediente[]} />
                     <div className="plato__row">
                       <span className="plato__precio">
                         {formatCOP(e.precio)}
@@ -160,10 +167,11 @@ function EnredoModal({
   onEnredar?: (e: EnredoInsignia) => void;
 }) {
   const ix = indice(catalog);
-  const byId = (id: string) => ix.get(id)!;
-  const base = byId(enredo.baseId);
-  const proteina = byId(enredo.proteinaId);
-  const toppings = enredo.toppingIds.map(byId);
+  // Un plato de cocina (ensalada, a la carta, especial) no tiene componentes.
+  const base = ix.get(enredo.baseId);
+  const proteina = ix.get(enredo.proteinaId);
+  const toppings = enredo.toppingIds.map((id) => ix.get(id)).filter(Boolean) as Ingrediente[];
+  const porPartes = Boolean(base && proteina);
   const { ajustes } = catalog;
 
   useEffect(() => {
@@ -182,8 +190,7 @@ function EnredoModal({
   const wa = () =>
     waLink(
       ajustes.whatsapp,
-      `¡Hola Papaghetti! 🍝 Quiero "${enredo.nombre}": ${base.nombre} + ${proteina.nombre}` +
-        ` + ${toppings.map((t) => t.nombre).join(", ")}. Total ${formatCOP(enredo.precio)}.`
+      `¡Hola Papaghetti! 🍝 Quiero "${enredo.nombre}". Total ${formatCOP(enredo.precio)}.`
     );
 
   return (
@@ -204,35 +211,43 @@ function EnredoModal({
             // eslint-disable-next-line @next/next/no-img-element
             <img className="plato__foto plato__foto--big" src={enredo.foto} alt={enredo.nombre} />
           ) : (
-            <CajaMini base={base} proteina={proteina} toppings={toppings} size="grande" />
+            porPartes ? (
+              <CajaMini base={base!} proteina={proteina!} toppings={toppings} size="grande" />
+            ) : (
+              <span className="plato__sinfoto plato__sinfoto--big" aria-hidden>🍽️</span>
+            )
           )}
         </div>
         <div className="modal__body">
           <h3>{enredo.nombre}</h3>
           <p className="plato__gancho">{enredo.gancho}</p>
-          <Termometro ings={[base, proteina, ...toppings]} />
-          <ul className="modal__list">
-            <li>
-              <span>
-                <IngImg ing={base} className="modal__ing" /> {base.nombre}
-              </span>
-              <em>base</em>
-            </li>
-            <li>
-              <span>
-                <IngImg ing={proteina} className="modal__ing" /> {proteina.nombre}
-              </span>
-              <em>proteína</em>
-            </li>
-            {toppings.map((t) => (
-              <li key={t.id}>
+          <Termometro ings={[base, proteina, ...toppings].filter(Boolean) as Ingrediente[]} />
+          {/* Los combos se desglosan por partes; los platos de cocina (ensaladas, a
+              la carta, especiales) van con su descripción y precio cerrado. */}
+          {porPartes && (
+            <ul className="modal__list">
+              <li>
                 <span>
-                  <IngImg ing={t} className="modal__ing" /> {t.nombre}
+                  <IngImg ing={base!} className="modal__ing" /> {base!.nombre}
                 </span>
-                <em>topping</em>
+                <em>base</em>
               </li>
-            ))}
-          </ul>
+              <li>
+                <span>
+                  <IngImg ing={proteina!} className="modal__ing" /> {proteina!.nombre}
+                </span>
+                <em>proteína</em>
+              </li>
+              {toppings.map((t) => (
+                <li key={t.id}>
+                  <span>
+                    <IngImg ing={t} className="modal__ing" /> {t.nombre}
+                  </span>
+                  <em>{t.categoria === "salsa" ? "salsa" : "topping"}</em>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {falta ? (
             <p className="modal__agotado">

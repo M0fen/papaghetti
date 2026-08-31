@@ -9,7 +9,9 @@
  * sin `ADMIN_PASSWORD` configurada se veía igual que una clave mal tecleada.
  */
 
+import Image from "next/image";
 import Link from "next/link";
+import logo from "@/public/logo-papaghetti.webp";
 import { useSearchParams } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { login } from "@/app/admin/actions";
@@ -43,12 +45,7 @@ export default function Login() {
   return (
     <main className="alogin">
       <div className="alogin__card">
-        <div className="alogin__marca">
-          <span className="alogin__hebra" aria-hidden>
-            〜
-          </span>
-          <span>Papaghetti</span>
-        </div>
+        <Image src={logo} alt="Papaghetti" priority className="alogin__logo" />
         <h1 className="alogin__h">El cerebro</h1>
         <p className="alogin__sub">Pedidos, cocina, despensa y caja.</p>
 

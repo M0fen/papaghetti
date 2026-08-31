@@ -77,6 +77,23 @@ export interface Totales {
   total: number;
 }
 
+/**
+ * LO QUE SE COBRA POR LOS ACOMPAÑANTES — de forma determinista y a favor del cliente.
+ *
+ * Antes la casa regalaba "los N primeros" del array. Pero el array llega en el orden
+ * en que el cliente los TOCÓ, y el servidor los resolvía en el orden del CATÁLOGO:
+ * la misma caja podía costar distinto en la pantalla y en la caja, y quitar y volver
+ * a poner un topping subía la cuenta. Además, tocar primero los baratos castigaba al
+ * cliente por un detalle que nadie le explicó.
+ *
+ * Ahora se regalan SIEMPRE los más caros: una sola respuesta posible para una misma
+ * selección, igual en el cliente y en el servidor, y defendible en el mostrador.
+ */
+export function cobroToppings(toppings: Ingrediente[], incluidos: number): number {
+  const precios = toppings.map((t) => t.precio).sort((a, b) => b - a);
+  return precios.slice(incluidos).reduce((s, p) => s + p, 0);
+}
+
 export function calcularTotales(opts: {
   base?: Ingrediente | null;
   /** hasta 2; los undefined se ignoran */
@@ -89,12 +106,14 @@ export function calcularTotales(opts: {
 }): Totales {
   const incluidos = opts.incluidos ?? TOPPINGS_INCLUIDOS;
   const prots = (opts.proteinas ?? []).filter(Boolean) as Ingrediente[];
-  const tops = opts.toppings ?? [];
+  // Las SALSAS van incluidas: ni se cobran ni gastan un cupo de cortesía. Si
+  // contaran, elegir dos salsas dejaría al cliente pagando todos sus acompañantes.
+  const tops = (opts.toppings ?? []).filter((t) => t && t.categoria !== "salsa");
 
   const subtotal =
     (opts.base?.precio ?? 0) +
     prots.reduce((s, p) => s + p.precio, 0) +
-    tops.reduce((s, t, i) => s + (i < incluidos ? 0 : t.precio), 0);
+    cobroToppings(tops, incluidos);
 
   const impuesto = Math.round((subtotal * (opts.impuestoPct ?? 0)) / 100);
   const domicilio = opts.tipo === "domicilio" ? opts.costoDomicilio ?? 0 : 0;
