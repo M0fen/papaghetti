@@ -45,6 +45,7 @@ web/qa-*.mjs
 !web/qa-dominio.mjs
 !web/qa-pedidos.mjs
 !web/qa-ts.mjs
+!web/qa-persistencia.mjs
 web/dbg.mjs
 *.webp.bak
 *.bak384

@@ -3679,18 +3679,26 @@ body.enreda-jugando .nav {
   margin-bottom: 16px;
 }
 .ins-topbar__spacer { flex: 1; }
+/* Las cifras del inventario van al ritmo de la pagina, no en cajas oscuras que
+   competian con las tarjetas: el dato manda, el contenedor desaparece. */
 .ins-stat {
-  background: var(--pg-espresso);
-  color: var(--pg-crema);
-  border-radius: var(--pg-radius);
-  padding: 10px 16px;
   display: flex;
   flex-direction: column;
-  min-width: 140px;
+  gap: 1px;
+  padding: 2px 16px 2px 0;
+  border-right: 1px solid rgba(30, 22, 17, 0.12);
+  min-width: 128px;
 }
-.ins-stat__k { font-size: 0.76rem; opacity: 0.7; }
-.ins-stat__v { font-family: var(--pg-font-display); font-size: 1.5rem; line-height: 1.1; }
-.ins-stat__v.is-warn { color: var(--pg-oro); }
+.ins-stat:last-of-type { border-right: 0; }
+.ins-stat__k {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 700;
+  opacity: 0.5;
+}
+.ins-stat__v { font-family: var(--pg-font-display); font-size: 1.6rem; line-height: 1.05; }
+.ins-stat__v.is-warn { color: var(--pg-pomodoro); }
 
 .ins-new,
 .promos details {
@@ -4030,34 +4038,37 @@ body.enreda-jugando .nav {
    ========================================================================== */
 .ins-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
+  /* Más angosto = más insumos a la vista. Con 280px entraban 3 por fila y los 16
+     insumos eran varios pantallazos de scroll en la tablet de la cocina. */
+  grid-template-columns: repeat(auto-fill, minmax(226px, 1fr));
+  gap: 10px;
 }
 .inscard {
   background: #fff;
   border: 1px solid rgba(30, 22, 17, 0.08);
-  border-radius: 16px;
-  padding: 14px 16px;
-  box-shadow: var(--pg-shadow);
+  /* El estado vive en una franja lateral: se lee de un vistazo en toda la rejilla
+     sin gritar con pastillas de color en cada tarjeta. */
+  border-left: 3px solid var(--pg-perejil);
+  border-radius: 14px;
+  padding: 11px 13px;
+  box-shadow: 0 1px 2px rgba(30, 22, 17, 0.05);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
-.inscard.is-low {
-  border-color: rgba(242, 165, 22, 0.55);
-  background: #fffdf8;
-}
+.inscard.is-low { border-left-color: var(--pg-oro); background: #fffdf8; }
+.inscard.is-out { border-left-color: var(--pg-pomodoro); background: #fff9f8; }
 .inscard__head { display: flex; align-items: center; gap: 8px; }
-.inscard__emoji { font-size: 1.5rem; }
-.inscard__name { flex: 1; font-size: 1rem; line-height: 1.15; }
+.inscard__emoji { font-size: 1.2rem; }
+.inscard__name { flex: 1; font-size: 0.92rem; line-height: 1.15; }
 .inscard__now { display: flex; align-items: baseline; gap: 10px; }
-.inscard__qty { font-family: var(--pg-font-display); font-size: 1.7rem; line-height: 1; }
+.inscard__qty { font-family: var(--pg-font-display); font-size: 1.5rem; line-height: 1; }
 .inscard__qty.is-ok { color: var(--pg-espresso); }
 .inscard__qty.is-warn { color: var(--pg-oro-ink, #9a6300); }
 .inscard__qty.is-danger { color: var(--pg-pomodoro); }
 .inscard__gauge {
   position: relative;
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
   background: rgba(30, 22, 17, 0.09);
   overflow: hidden;
@@ -4065,17 +4076,101 @@ body.enreda-jugando .nav {
 .inscard__bar { height: 100%; border-radius: 999px; background: var(--pg-perejil); transition: width 0.3s ease; }
 .inscard__bar.is-low { background: var(--pg-oro); }
 .inscard__min { position: absolute; top: -2px; width: 2px; height: 12px; background: var(--pg-pomodoro); opacity: 0.7; }
-.inscard__sub { font-size: 0.76rem; opacity: 0.62; }
-.inscard__stock {
-  border-top: 1px dashed rgba(30, 22, 17, 0.1);
-  padding-top: 10px;
-  margin-top: 2px;
+.inscard__sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.72rem;
+  opacity: 0.62;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.inscard__stock-lbl { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; opacity: 0.5; margin-bottom: 6px; }
-.inscard__stock-btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.inscard__custom { display: inline-flex; gap: 4px; align-items: center; }
-.inscard__custominput { width: 66px; padding: 6px 8px; }
-.chipbtn--add { font-weight: 800; }
+.inscard__falta { color: var(--pg-pomodoro, #d1381f); font-weight: 700; opacity: 0.9; }
+.inscard__costo { margin-left: auto; }
+.inscard__costo--falta { color: var(--pg-pomodoro, #d1381f); font-weight: 700; opacity: 0.85; }
+/* El nombre reserva dos renglones para que todas las tarjetas de la fila midan
+   igual, y la entrada se ancla abajo: así los campos quedan alineados. */
+.inscard__name { display: flex; align-items: center; min-height: 2.2em; }
+.entrada { margin-top: auto; }
+/* ENTRADA DE MERCANCIA: cantidad + lo que costo, en una sola linea. */
+.entrada {
+  border-top: 1px dashed rgba(30, 22, 17, 0.1);
+  padding-top: 8px;
+  margin-top: 2px;
+  display: grid;
+  gap: 6px;
+}
+.entrada__fila { display: flex; gap: 6px; align-items: stretch; }
+.entrada__campo {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  min-width: 0;
+  border: 1px solid rgba(30, 22, 17, 0.16);
+  border-radius: 9px;
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.entrada__campo:focus-within {
+  border-color: var(--pg-oro);
+  box-shadow: 0 0 0 3px rgba(242, 165, 22, 0.16);
+}
+.entrada__inp {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 0;
+  color: inherit;
+}
+/* Sin las flechitas del number: en tablet solo estorban. */
+.entrada__inp::-webkit-outer-spin-button,
+.entrada__inp::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.entrada__inp[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.entrada__uni,
+.entrada__cop { font-size: 0.76rem; opacity: 0.55; font-weight: 700; flex: none; }
+.entrada__campo--money { flex: 1.1; }
+.entrada__ok {
+  flex: none;
+  width: 40px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--pg-espresso);
+  color: var(--pg-crema);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.entrada__ok:hover:not(:disabled) { background: var(--pg-pomodoro); }
+.entrada__ok:disabled { opacity: 0.28; cursor: default; }
+.entrada__atajos { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.entrada__at {
+  border: 1px solid rgba(30, 22, 17, 0.14);
+  background: transparent;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+}
+.entrada__at:hover { opacity: 1; border-color: var(--pg-oro); background: rgba(242, 165, 22, 0.1); }
+/* Lo que va a quedar registrado, dicho ANTES de pulsar. */
+.entrada__calc {
+  margin-left: auto;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--pg-perejil-ink, #3f6b2a);
+  font-variant-numeric: tabular-nums;
+}
 .inscard__edit {
   border-top: 1px dashed rgba(30, 22, 17, 0.12);
   padding-top: 12px;
@@ -5165,3 +5260,226 @@ body.enreda-jugando .sticky-pedir {
   width: 100%;
   min-height: 40px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LA PUERTA DEL PANEL
+   Lo primero que se toca al abrir el local. Un solo campo, un solo botón,
+   objetivos grandes: se usa con prisa y a veces con una mano.
+   ══════════════════════════════════════════════════════════════════════════ */
+.alogin {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(242, 165, 22, 0.16), transparent 60%),
+    var(--pg-crema, #fbf1de);
+}
+.alogin__card {
+  width: min(100%, 400px);
+  background: #fff;
+  border: 1px solid rgba(30, 22, 17, 0.08);
+  border-radius: 22px;
+  padding: 34px 30px 26px;
+  box-shadow: 0 18px 50px -28px rgba(30, 22, 17, 0.5);
+  text-align: center;
+}
+.alogin__marca {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--pg-font-display);
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+}
+.alogin__hebra { color: var(--pg-pomodoro, #d1381f); font-size: 1.15rem; line-height: 1; }
+.alogin__h {
+  font-family: var(--pg-font-display);
+  font-size: 2.1rem;
+  line-height: 1.05;
+  margin: 10px 0 4px;
+}
+.alogin__sub { font-size: 0.9rem; opacity: 0.6; margin: 0 0 22px; }
+.alogin__form { display: grid; gap: 10px; }
+.alogin__campo { display: block; }
+.alogin__inp {
+  width: 100%;
+  font: inherit;
+  font-size: 1.05rem;
+  text-align: center;
+  letter-spacing: 0.06em;
+  padding: 15px 16px;
+  min-height: 52px;
+  border-radius: 13px;
+  border: 1.5px solid rgba(30, 22, 17, 0.16);
+  background: #fffdf9;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.alogin__inp::placeholder { letter-spacing: 0; opacity: 0.42; }
+.alogin__inp:focus {
+  outline: 0;
+  border-color: var(--pg-oro, #f2a516);
+  box-shadow: 0 0 0 4px rgba(242, 165, 22, 0.18);
+}
+.alogin__inp[aria-invalid="true"] { border-color: var(--pg-pomodoro, #d1381f); }
+.alogin__btn {
+  font: inherit;
+  font-weight: 800;
+  font-size: 1rem;
+  min-height: 52px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--pg-pomodoro, #d1381f);
+  color: #fff;
+  cursor: pointer;
+  transition: filter 0.15s, opacity 0.15s;
+}
+.alogin__btn:hover:not(:disabled) { filter: brightness(1.08); }
+.alogin__btn:disabled { opacity: 0.6; cursor: progress; }
+.alogin__error {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgba(209, 56, 31, 0.09);
+  border: 1px solid rgba(209, 56, 31, 0.3);
+  color: #8c2415;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.alogin__error span { display: block; font-weight: 500; opacity: 0.85; margin-top: 3px; }
+.alogin__volver {
+  display: inline-block;
+  margin-top: 20px;
+  font-size: 0.82rem;
+  opacity: 0.5;
+  color: inherit;
+  text-decoration: none;
+}
+.alogin__volver:hover { opacity: 0.85; text-decoration: underline; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RESUMEN · jerarquía en vez de siete cifras del mismo tamaño
+   ══════════════════════════════════════════════════════════════════════════ */
+/* Abrir / cerrar el negocio: la acción más frecuente del día, visible siempre. */
+.estado-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.88rem;
+  padding: 9px 15px;
+  min-height: 42px;
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.estado-btn.is-on { background: rgba(90, 140, 60, 0.13); border-color: rgba(90, 140, 60, 0.4); color: #2f5a1d; }
+.estado-btn.is-off { background: rgba(209, 56, 31, 0.12); border-color: rgba(209, 56, 31, 0.45); color: #8c2415; }
+.estado-btn__dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.estado-btn.is-on .estado-btn__dot { animation: latidoVivo 2.4s ease-in-out infinite; }
+@keyframes latidoVivo {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.estado-btn__accion {
+  font-weight: 600;
+  font-size: 0.76rem;
+  opacity: 0.6;
+  border-left: 1px solid currentColor;
+  padding-left: 8px;
+  margin-left: 2px;
+}
+
+.hoy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 22px;
+  background: #fff;
+  border: 1px solid rgba(30, 22, 17, 0.08);
+  border-radius: 18px;
+  padding: 20px 24px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 2px rgba(30, 22, 17, 0.05);
+}
+.hoy__main { display: flex; flex-direction: column; gap: 2px; min-width: 190px; }
+.hoy__k {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 700;
+  opacity: 0.5;
+}
+.hoy__v {
+  font-family: var(--pg-font-display);
+  font-size: clamp(2rem, 4vw, 2.7rem);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hoy__sub { font-size: 0.8rem; opacity: 0.6; }
+/* Lo pendiente son ENLACES, no cifras: cada uno lleva a donde se resuelve. */
+.hoy__pend {
+  flex: 1;
+  min-width: 240px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.pend {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 11px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid transparent;
+  transition: transform 0.12s, filter 0.12s;
+}
+.pend:hover { transform: translateY(-1px); filter: brightness(0.97); }
+.pend--activo { background: rgba(242, 165, 22, 0.16); border-color: rgba(242, 165, 22, 0.4); }
+.pend--cobro { background: rgba(209, 56, 31, 0.1); border-color: rgba(209, 56, 31, 0.32); color: #8c2415; }
+.pend--alto { background: rgba(209, 56, 31, 0.14); border-color: rgba(209, 56, 31, 0.42); color: #8c2415; }
+.pend--medio { background: rgba(242, 165, 22, 0.12); border-color: rgba(242, 165, 22, 0.32); }
+.pend--info { background: rgba(30, 22, 17, 0.05); border-color: rgba(30, 22, 17, 0.12); }
+.hoy__limpio { margin: 0; font-size: 0.9rem; opacity: 0.6; }
+
+@media (max-width: 640px) {
+  .hoy { padding: 16px; gap: 14px; }
+  .hoy__pend { min-width: 100%; }
+}
+
+/* --- /kds : el tablero de cocina, solo --- */
+.kds-solo {
+  min-height: 100dvh;
+  padding: 16px 18px 28px;
+  background: var(--pg-crema, #fbf1de);
+}
+.kds-solo .kds { max-width: 1600px; margin: 0 auto; }
+.kds-salida {
+  position: fixed;
+  top: 12px;
+  right: 14px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(30, 22, 17, 0.08);
+  color: inherit;
+  text-decoration: none;
+  font-size: 1rem;
+  opacity: 0.45;
+}
+.kds-salida:hover { opacity: 1; background: rgba(30, 22, 17, 0.16); }
+.kds-abrir { display: flex; justify-content: flex-end; margin-bottom: -6px; }

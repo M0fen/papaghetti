@@ -183,6 +183,29 @@ try {
     `${Math.round(pesoOriginal / 1024)}KB → ${Math.round(pesoAhora / 1024)}KB`,
   );
 
+  console.log("\n═══ ENTRADA DE MERCANCÍA CON DINERO REAL ═══");
+  {
+    const ins0 = JSON.parse(fs.readFileSync(FILE, "utf8")).insumos[0];
+    const stockAntes = ins0.stock;
+    // Compré 10 unidades y pagué $70.000 → el costo unitario debe quedar en $7.000
+    await cat.abastecerInsumo(ins0.id, 10, 70000);
+    const d = JSON.parse(fs.readFileSync(FILE, "utf8"));
+    const ins1 = d.insumos.find((i) => i.id === ins0.id);
+    check("suma la cantidad", Math.abs(ins1.stock - stockAntes - 10) < 0.001, `${stockAntes} → ${ins1.stock}`);
+    check("recalcula el costo unitario", ins1.costo === 7000, `$${ins1.costo}/${ins1.unidad} (antes $${ins0.costo})`);
+    const mov = (d.movimientos ?? [])[0];
+    check("registra el gasto por el monto REAL del recibo", mov?.monto === 70000, `$${mov?.monto}`);
+    check("el movimiento es una compra de insumos", mov?.tipo === "compra" && mov?.categoria === "insumos");
+
+    // Sin monto: usa el costo que ya conocía.
+    await cat.abastecerInsumo(ins0.id, 2);
+    const d2 = JSON.parse(fs.readFileSync(FILE, "utf8"));
+    const ins2 = d2.insumos.find((i) => i.id === ins0.id);
+    check("sin monto, el costo NO cambia", ins2.costo === 7000, `$${ins2.costo}`);
+    check("y estima el gasto con ese costo", d2.movimientos[0].monto === 14000, `$${d2.movimientos[0].monto}`);
+    await rechaza("abastecer sin cantidad", () => cat.abastecerInsumo(ins0.id, 0), "cuánto entró");
+  }
+
   console.log("\n═══ NO SE PUEDE BORRAR UN INSUMO QUE ALGUNA RECETA USA ═══");
   if (insumoDeLaBase) {
     await rechaza(

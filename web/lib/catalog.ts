@@ -6,7 +6,7 @@ import {
   CATALOG_TABLE,
   CATALOG_ID,
 } from "./supabase";
-import { desglosarPrecioFinal, faltaParaMinimo, totalDe } from "./precios";
+import { desglosarPrecioFinal, faltaParaMinimo, totalDe, diaNegocio } from "./precios";
 import {
   SEED_CATALOG,
   SEED_AJUSTES,
@@ -73,6 +73,15 @@ const FILE = path.join(DATA_DIR, "catalog.json");
  * un catálogo leído (archivo o Supabase). Idempotente.
  */
 function migrate(cat: Catalog): Catalog {
+  /* Defensa mínima: si lo que llega no es un catálogo (documento vacío, truncado o de
+     otra cosa), rellenamos las colecciones obligatorias en vez de reventar con un
+     "Cannot read properties of undefined" que no le dice nada a nadie. Los grupos SÍ
+     se siembran porque sin carta no hay POS. */
+  if (!cat || typeof cat !== "object") cat = structuredClone(SEED_CATALOG);
+  for (const g of ["bases", "proteinas", "toppings"] as const) {
+    if (!Array.isArray(cat[g]) || cat[g].length === 0) cat[g] = structuredClone(SEED_CATALOG[g]);
+  }
+  if (!Array.isArray(cat.enredos)) cat.enredos = structuredClone(SEED_CATALOG.enredos);
   cat.pedidos ??= []; // Fase 3
   cat.movimientos ??= []; // Fase 4 · contabilidad
   cat.leads ??= []; //   Fase 3.5
@@ -127,12 +136,142 @@ function migrate(cat: Catalog): Catalog {
   return cat;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   DÓNDE VIVE EL CEREBRO
+
+   Tres backends, en orden de preferencia:
+     1. SUPABASE  — si están las dos env vars (el destino final, relacional).
+     2. VERCEL BLOB — almacén de objetos durable, privado, ligado al proyecto.
+        Es lo que hace que el POS guarde de un día para otro HOY: /tmp es efímero
+        y por instancia, así que un pedido creado en una lambda no existía para la
+        pantalla de cocina en otra, y todo el turno se evaporaba al reciclar.
+     3. ARCHIVO   — data/catalog.json en local (desarrollo).
+   ══════════════════════════════════════════════════════════════════════════ */
+/**
+ * Blob se usa SOLO en Vercel. `vercel env pull` deja el token en .env.local, así que
+ * sin esta condición `next dev` escribiría sobre los datos REALES del restaurante
+ * mientras se programa. En local manda siempre el archivo.
+ * (`PG_BLOB=1` fuerza el backend para poder probarlo a mano.)
+ */
+const blobEnabled = (): boolean =>
+  Boolean(process.env.BLOB_READ_WRITE_TOKEN) &&
+  Boolean(process.env.VERCEL || process.env.PG_BLOB);
+const RUTA_BLOB = "cerebro/catalog.json";
+
+/**
+ * ETag de la última lectura. Blob soporta escritura condicional (`ifMatch`), o sea
+ * COMPARE-AND-SWAP de verdad: si otra instancia escribió entre nuestra lectura y
+ * nuestra escritura, el put falla en vez de pisarla en silencio.
+ */
+let etagActual: string | null = null;
+
+/**
+ * Memo cortísimo. Las pantallas del panel son `force-dynamic` y se auto-refrescan
+ * (cocina 8s, caja 10s, mesas 15s): sin esto, cada refresco de cada dispositivo es
+ * una lectura de red. 2 segundos no alcanzan a mostrar nada rancio y quitan la
+ * mayoría de las lecturas.
+ */
+let memo: { cat: Catalog; hasta: number } | null = null;
+const MEMO_MS = 2000;
+const olvidar = () => {
+  memo = null;
+};
+
 async function read(): Promise<Catalog> {
-  return supabaseEnabled() ? readSupabase() : readFile();
+  if (memo && memo.hasta > Date.now()) return memo.cat;
+  const cat = supabaseEnabled()
+    ? await readSupabase()
+    : blobEnabled()
+      ? await readBlob()
+      : await readFile();
+  memo = { cat, hasta: Date.now() + MEMO_MS };
+  return cat;
 }
 
-async function write(cat: Catalog): Promise<void> {
-  return supabaseEnabled() ? writeSupabase(cat) : writeFile(cat);
+/** Lectura SIN memo: la que se usa dentro del candado, antes de escribir. */
+async function readFresco(): Promise<Catalog> {
+  olvidar();
+  return read();
+}
+
+async function write(cat: Catalog, sinCondicion = false): Promise<void> {
+  olvidar();
+  if (supabaseEnabled()) return writeSupabase(cat);
+  if (blobEnabled()) return writeBlob(cat, sinCondicion);
+  return writeFile(cat);
+}
+
+/* --- Backend: Vercel Blob (durable, privado, con escritura condicional) --- */
+async function readBlob(): Promise<Catalog> {
+  const { get } = await import("@vercel/blob");
+  try {
+    const b = await get(RUTA_BLOB, { access: "private", useCache: false });
+    if (!b || b.statusCode !== 200 || !b.stream) {
+      // Todavía no existe el documento: primer arranque legítimo → siembra.
+      const seed = structuredClone(SEED_CATALOG);
+      await writeBlob(seed);
+      return seed;
+    }
+    // `get` devuelve el ETag en forma DÉBIL (W/"abc") y `put` compara contra la
+    // fuerte ("abc"): sin normalizar, TODA escritura condicional fallaba.
+    etagActual = (b.blob?.etag ?? "").replace(/^W\//, "") || null;
+    const texto = await new Response(b.stream).text();
+    return migrate(JSON.parse(texto) as Catalog);
+  } catch (e) {
+    // Un fallo de red NO puede devolver la semilla: la siguiente acción la
+    // escribiría encima y borraría el turno. Fallar ruidosamente es lo correcto.
+    if ((e as Error)?.name === "BlobNotFoundError") {
+      const seed = structuredClone(SEED_CATALOG);
+      await writeBlob(seed);
+      return seed;
+    }
+    const causa = (e as { cause?: { message?: string } })?.cause?.message;
+    throw new Error(
+      `No se pudo leer el cerebro: ${(e as Error)?.message ?? e}${causa ? ` (${causa})` : ""}`,
+      { cause: e },
+    );
+  }
+}
+
+async function writeBlob(cat: Catalog, sinCondicion = false): Promise<void> {
+  const { put } = await import("@vercel/blob");
+  const cuerpo = JSON.stringify(cat);
+  const r = await put(RUTA_BLOB, cuerpo, {
+    access: "private",
+    contentType: "application/json",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    cacheControlMaxAge: 0,
+    // Compare-and-swap: solo escribe si nadie tocó el documento desde que lo leímos.
+    ...(etagActual && !sinCondicion ? { ifMatch: etagActual } : {}),
+  });
+  etagActual = (r.etag ?? "").replace(/^W\//, "") || null;
+  void respaldoDelDia(cuerpo);
+}
+
+/**
+ * RESPALDO DIARIO. Una copia fechada por día, sin bloquear la escritura principal.
+ * Si algo sale mal (un Deshacer desafortunado, un reset, una migración), se puede
+ * volver al cierre de ayer en vez de perderlo todo. Cuesta centavos.
+ */
+let respaldoHecho = "";
+async function respaldoDelDia(cuerpo: string): Promise<void> {
+  const dia = diaNegocio();
+  if (respaldoHecho === dia) return;
+  respaldoHecho = dia;
+  try {
+    const { put } = await import("@vercel/blob");
+    await put(`cerebro/respaldo-${dia}.json`, cuerpo, {
+      access: "private",
+      contentType: "application/json",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      cacheControlMaxAge: 0,
+    });
+  } catch {
+    // Un respaldo que falla no puede tumbar un pedido. Se reintenta mañana.
+    respaldoHecho = "";
+  }
 }
 
 /* --- Backend: archivo local / /tmp (dev y fallback) --- */
@@ -252,16 +391,95 @@ function nuevaEntrada(texto: string, meta = false): HistItem {
 }
 
 /**
+ * CANDADO DE ESCRITURA (por instancia).
+ *
+ * Toda mutación es leer → modificar → escribir el documento entero. Sin serializar,
+ * dos peticiones de la misma instancia se pisan: la segunda escribe encima de un
+ * estado que ya no era el actual y se pierde lo que hizo la primera. La cola cuesta
+ * nada y elimina esa carrera por completo dentro del proceso.
+ */
+let cola: Promise<unknown> = Promise.resolve();
+function enFila<T>(fn: () => Promise<T>): Promise<T> {
+  const r = cola.then(fn, fn);
+  cola = r.then(
+    () => undefined,
+    () => undefined,
+  );
+  return r;
+}
+
+/** Índice por id, para unir dos listas sin perder ni duplicar. */
+function unir<T extends { id: string }>(base: T[], mio: T[]): T[] {
+  const m = new Map(base.map((x) => [x.id, x]));
+  for (const x of mio) m.set(x.id, x); // mi versión manda sobre la del otro
+  return [...m.values()];
+}
+
+/**
+ * Une lo que YO cambié con lo que otra instancia escribió mientras tanto.
+ *
+ * Las tres colecciones transaccionales (pedidos, movimientos, leads) son
+ * append-only en la práctica: si el cajero cobra el #A1 mientras entra el #B2 por
+ * QR desde otra lambda, ninguno de los dos puede desaparecer. Para el resto del
+ * catálogo (precios, recetas, ajustes) manda mi versión: lo edita una sola persona.
+ */
+function fusionar(actual: Catalog, mio: Catalog): Catalog {
+  // Las tres listas se guardan MÁS NUEVO PRIMERO y las pantallas confían en ese
+  // orden. `unir` respeta el orden del mapa (primero los de `actual`), así que sin
+  // reordenar, lo recién creado aparecía al final: el movimiento que acababas de
+  // registrar no salía arriba en Finanzas.
+  const recientes = <T>(xs: T[], fecha: (x: T) => string) =>
+    [...xs].sort((a, b) => fecha(b).localeCompare(fecha(a)));
+  return {
+    ...mio,
+    pedidos: recientes(unir(actual.pedidos ?? [], mio.pedidos ?? []), (p) => p.creadoEn),
+    movimientos: recientes(unir(actual.movimientos ?? [], mio.movimientos ?? []), (m) => m.fecha),
+    leads: recientes(unir(actual.leads ?? [], mio.leads ?? []), (l) => l.creadoEn),
+  };
+}
+
+/**
  * Persiste `cat` como una acción: guarda un snapshot del estado ANTERIOR en la
  * pila de deshacer, limpia rehacer y agrega la entrada al historial.
  * Reemplaza a write() en todas las mutaciones del operador.
+ *
+ * `autoritativo` = mi documento manda tal cual, sin unir (lo usa el borrado
+ * explícito de un movimiento: unir lo resucitaría).
  */
-async function commit(cat: Catalog, texto?: string): Promise<void> {
-  const prev = await read(); // estado persistido (pre-mutación)
-  cat.undo = [...(prev.undo ?? []), stripSnap(prev)].slice(-UNDO_CAP);
-  cat.redo = [];
-  if (texto) cat.historial = [nuevaEntrada(texto), ...(cat.historial ?? [])].slice(0, HIST_CAP);
-  await write(cat);
+async function commit(
+  cat: Catalog,
+  texto?: string,
+  opciones?: { autoritativo?: boolean },
+): Promise<void> {
+  return enFila(async () => {
+    for (let intento = 0; intento < 3; intento++) {
+      const actual = await readFresco(); // fija el etag para la escritura condicional
+      const doc = opciones?.autoritativo ? { ...cat } : fusionar(actual, cat);
+      doc.undo = [...(actual.undo ?? []), stripSnap(actual)].slice(-UNDO_CAP);
+      doc.redo = [];
+      if (texto) {
+        doc.historial = [nuevaEntrada(texto), ...(actual.historial ?? [])].slice(0, HIST_CAP);
+      }
+      try {
+        // Último intento: se escribe SIN condición. Ya venimos de releer y fusionar,
+        // así que no se pierde nada — y perder un pedido por un compare-and-swap
+        // terco sería mucho peor que la carrera que intenta evitar.
+        await write(doc, intento === 2);
+        return;
+      } catch (e) {
+        // Otra instancia escribió entre nuestra lectura y nuestra escritura: el
+        // compare-and-swap la protegió. Releemos y reintentamos sobre lo nuevo.
+        const conflicto =
+          (e as Error)?.name === "BlobPreconditionFailedError" ||
+          /precondition|ifMatch|412/i.test((e as Error)?.message ?? "");
+        if (conflicto && intento < 2) {
+          etagActual = null;
+          continue;
+        }
+        throw e;
+      }
+    }
+  });
 }
 
 /** Deshace la última acción (restaura el snapshot anterior). */
@@ -997,15 +1215,28 @@ export async function deleteInsumo(id: string): Promise<Catalog> {
   return cat;
 }
 
-/** Registra una compra (salida de caja) por la cantidad abastecida × costo. */
-function registrarCompra(cat: Catalog, insumo: Insumo, delta: number): void {
-  if (delta <= 0 || !insumo.costo) return;
+/**
+ * Registra una compra (salida de caja).
+ *
+ * `montoReal` es lo que de verdad se pagó en la tienda. Si viene, manda sobre
+ * `cantidad × costo`: es plata que salió de la caja y el reporte debe cuadrar con
+ * el recibo, no con una estimación.
+ */
+function registrarCompra(
+  cat: Catalog,
+  insumo: Insumo,
+  delta: number,
+  montoReal?: number,
+): void {
+  if (delta <= 0) return;
+  const monto = montoReal && montoReal > 0 ? Math.round(montoReal) : Math.round(delta * (insumo.costo ?? 0));
+  if (monto <= 0) return; // sin costo conocido no hay salida de caja que registrar
   const mov: Movimiento = {
     id: crypto.randomUUID().slice(0, 8).toUpperCase(),
     fecha: new Date().toISOString(),
     tipo: "compra",
     concepto: `Abastecer ${insumo.nombre}`,
-    monto: Math.round(delta * insumo.costo),
+    monto,
     categoria: "insumos",
     insumoId: insumo.id,
     cantidad: Number(delta.toFixed(3)),
@@ -1013,18 +1244,40 @@ function registrarCompra(cat: Catalog, insumo: Insumo, delta: number): void {
   cat.movimientos = [mov, ...(cat.movimientos ?? [])].slice(0, 2000);
 }
 
-/** Suma cantidad al stock de un insumo → "Abastecer" (registra la compra). */
-export async function abastecerInsumo(id: string, cantidad: number): Promise<Catalog> {
+/**
+ * Suma cantidad al stock de un insumo → "Abastecer".
+ *
+ * `montoTotal` (opcional) es lo que se pagó por ESA compra. Cuando viene:
+ *  · el movimiento de caja se registra por el monto exacto del recibo, y
+ *  · el costo unitario del insumo se ACTUALIZA solo (monto ÷ cantidad).
+ *
+ * Antes solo se podía teclear la cantidad, y el costo unitario vivía escondido en
+ * el formulario de edición: el operario compraba "$70.000 de papa" y el sistema
+ * anotaba una cifra vieja. Ahora se registra lo que pasó de verdad y el margen de
+ * cada plato se corrige solo cuando cambia el precio del proveedor.
+ */
+export async function abastecerInsumo(
+  id: string,
+  cantidad: number,
+  montoTotal?: number,
+): Promise<Catalog> {
   const cat = await read();
   const it = cat.insumos.find((x) => x.id === id);
-  if (it) {
-    const antes = it.stock;
-    it.stock = Math.max(0, Number((it.stock + cantidad).toFixed(3)));
-    registrarCompra(cat, it, it.stock - antes);
+  if (!it) throw new Error("Ese insumo ya no existe.");
+  if (!(cantidad > 0)) throw new Error("¿Cuánto entró? Escribe una cantidad.");
+  const antes = it.stock;
+  it.stock = Math.max(0, Number((it.stock + cantidad).toFixed(3)));
+  const delta = it.stock - antes;
+  if (montoTotal && montoTotal > 0 && delta > 0) {
+    it.costo = Math.max(0, Math.round(montoTotal / delta));
   }
+  registrarCompra(cat, it, delta, montoTotal);
   reactivarPreparables(cat, id);
-  const ins = cat.insumos.find((x) => x.id === id);
-  await commit(cat, `Abasteció ${cantidad} ${ins?.unidad ?? ""} de ${ins?.nombre ?? id}`.trim());
+  await commit(
+    cat,
+    `Abasteció ${cantidad} ${it.unidad} de ${it.nombre}` +
+      (montoTotal && montoTotal > 0 ? ` por ${formatCOP(montoTotal)}` : ""),
+  );
   return cat;
 }
 
@@ -1089,7 +1342,7 @@ export async function crearGasto(input: NuevoGasto): Promise<Catalog> {
 export async function deleteMovimiento(id: string): Promise<Catalog> {
   const cat = await read();
   cat.movimientos = (cat.movimientos ?? []).filter((m) => m.id !== id);
-  await commit(cat, "Eliminó un movimiento");
+  await commit(cat, "Eliminó un movimiento", { autoritativo: true });
   return cat;
 }
 

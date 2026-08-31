@@ -17,13 +17,13 @@ import {
 } from "@/lib/menu";
 import {
   abastecerAction,
-  abastecerAParAction,
   abastecerTodoAParAction,
   saveInsumoAction,
   crearInsumoAction,
   eliminarInsumoAction,
 } from "@/app/admin/actions";
 
+/** Lo que suele entrar de una vez, para no teclear en el caso común. */
 const PRESETS: Record<UnidadInsumo, number[]> = {
   lb: [1, 5],
   kg: [1, 5],
@@ -110,7 +110,7 @@ function InsumoCard({ ins }: { ins: Insumo }) {
   const presets = PRESETS[ins.unidad] ?? [1, 5];
 
   return (
-    <article className={`inscard ${bajo ? "is-low" : ""}`}>
+    <article className={`inscard ${agotado ? "is-out" : bajo ? "is-low" : ""}`}>
       <header className="inscard__head">
         <span className="inscard__emoji" aria-hidden>{ins.emoji ?? "📦"}</span>
         <b className="inscard__name">{ins.nombre}</b>
@@ -129,39 +129,36 @@ function InsumoCard({ ins }: { ins: Insumo }) {
         <span className={`inscard__qty ${estado.cls}`}>
           {formatCantidad(ins.stock, ins.unidad)}
         </span>
-        <span className={`pill pill--${estado.cls.replace("is-", "")}`}>{estado.txt}</span>
+        {/* El estado normal ya lo dice la franja lateral: la pastilla solo aparece
+            cuando hay algo que hacer, así la rejilla no grita toda a la vez. */}
+        {estado.txt !== "OK" && (
+          <span className={`pill pill--${estado.cls.replace("is-", "")}`}>{estado.txt}</span>
+        )}
       </div>
       <div className="inscard__gauge" title={`${pct}% del estándar`}>
         <div className={`inscard__bar ${bajo ? "is-low" : ""}`} style={{ width: `${pct}%` }} />
         <span className="inscard__min" style={{ left: `${ins.parStock > 0 ? Math.min(100, (min / ins.parStock) * 100) : 0}%` }} />
       </div>
+      {/* Una sola línea: el estándar, lo que falta y a cuánto sale. Antes eran tres
+          datos con etiquetas largas que envolvían a dos renglones y descuadraban
+          la altura de cada tarjeta de la fila. */}
       <div className="inscard__sub">
-        Estándar {ins.parStock} {unidadCorta[ins.unidad]}
-        {falta > 0 ? ` · faltan ${falta} ${unidadCorta[ins.unidad]}` : ""}
-        {ins.costo ? ` · ${formatCOP(ins.costo)}/${unidadCorta[ins.unidad]}` : ""}
+        <span>
+          est. {ins.parStock} {unidadCorta[ins.unidad]}
+        </span>
+        {falta > 0 && <span className="inscard__falta">−{falta}</span>}
+        {ins.costo ? (
+          <span className="inscard__costo">
+            {formatCOP(ins.costo)}/{unidadCorta[ins.unidad]}
+          </span>
+        ) : (
+          <span className="inscard__costo inscard__costo--falta" title="Sin costo, el margen de sus platos sale inflado">
+            sin costo
+          </span>
+        )}
       </div>
 
-      {!editar && (
-        <div className="inscard__stock">
-          <span className="inscard__stock-lbl">Abastecer</span>
-          <div className="inscard__stock-btns">
-            {presets.map((n) => (
-              <form action={abastecerAction} key={n}>
-                <input type="hidden" name="id" value={ins.id} />
-                <input type="hidden" name="cantidad" value={n} />
-                <button className="chipbtn" type="submit">+{n}</button>
-              </form>
-            ))}
-            <form action={abastecerAParAction}>
-              <input type="hidden" name="id" value={ins.id} />
-              <button className="chipbtn chipbtn--par" type="submit" title="Llenar hasta el estándar">
-                ⤴ estándar
-              </button>
-            </form>
-            <AbastecerCustom id={ins.id} unidad={ins.unidad} />
-          </div>
-        </div>
-      )}
+      {!editar && <Entrada ins={ins} presets={presets} falta={falta} />}
 
       {editar && (
         <form action={saveInsumoAction} className="inscard__edit">
@@ -213,20 +210,98 @@ function InsumoCard({ ins }: { ins: Insumo }) {
   );
 }
 
-function AbastecerCustom({ id, unidad }: { id: string; unidad: UnidadInsumo }) {
+/**
+ * LA ENTRADA DE MERCANCÍA — un solo gesto.
+ *
+ * Antes había cuatro controles compitiendo por lo mismo (+1, +5, ⤴ estándar y un
+ * input suelto) y NINGUNO permitía decir cuánto se pagó: el costo unitario vivía
+ * enterrado en el formulario de edición, así que se quedaba viejo y el margen de
+ * cada plato mentía.
+ *
+ * Ahora: cantidad + (opcional) lo que costó. Si pones el dinero, el costo unitario
+ * se recalcula solo y el gasto entra a Finanzas por el monto exacto del recibo.
+ */
+function Entrada({
+  ins,
+  presets,
+  falta,
+}: {
+  ins: Insumo;
+  presets: number[];
+  falta: number;
+}) {
+  const [cant, setCant] = useState("");
+  const [monto, setMonto] = useState("");
+  const n = Number(cant) || 0;
+  const m = Number(monto) || 0;
+  // Lo que va a quedar registrado, dicho antes de pulsar: sin sorpresas.
+  const unitario = n > 0 && m > 0 ? Math.round(m / n) : null;
+
   return (
-    <form action={abastecerAction} className="inscard__custom">
-      <input type="hidden" name="id" value={id} />
-      <input
-        className="admin-input inscard__custominput"
-        type="number"
-        name="cantidad"
-        min={0}
-        step="any"
-        placeholder={unidadCorta[unidad]}
-        aria-label="cantidad a abastecer"
-      />
-      <button className="chipbtn chipbtn--add" type="submit">＋</button>
+    <form action={abastecerAction} className="entrada">
+      <input type="hidden" name="id" value={ins.id} />
+      <div className="entrada__fila">
+        <label className="entrada__campo">
+          <input
+            className="entrada__inp"
+            type="number"
+            name="cantidad"
+            min={0}
+            step="any"
+            value={cant}
+            onChange={(e) => setCant(e.target.value)}
+            placeholder="0"
+            aria-label={`Cantidad de ${ins.nombre} en ${unidadCorta[ins.unidad]}`}
+          />
+          <span className="entrada__uni">{unidadCorta[ins.unidad]}</span>
+        </label>
+        <label className="entrada__campo entrada__campo--money">
+          <span className="entrada__cop">$</span>
+          <input
+            className="entrada__inp"
+            type="number"
+            name="monto"
+            min={0}
+            step={100}
+            value={monto}
+            onChange={(e) => setMonto(e.target.value)}
+            placeholder="pagado"
+            aria-label={`Cuánto pagaste por ${ins.nombre} (opcional)`}
+          />
+        </label>
+        <button className="entrada__ok" type="submit" disabled={n <= 0} title="Registrar entrada">
+          ↵
+        </button>
+      </div>
+
+      <div className="entrada__atajos">
+        {presets.map((x) => (
+          <button
+            key={x}
+            type="button"
+            className="entrada__at"
+            onClick={() => setCant(String(x))}
+            title={`${x} ${unidadCorta[ins.unidad]}`}
+          >
+            +{x}
+          </button>
+        ))}
+        {falta > 0 && (
+          <button
+            type="button"
+            className="entrada__at"
+            onClick={() => setCant(String(falta))}
+            title={`Lo que falta para el estándar: ${falta} ${unidadCorta[ins.unidad]}`}
+          >
+            ⤴ {falta}
+          </button>
+        )}
+        {unitario !== null && (
+          <span className="entrada__calc" aria-live="polite">
+            = {formatCOP(unitario)}/{unidadCorta[ins.unidad]}
+          </span>
+        )}
+      </div>
     </form>
   );
 }

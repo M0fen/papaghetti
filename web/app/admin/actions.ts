@@ -245,7 +245,12 @@ export async function abastecerAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const cantidad = Number(formData.get("cantidad") ?? 0);
   if (!id || !cantidad) return;
-  await abastecerInsumo(id, cantidad);
+  // `monto` = lo que se pagó de verdad. Si viene, actualiza el costo unitario solo.
+  const monto = Number(formData.get("monto") ?? 0);
+  await intentar(
+    () => abastecerInsumo(id, cantidad, monto > 0 ? monto : undefined),
+    monto > 0 ? `Entró mercancía por ${monto.toLocaleString("es-CO")} COP` : "Despensa actualizada",
+  );
   reflejarInv();
 }
 
