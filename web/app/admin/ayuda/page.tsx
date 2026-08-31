@@ -101,10 +101,10 @@ export default async function AyudaPage() {
         <article className="ayuda-card">
           <h3>Cómo se cobra un enredo</h3>
           <p>
-            Base + proteína(s) a precio completo. Las <b>salsas van incluidas</b> y no gastan
-            cupo. De los acompañantes, <b>los {TOPPINGS_INCLUIDOS} más caros van por cuenta
-            de la casa</b> y el resto se cobra. Los combos, ensaladas y platos a la carta
-            tienen <b>precio cerrado</b>.
+            Base + proteína(s) a precio completo y <b>cada acompañante a su precio</b>: en
+            Papaghetti nada va por cuenta de la casa. Las <b>salsas van con el plato</b>
+            porque valen $0 en la carta. Los combos, ensaladas y platos a la carta tienen{" "}
+            <b>precio cerrado</b>.
           </p>
         </article>
 
@@ -139,8 +139,8 @@ export default async function AyudaPage() {
           <b>{a.impuestoPct ? `${a.impuestoPct}%` : "ninguno"}</b>
         </li>
         <li>
-          <span>Acompañantes de cortesía</span>
-          <b>{TOPPINGS_INCLUIDOS}</b>
+          <span>Acompañantes que no se cobran</span>
+          <b>{TOPPINGS_INCLUIDOS === 0 ? "ninguno" : TOPPINGS_INCLUIDOS}</b>
         </li>
         <li>
           <span>Domicilio</span>

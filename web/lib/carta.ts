@@ -7,12 +7,11 @@
  *
  * ESTRUCTURA
  *  · BASES        — se elige una. Trae el precio de arranque del plato.
- *  · SALSAS       — se eligen libremente y NO se cobran. Van dentro del grupo
+ *  · SALSAS       — se eligen libremente y valen $0 en la carta. Van dentro del grupo
  *                   "toppings" del cerebro (para no partir el modelo de datos) pero
- *                   con `categoria: "salsa"`: no cuestan y NO gastan los dos
- *                   acompañantes de cortesía.
+ *                   con `categoria: "salsa"`, que es lo que las saca del cobro.
  *  · PROTEINAS    — se cobran completas, se pueden sumar varias.
- *  · ACOMPANANTES — los dos primeros van por cuenta de la casa (TOPPINGS_INCLUIDOS).
+ *  · ACOMPANANTES — cada uno se cobra a su precio: nada va por cuenta de la casa.
  *  · PLATOS       — combos, ensaladas, a la carta y especiales: precio CERRADO.
  *                   Los combos llevan componentes (descuentan despensa); los demás
  *                   son platos de cocina que todavía no tienen ficha técnica.
@@ -72,7 +71,7 @@ export const BASES: Ingrediente[] = [
 ];
 
 /* ══════════════════════════════════════════════════════════════════════════
-   SALSAS · incluidas, sin costo y sin gastar los acompañantes de cortesía
+   SALSAS · valen $0 en la carta: van con el plato, se elijan las que se elijan
    ══════════════════════════════════════════════════════════════════════════ */
 export const SALSAS: Ingrediente[] = [
   {
@@ -217,7 +216,7 @@ export const PROTEINAS: Ingrediente[] = [
 ];
 
 /* ══════════════════════════════════════════════════════════════════════════
-   ACOMPAÑANTES · los dos primeros van por cuenta de la casa
+   ACOMPAÑANTES · cada uno se cobra a su precio
    ══════════════════════════════════════════════════════════════════════════ */
 export const ACOMPANANTES: Ingrediente[] = [
   {
@@ -593,5 +592,5 @@ export const RECETAS: Record<string, RecetaItem[]> = {
   ],
 };
 
-/** Los "toppings" del cerebro = salsas (gratis) + acompañantes (con precio). */
+/** Los "toppings" del cerebro = salsas ($0) + acompañantes (cada uno con precio). */
 export const TOPPINGS: Ingrediente[] = [...SALSAS, ...ACOMPANANTES];

@@ -195,13 +195,16 @@ function OrderCard({ p }: { p: Pedido }) {
         {p.pago === "pendiente" && p.estado !== "cancelado" && (
           <form action={cobrarAction} className="ocard__cobrar">
             <input type="hidden" name="id" value={p.id} />
+            {/* step="any": con step=500 el navegador rechazaba en silencio una propina de
+                2.300 o un descuento de 1.200 — se tocaba el método de pago y el cobro
+                simplemente no ocurría, sin ningún mensaje. */}
             <label className="ocard__pd">
               Propina
-              <input type="number" name="propina" min={0} step={500} defaultValue={0} aria-label="Propina" />
+              <input type="number" name="propina" min={0} step="any" defaultValue={0} aria-label="Propina" />
             </label>
             <label className="ocard__pd">
               Descuento
-              <input type="number" name="descuento" min={0} step={500} defaultValue={0} aria-label="Descuento" />
+              <input type="number" name="descuento" min={0} step="any" defaultValue={0} aria-label="Descuento" />
             </label>
             <span className="muted">Cobrar:</span>
             {METODOS.map((m) => (

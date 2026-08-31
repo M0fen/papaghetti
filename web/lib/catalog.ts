@@ -48,7 +48,7 @@ const GRUPO: Record<Categoria, "bases" | "proteinas" | "toppings"> = {
   base: "bases",
   proteina: "proteinas",
   topping: "toppings",
-  // Las salsas viven con los toppings pero ni cuestan ni gastan los de cortesía.
+  // Las salsas viven con los toppings, pero valen $0: se filtran al cobrar.
   salsa: "toppings",
 };
 const slugify = (s: string) =>
@@ -1185,15 +1185,14 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
   const impuestoPct = cat.ajustes.impuestoPct ?? 0;
   // El insignia tiene precio de carta CERRADO (todo incluido) → se desglosa hacia atrás
   // para que subtotal/impuesto sigan siendo comparables con los pedidos armados a mano.
-  // Las SALSAS van incluidas: no cuestan y NO gastan un cupo de cortesía. Si
-  // contaran, elegir dos salsas dejaría al cliente pagando todos sus acompañantes.
+  // Las SALSAS valen $0 en la carta: fuera del conteo de lo que se cobra.
   const cobrables = tops.filter((t) => t.categoria !== "salsa");
   const armado =
     (base?.precio ?? 0) +
     prots.reduce((s, p) => s + p.precio, 0) + // todas las proteínas a precio completo
-    // MISMA función que usa el cliente (lib/precios.ts): la casa regala los más
-    // caros. Antes cada lado regalaba "los primeros" de un orden distinto y el
-    // total de la pantalla no era el que se cobraba.
+    // MISMA función que usa el cliente (lib/precios.ts). Hoy TOPPINGS_INCLUIDOS es 0,
+    // o sea que suma todos; sigue pasando por aquí para que, si alguna vez hay promo,
+    // el total de la pantalla no pueda separarse del que se cobra.
     cobroToppings(cobrables, TOPPINGS_INCLUIDOS);
   const { subtotal, impuesto } = insignia
     ? desglosarPrecioFinal(insignia.precio, impuestoPct)

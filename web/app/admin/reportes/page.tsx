@@ -316,7 +316,7 @@ export default async function FinanzasPage({
             <GastoRapido />
             <div className="gasto-form__grid">
               <input className="admin-input" name="concepto" placeholder="Concepto (ej: recibo de luz)" required />
-              <input className="admin-input" type="number" name="monto" placeholder="Monto COP" min={0} step={500} required />
+              <input className="admin-input" type="number" name="monto" placeholder="Monto COP" min={0} step="any" required />
               <select className="admin-input" name="categoria" defaultValue="otro">
                 {GASTO_CATEGORIAS.map((c) => (
                   <option key={c} value={c}>{gastoCatLabel[c]}</option>

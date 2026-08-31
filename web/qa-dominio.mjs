@@ -6,7 +6,14 @@
  *
  * El proyecto no tiene runner instalado a propósito: esto no necesita uno.
  */
-import { totalDe, diaNegocio, horaNegocio, calcularTotales, desglosarPrecioFinal } from "./lib/precios.ts";
+import {
+  totalDe,
+  diaNegocio,
+  horaNegocio,
+  calcularTotales,
+  desglosarPrecioFinal,
+  idsGratis,
+} from "./lib/precios.ts";
 import { inicioDe, esVenta, ventaNeta } from "./lib/menu.ts";
 
 let ok = 0,
@@ -83,11 +90,12 @@ console.log("\n═══ EL ESPEJO DEL CLIENTE COINCIDE CON EL SERVIDOR ══�
     costoDomicilio: 5000,
     incluidos: 2,
   });
-  /* La casa regala los DOS MÁS CAROS (4.500 y 2.000) y cobra el que queda (2.000).
-     Antes regalaba "los dos primeros del array", que llegaba en el orden en que el
-     cliente los tocó: el mismo plato costaba distinto según el orden de los clics, y
-     el servidor —que los resolvía en orden de catálogo— cobraba otra cosa. */
-  eq("subtotal: se regalan los dos toppings más caros", t.subtotal, 18900 + 9000 + 2000);
+  /* Este bloque prueba la MAQUINARIA de promoción con `incluidos: 2` explícito. La regla
+     viva del negocio es otra —nada va por cuenta de la casa, TOPPINGS_INCLUIDOS = 0— y se
+     comprueba más abajo. Con 2 se descuentan los DOS MÁS CAROS (4.500 y 2.000) y se cobra
+     el que queda (2.000): nunca "los dos primeros del array", que llegaba en el orden en
+     que el cliente los tocó y hacía que el mismo plato costara distinto según los clics. */
+  eq("con promoción de 2, se descuentan los dos más caros", t.subtotal, 18900 + 9000 + 2000);
   eq("impuesto", t.impuesto, Math.round(29900 * 0.08));
   eq("total del espejo", t.total, 29900 + 2392 + 5000);
   eq("y coincide con totalDe()", totalDe(t), 37292);
@@ -103,19 +111,34 @@ console.log("\n═══ EL ESPEJO DEL CLIENTE COINCIDE CON EL SERVIDOR ══�
   const alDerecho = calcularTotales({ base, proteinas: [prot], toppings: tops, impuestoPct: 8, incluidos: 2 });
   eq("tocar los toppings en otro orden cuesta lo mismo", alReves.total, alDerecho.total);
 
-  // Las SALSAS van incluidas y NO gastan un cupo de cortesía.
+  // Las SALSAS valen $0 en la carta y no ensucian el conteo de acompañantes.
+  const salsas = [
+    { id: "s1", nombre: "Salsa", categoria: "salsa", precio: 0 },
+    { id: "s2", nombre: "Otra salsa", categoria: "salsa", precio: 0 },
+  ];
   const conSalsas = calcularTotales({
     base,
     proteinas: [prot],
-    toppings: [
-      { id: "s1", nombre: "Salsa", categoria: "salsa", precio: 0 },
-      { id: "s2", nombre: "Otra salsa", categoria: "salsa", precio: 0 },
-      ...tops,
-    ],
+    toppings: [...salsas, ...tops],
     impuestoPct: 8,
     incluidos: 2,
   });
-  eq("dos salsas no gastan los acompañantes de cortesía", conSalsas.subtotal, alDerecho.subtotal);
+  eq("las salsas no gastan cupo de promoción", conSalsas.subtotal, alDerecho.subtotal);
+
+  /* LA REGLA VIVA: nada va por cuenta de la casa. Sin pasar `incluidos`, `calcularTotales`
+     usa TOPPINGS_INCLUIDOS — y mientras ese número sea 0, se cobra TODO acompañante. Esto
+     es lo que ve el cliente hoy, así que se prueba sin sustituirlo por una constante local:
+     si alguien vuelve a poner 2 en menu.ts sin querer, esta prueba lo caza. */
+  const hoy = calcularTotales({ base, proteinas: [prot], toppings: tops, impuestoPct: 8 });
+  eq("hoy se cobran TODOS los acompañantes", hoy.subtotal, 18900 + 9000 + 2000 + 2000 + 4500);
+  eq("y nada aparece marcado como regalado", idsGratis(tops).size, 0);
+  const hoyConSalsas = calcularTotales({
+    base,
+    proteinas: [prot],
+    toppings: [...salsas, ...tops],
+    impuestoPct: 8,
+  });
+  eq("las salsas siguen sin costar", hoyConSalsas.subtotal, hoy.subtotal);
 
   // Enredo insignia: precio de carta cerrado, desglosado hacia atrás.
   const d = desglosarPrecioFinal(28900, 8);

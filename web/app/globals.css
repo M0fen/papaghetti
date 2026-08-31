@@ -5250,6 +5250,213 @@ body.enreda-jugando .sticky-pedir {
 }
 .npedido__pie b { font-size: 1.08rem; }
 
+/* ── La fila de acciones de Pedidos: tomar uno nuevo, o corregir un precio ──
+   El formulario de "Nuevo pedido" se abre EN LA MISMA fila, así que cuando aparece
+   ocupa el ancho completo y empuja al lápiz abajo en vez de aplastarlo. */
+.pedidos__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.pedidos__acciones > form.npedido { flex: 1 1 100%; }
+.prq__abrir { display: inline-flex; align-items: center; gap: 8px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EL LÁPIZ — precios y productos encima de Pedidos
+   ══════════════════════════════════════════════════════════════════════════ */
+.prq { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 16px; }
+.prq__fondo { position: absolute; inset: 0; background: rgba(20, 13, 6, 0.55); backdrop-filter: blur(3px); }
+.prq__panel {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  background: var(--pg-crema, #fbf1de);
+  color: inherit;
+  border-radius: 18px;
+  border: 1px solid var(--pg-linea, rgba(0, 0, 0, 0.14));
+  box-shadow: 0 26px 70px rgba(20, 13, 6, 0.34);
+  overflow: hidden;
+}
+.prq__h {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--pg-linea, rgba(0, 0, 0, 0.1));
+}
+.prq__k {
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  font-weight: 800;
+  opacity: 0.55;
+  margin-bottom: 2px;
+}
+.prq__h h2 {
+  font-family: var(--pg-font-display);
+  font-size: 1.35rem;
+  line-height: 1.1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.prq__sub { font-size: 0.84rem; opacity: 0.7; margin-top: 5px; max-width: 52ch; }
+.prq__x {
+  border: 0;
+  background: transparent;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.prq__x:hover { background: rgba(0, 0, 0, 0.07); }
+
+.prq__buscar { display: flex; gap: 8px; padding: 12px 20px; }
+.prq__buscar input {
+  flex: 1;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 11px;
+  border: 2px solid var(--pg-linea, rgba(0, 0, 0, 0.15));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.prq__nuevo {
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 11px;
+  border: 2px dashed var(--pg-oro, #f2a516);
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  font-size: 0.86rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.prq__crear {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 20px 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(242, 165, 22, 0.12);
+}
+.prq__crear input[name="nombre"] { flex: 1 1 180px; }
+.prq__crear input,
+.prq__crear select {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 2px solid var(--pg-linea, rgba(0, 0, 0, 0.15));
+  background: var(--pg-crema, #fbf1de);
+  color: inherit;
+  font: inherit;
+}
+.prq__aviso { flex: 1 1 100%; font-size: 0.76rem; opacity: 0.7; font-style: normal; }
+
+.prq__lista { overflow-y: auto; padding: 0 20px 8px; flex: 1; }
+.prq__lista h3 {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.55;
+  margin: 14px 0 6px;
+}
+.prq__fila {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.prq__nombre {
+  flex: 1 1 140px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+}
+.prq__nombre:hover { border-color: var(--pg-linea, rgba(0, 0, 0, 0.14)); }
+.prq__nombre:focus { border-color: var(--pg-oro, #f2a516); outline: none; }
+.prq__precio {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 2px solid var(--pg-linea, rgba(0, 0, 0, 0.14));
+}
+.prq__precio span { opacity: 0.5; font-weight: 700; }
+.prq__precio input {
+  width: 92px;
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.prq__precio input:focus { outline: none; }
+.prq__precio:focus-within { border-color: var(--pg-oro, #f2a516); }
+.prq__pista { font-size: 0.74rem; opacity: 0.6; font-style: normal; }
+/* El botón solo se enciende cuando hay algo que guardar: si estuviera siempre vivo,
+   nadie sabría si el cambio ya entró. */
+.prq__ok {
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.82rem;
+  opacity: 0.3;
+  cursor: default;
+}
+.prq__ok.is-vivo {
+  opacity: 1;
+  cursor: pointer;
+  background: var(--pg-oro, #f2a516);
+  color: #241a0c;
+}
+.prq__fila.is-sucia { background: rgba(242, 165, 22, 0.09); border-radius: 10px; }
+.prq__vacio { padding: 24px 0; text-align: center; opacity: 0.6; }
+.prq__pie {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--pg-linea, rgba(0, 0, 0, 0.1));
+  font-size: 0.82rem;
+  opacity: 0.85;
+}
+.prq__pie a { color: inherit; font-weight: 700; }
+@media (max-width: 560px) {
+  .prq { padding: 0; }
+  .prq__panel { max-height: 100vh; height: 100%; border-radius: 0; border: 0; }
+  .prq__fila { flex-wrap: wrap; }
+  .prq__nombre { flex: 1 1 100%; }
+}
+
 /* --- Mesas: tercer estado "servida · por cobrar" --- */
 .tbl--porcobrar {
   border-color: var(--pg-oro, #f2a516) !important;

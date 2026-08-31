@@ -3,8 +3,8 @@
 /**
  * EMPLATA — cliente (mobile-first, vertical, una mano).
  *
- * Reusa el cerebro tal cual: precios espejo de crearPedido (base + proteína + toppings con los
- * primeros TOPPINGS_INCLUIDOS gratis POR ORDEN + impuesto), y envía por enviarPedido (canal "qr",
+ * Reusa el cerebro tal cual: precios espejo de crearPedido (base + proteína + cada acompañante a
+ * su precio, salsas a $0, + impuesto), y envía por enviarPedido (canal "qr",
  * tipo "mesa"). La caja origami es 2D (CSS) con juice: caída con rebote, vapor, sonido diegético y
  * haptics. `prefers-reduced-motion` desactiva animaciones/sonido-auto. El slot 3D queda preparado
  * (#caja-3d-slot) para montar la caja R3F encima SIN tocar la lógica (fallback = esta 2D).
@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatCOP, estadoLabel, type EnredoInsignia, type EstadoPedido, type Ingrediente } from "@/lib/menu";
 import PlatosCarta from "@/components/PlatosCarta";
 import Salsas from "@/components/Salsas";
-import { calcularTotales, idsGratis } from "@/lib/precios";
+import { calcularTotales, soloCobrables } from "@/lib/precios";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { nuevaClave } from "@/lib/idem";
 import { useSonido } from "./sonido";
@@ -160,8 +160,8 @@ export default function EmplataClient({
     impuestoPct,
     incluidos,
   });
-  /** Quiénes van de cortesía, para que la etiqueta diga lo mismo que el total. */
-  const gratis = useMemo(() => idsGratis(tops, incluidos), [tops, incluidos]);
+  /** Los acompañantes que suman a la cuenta (las salsas valen $0 y quedan fuera). */
+  const cobrables = useMemo(() => soloCobrables(tops), [tops]);
 
   // ---- juice: caída + vapor + haptic ----
   const soltar = useCallback(
@@ -423,23 +423,13 @@ export default function EmplataClient({
             </section>
             <section className="emp-paso">
               <h2>
-                <b>3</b> LOS TOPPINGS{" "}
-                <small>
-                  {incluidos} van por la casa
-                </small>
+                <b>3</b> LOS ACOMPAÑANTES{" "}
+                <small>cada uno con su precio</small>
               </h2>
               <div className="emp-grid">
-                {toppings.filter((t) => t.categoria !== "salsa").map((i) => {
-                  const k = idxTop(i.id);
-                  const activo = k >= 0;
-                  const gratis = activo && k < incluidos;
-                  return chip(
-                    i,
-                    activo,
-                    toggleTopping,
-                    gratis ? "GRATIS" : undefined,
-                  );
-                })}
+                {toppings
+                  .filter((t) => t.categoria !== "salsa")
+                  .map((i) => chip(i, idxTop(i.id) >= 0, toggleTopping))}
               </div>
             </section>
             <div className="emp-espaciador" />
@@ -495,9 +485,16 @@ export default function EmplataClient({
             )}
             <div className="emp-total">
               <small>
-                {tops.length > incluidos
-                  ? `${incluidos} gratis · ${tops.length - incluidos} con precio`
-                  : `toppings gratis: ${tops.length}/${incluidos}`}
+                {[
+                  cobrables.length
+                    ? `${cobrables.length} acompañante${cobrables.length > 1 ? "s" : ""}`
+                    : "Sin acompañantes aún",
+                  tops.length > cobrables.length
+                    ? `${tops.length - cobrables.length} salsa${tops.length - cobrables.length > 1 ? "s" : ""}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
                 {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
               </small>
               <b>{formatCOP(total)}</b>

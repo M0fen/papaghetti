@@ -15,7 +15,6 @@
 
 import { useEffect, useState } from "react";
 import type { Ingrediente } from "@/lib/menu";
-import { TOPPINGS_INCLUIDOS } from "@/lib/menu";
 import Reveal from "./Reveal";
 import Configurator from "./Configurator";
 import IngImg from "./IngImg";
@@ -67,8 +66,8 @@ export default function EnredaTuPlato({
             Tú mandas en el enredo
           </h2>
           <p className="lead">
-            Elige base, proteína y toppings. Los primeros {TOPPINGS_INCLUIDOS} toppings van por
-            cuenta de la casa.
+            Elige base, proteína y acompañantes. Cada cosa vale lo que dice la carta y las
+            salsas van con el plato.
           </p>
         </Reveal>
 

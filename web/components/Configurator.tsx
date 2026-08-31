@@ -2,7 +2,6 @@
 
 import { useRef, useState, useTransition } from "react";
 import {
-  TOPPINGS_INCLUIDOS,
   TIPOS,
   tipoLabel,
   tipoIcon,
@@ -88,14 +87,12 @@ export default function Configurator({
     setToppingIds(shuffled.slice(0, 2 + Math.floor(Math.random() * 2)).map((t) => t.id));
   };
 
-  // Ticket: base + proteína + toppings (los primeros N son cortesía)
+  /* Ticket: base + proteína + acompañantes, cada uno a su precio. `gratis` solo se marca
+     cuando el ingrediente de verdad vale $0 en la carta (las salsas), no por cortesía. */
   const lineas: { label: string; valor: number; gratis?: boolean }[] = [
     { label: base.nombre, valor: base.precio },
     { label: proteina.nombre, valor: proteina.precio },
-    ...toppings.map((t, i) => {
-      const gratis = i < TOPPINGS_INCLUIDOS;
-      return { label: t.nombre, valor: gratis ? 0 : t.precio, gratis };
-    }),
+    ...toppings.map((t) => ({ label: t.nombre, valor: t.precio, gratis: t.precio === 0 })),
   ];
   // Un solo cálculo para todo el sitio (espejo de crearPedido) — lib/precios.ts
   const { subtotal, impuesto, domicilio, total } = calcularTotales({
@@ -173,7 +170,7 @@ export default function Configurator({
               ))}
             </Group>
 
-            <Group titulo="3 · Los toppings" nota={`${TOPPINGS_INCLUIDOS} de cortesía`}>
+            <Group titulo="3 · Los acompañantes" nota="cada uno con su precio">
               {toppingsCat.map((t) => (
                 <Chip
                   key={t.id}
@@ -204,7 +201,7 @@ export default function Configurator({
               {lineas.map((l, i) => (
                 <div className="ticket__row" key={i}>
                   <span>{l.label}</span>
-                  <span>{l.gratis ? "cortesía" : formatCOP(l.valor)}</span>
+                  <span>{l.gratis ? "incluido" : formatCOP(l.valor)}</span>
                 </div>
               ))}
               {impuestoPct > 0 && (
@@ -392,8 +389,8 @@ export default function Configurator({
             Tú mandas en el enredo
           </h2>
           <p className="lead">
-            Elige base, proteína y toppings. Los primeros {TOPPINGS_INCLUIDOS}{" "}
-            toppings van por cuenta de la casa.
+            Elige base, proteína y acompañantes. Cada cosa vale lo que dice la carta y las
+            salsas van con el plato.
           </p>
         </Reveal>
         {cuerpo}
@@ -447,7 +444,7 @@ function Chip({
       {showPrice && <span className="extra">{formatCOP(ing.precio)}</span>}
       {showExtra && (
         <span className="extra">
-          {ing.precio === 0 ? "gratis" : `+${formatCOP(ing.precio)}`}
+          {ing.precio === 0 ? "incluido" : `+${formatCOP(ing.precio)}`}
         </span>
       )}
     </button>

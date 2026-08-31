@@ -59,7 +59,7 @@ export default async function AjustesPage() {
             </label>
             <label className="field">
               <span>Costo domicilio (COP)</span>
-              <input className="admin-input" type="number" name="costoDomicilio" min={0} step={500} defaultValue={ajustes.costoDomicilio} />
+              <input className="admin-input" type="number" name="costoDomicilio" min={0} step="any" defaultValue={ajustes.costoDomicilio} />
             </label>
             <label className="field">
               <span>Pedido mínimo (COP)</span>

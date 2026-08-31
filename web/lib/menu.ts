@@ -6,9 +6,9 @@
  */
 
 /**
- * Familias de componente. "salsa" se añadió con la carta real: las salsas se
- * eligen libremente, NO se cobran y NO gastan los acompañantes de cortesía.
- * Viven dentro del grupo `toppings` del catálogo para no partir el modelo.
+ * Familias de componente. "salsa" se añadió con la carta real: valen $0 y se eligen
+ * libremente, así que se filtran de todo lo que cobra. Viven dentro del grupo
+ * `toppings` del catálogo para no partir el modelo.
  */
 export type Categoria = "base" | "proteina" | "topping" | "salsa";
 export type Tag = "veggie" | "picante" | "premium" | "clasico";
@@ -177,8 +177,16 @@ export {
 } from "./carta";
 import { BASES, PROTEINAS, TOPPINGS, PLATOS, INSUMOS, RECETAS } from "./carta";
 
-/** Toppings de cortesía incluidos antes de empezar a cobrar extra. */
-export const TOPPINGS_INCLUIDOS = 2;
+/**
+ * Acompañantes que NO se cobran. Hoy es 0: en Papaghetti nada va por cuenta de la
+ * casa — cada acompañante que el cliente agrega se cobra a su precio de carta.
+ *
+ * El número sigue vivo (y no cableado a cero) porque toda la maquinaria de precios
+ * lo respeta: si algún día hay una promoción de "el primero va incluido", se sube
+ * aquí y la caja, el juego, la carta y el comprobante se enteran solos. Las salsas
+ * son otra cosa: valen $0 en la carta, no son una cortesía que se pueda quitar.
+ */
+export const TOPPINGS_INCLUIDOS = 0;
 
 /** Familias de la carta de precio cerrado. */
 export type GrupoPlato = "combo" | "ensalada" | "carta" | "especial";

@@ -1189,10 +1189,10 @@ export default function EmplataGame(props: {
   const [direccion, setDireccion] = useState("");
   const [notas, setNotas] = useState("");
 
-  /* `gratis` = los ids que van de cortesía, calculados con la MISMA función que el
-     precio (idsGratis). Las etiquetas del canvas los leen de aquí: antes cada una
-     decidía por su cuenta, por orden de toque y contando las salsas, así que el
-     cartel "GRATIS" contradecía al total que tenía al lado. */
+  /* `gratis` = los ids que NO se cobran, calculados con la MISMA función que el precio
+     (idsGratis). Hoy siempre viene vacío —en Papaghetti nada va por cuenta de la casa—
+     pero el canvas lo sigue leyendo de aquí y no de su propia cuenta: si algún día hay
+     promoción, la etiqueta no podrá contradecir al total que tiene al lado. */
   const sel = useRef({ baseId: "", proteinaIds: [] as string[], toppingIds: [] as string[], tab: 0 as 0 | 1 | 2, gratis: new Set<string>() });
 
   // W4: la escena NO se desmonta al pedir. faseRef gobierna el loop; estadoRef lo lee sin re-render.
@@ -1224,10 +1224,10 @@ export default function EmplataGame(props: {
   const all = [...bases, ...proteinas, ...toppings];
   const find = (id: string) => all.find((i) => i.id === id);
   const tops = toppingIds.map(find).filter(Boolean) as Ingrediente[];
-  /** Solo los que de verdad cuentan para la cortesía: las salsas van incluidas. */
+  /** Los acompañantes que suman a la cuenta: las salsas valen $0 y quedan fuera. */
   const cobrables = soloCobrables(tops);
   /* El espejo de la selección que lee el canvas. Va DESPUÉS de `tops` porque
-     necesita los ingredientes ya resueltos para saber cuáles van de cortesía. */
+     necesita los ingredientes ya resueltos. */
   useEffect(() => {
     sel.current = { baseId, proteinaIds, toppingIds, tab, gratis: idsGratis(tops, incluidos) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2877,15 +2877,16 @@ export default function EmplataGame(props: {
       }
       if (cat !== "base") wd.manchas.push({ fx, fy: ty, life: 1, r: radioDe(cat, sc) * 0.7 });
       const idxT = sel.current.toppingIds.indexOf(ing.id);
-      const gratis = sel.current.gratis.has(ing.id);
+      // La salsa va con el plato (vale $0 en la carta); lo demás canta su precio.
+      const sinCosto = ing.categoria === "salsa";
       // los pops vivos suben para dejar sitio (nunca ilegibles apilados); el nuevo nace en el borde
       if (!reduce) for (const pv of wd.pops) pv.y -= 22;
       wd.pops.push({
         x: clamp(xScreen, boxX - boxW * 0.34, boxX + boxW * 0.34),
         y: boxY - boxH * 0.5,
         life: 1,
-        texto: ing.categoria === "salsa" ? "INCLUIDA" : gratis ? "GRATIS" : ing.precio > 0 ? `+${formatCOP(ing.precio)}` : ing.nombre,
-        gratis,
+        texto: sinCosto ? "VA CON EL PLATO" : ing.precio > 0 ? `+${formatCOP(ing.precio)}` : ing.nombre,
+        gratis: sinCosto,
       });
       // seguidilla: emplatar rápido sube el tono (pequeña celebración musical)
       if (wd.t - wd.comboT < 110) wd.combo++;
@@ -5571,44 +5572,20 @@ export default function EmplataGame(props: {
         ctx.fillText(l1, 0, cardHd / 2 - (l2 ? 31 : 23));
         if (l2) ctx.fillText(l2, 0, cardHd / 2 - 19);
         ctx.shadowBlur = 0;
-        // precio / GRATIS chip (oro sobre bandeja oscura — legible; el espresso desaparecería)
+        /* EL PRECIO, SIEMPRE. En la carta de Papaghetti nada va por cuenta de la casa:
+           cada acompañante muestra lo que cuesta y eso es lo que suma la cuenta. Aquí
+           vivían un chip "GRATIS" y un sello "VA DE LA CASA"; se fueron con la regla. */
         const idxT = sel.current.toppingIds.indexOf(ing.id);
-        const esGratis = ing.categoria === "salsa" || sel.current.gratis.has(ing.id);
         ctx.font = fontB(12, 800);
-        if (esGratis && !ing.agotado) {
-          ctx.fillStyle = "#C69A5B";
-          ctx.beginPath();
-          ctx.roundRect(-26, cardHd / 2 - 9, 52, 16, 8);
-          ctx.fill();
-          ctx.fillStyle = "#2A1C0E";
-          ctx.fillText(ing.categoria === "salsa" ? "INCLUIDA" : "GRATIS", 0, cardHd / 2 - 0.5);
-        } else {
-          ctx.shadowColor = "rgba(18,9,3,0.7)";
-          ctx.shadowBlur = 4;
-          ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.55)" : "#F6D79A";
-          ctx.fillText(
-            ing.agotado ? "AGOTADO" : ing.precio > 0 ? formatCOP(ing.precio) : "—",
-            0,
-            cardHd / 2 - 2,
-          );
-          ctx.shadowBlur = 0;
-        }
-        // LA CORTESÍA, DONDE SE DECIDE: mientras queden toppings de la casa, la carta lo
-        // dice en vez de mostrar solo un precio que el cliente cree que va a pagar.
-        if (
-          ing.categoria === "topping" &&
-          !ing.agotado &&
-          !esGratis &&
-          sel.current.toppingIds.filter((id) => find(id)?.categoria !== "salsa").length < incluidos
-        ) {
-          ctx.font = fontB(9, 800);
-          ctx.fillStyle = "#C69A5B";
-          ctx.beginPath();
-          ctx.roundRect(-33, -cardHd / 2 + 1, 66, 14, 7); // DENTRO de la carta: no invade las pestañas
-          ctx.fill();
-          ctx.fillStyle = "#2A1C0E";
-          ctx.fillText("VA DE LA CASA", 0, -cardHd / 2 + 8.2);
-        }
+        ctx.shadowColor = "rgba(18,9,3,0.7)";
+        ctx.shadowBlur = 4;
+        ctx.fillStyle = ing.agotado ? "rgba(251,241,222,0.55)" : "#F6D79A";
+        ctx.fillText(
+          ing.agotado ? "AGOTADO" : ing.precio > 0 ? formatCOP(ing.precio) : "—",
+          0,
+          cardHd / 2 - 2,
+        );
+        ctx.shadowBlur = 0;
         // check de seleccionado (en el borde del plato)
         if (selr) {
           ctx.fillStyle = "#F2A516";
@@ -6431,11 +6408,18 @@ export default function EmplataGame(props: {
                 ? desdeBase
                   ? `Arma tu caja · desde ${desdeBase}`
                   : "Sin bases disponibles hoy"
-                : cobrables.length > incluidos
-                  ? `${incluidos} gratis · ${cobrables.length - incluidos} con precio`
-                  : `${cobrables.length}/${incluidos} de cortesía${
-                      tops.length > cobrables.length ? " · salsas incluidas" : ""
-                    }`}
+                : /* Ya no hay cortesías: el renglón cuenta lo que lleva la caja. Las
+                     salsas se nombran aparte porque valen $0 y conviene que se note. */
+                  [
+                    cobrables.length
+                      ? `${cobrables.length} acompañante${cobrables.length > 1 ? "s" : ""}`
+                      : "Sin acompañantes aún",
+                    tops.length > cobrables.length
+                      ? `${tops.length - cobrables.length} salsa${tops.length - cobrables.length > 1 ? "s" : ""}`
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
               {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
             </small>
             <div className="emp-total__row">

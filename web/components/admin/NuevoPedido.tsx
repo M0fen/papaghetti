@@ -20,7 +20,6 @@ import {
   tipoLabel,
   tipoIcon,
   formatCOP,
-  TOPPINGS_INCLUIDOS,
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
@@ -190,7 +189,7 @@ export default function NuevoPedido({
       </fieldset>
 
       <fieldset className="npedido__grupo">
-        <legend>Acompañantes · los {TOPPINGS_INCLUIDOS} más caros van por cuenta de la casa · las salsas son gratis</legend>
+        <legend>Acompañantes · cada uno se cobra a su precio · las salsas van con el plato</legend>
         <div className="npedido__chips">
           {topsD.map((t) => (
             <label key={t.id} className={`chipbtn ${topIds.includes(t.id) ? "is-on" : ""}`}>

@@ -80,7 +80,7 @@ export default function Salsas({
                 <p className="salsas__k">VAN INCLUIDAS</p>
                 <h2>Las salsas</h2>
                 <p className="salsas__sub">
-                  Elige las que quieras. No cuestan y no gastan tus acompañantes de cortesía.
+                  Elige las que quieras: van con el plato y no suman a la cuenta.
                 </p>
               </div>
               <button type="button" className="salsas__x" onClick={onCerrar} aria-label="Cerrar">

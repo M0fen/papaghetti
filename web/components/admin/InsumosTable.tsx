@@ -262,7 +262,7 @@ function Entrada({
             type="number"
             name="monto"
             min={0}
-            step={100}
+            step="any"
             value={monto}
             onChange={(e) => setMonto(e.target.value)}
             placeholder="pagado"

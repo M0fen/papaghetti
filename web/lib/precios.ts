@@ -7,7 +7,9 @@
  * y no en cinco.
  *
  * Reglas vivas:
- *  · los primeros `incluidos` toppings van por cuenta de la casa, POR ORDEN de agregado
+ *  · cada acompañante se cobra a su precio; nada va por cuenta de la casa
+ *    (`incluidos` es 0 hoy; existe por si algún día hay promoción)
+ *  · las salsas valen $0 en la carta: van con el plato siempre
  *  · las proteínas (hasta 2) van a precio completo
  *  · el impuesto se calcula sobre el subtotal
  *  · el DOMICILIO se cobra aparte y solo cuando el servicio es a domicilio
@@ -78,16 +80,12 @@ export interface Totales {
 }
 
 /**
- * LO QUE SE COBRA POR LOS ACOMPAÑANTES — de forma determinista y a favor del cliente.
+ * LO QUE SE COBRA POR LOS ACOMPAÑANTES.
  *
- * Antes la casa regalaba "los N primeros" del array. Pero el array llega en el orden
- * en que el cliente los TOCÓ, y el servidor los resolvía en el orden del CATÁLOGO:
- * la misma caja podía costar distinto en la pantalla y en la caja, y quitar y volver
- * a poner un topping subía la cuenta. Además, tocar primero los baratos castigaba al
- * cliente por un detalle que nadie le explicó.
- *
- * Ahora se regalan SIEMPRE los más caros: una sola respuesta posible para una misma
- * selección, igual en el cliente y en el servidor, y defendible en el mostrador.
+ * Con `incluidos = 0` (lo normal) esto es simplemente la suma de todos: cada
+ * acompañante se cobra a su precio de carta. El parámetro sobrevive para promociones,
+ * y si alguna vez vuelve a ser > 0 se descuentan SIEMPRE los más caros: una sola
+ * respuesta posible para una misma selección, igual en el cliente y en el servidor.
  */
 export function cobroToppings(toppings: Ingrediente[], incluidos: number): number {
   const precios = soloCobrables(toppings)
@@ -96,16 +94,16 @@ export function cobroToppings(toppings: Ingrediente[], incluidos: number): numbe
   return precios.slice(incluidos).reduce((s, p) => s + p, 0);
 }
 
-/** Las salsas van incluidas: ni cuestan ni gastan cupo de cortesía. */
+/** Las salsas van con el plato: no se cobran ni entran en el conteo. */
 export const soloCobrables = (toppings: Ingrediente[]) =>
   (toppings ?? []).filter((t) => t && t.categoria !== "salsa");
 
 /**
- * QUIÉNES van de cortesía, por id. Una sola respuesta para toda la interfaz.
+ * QUIÉNES no se cobran, por id. Una sola respuesta para toda la interfaz.
  *
- * Las etiquetas "GRATIS" del juego y del armador se calculaban aparte, por orden de
- * toque y contando las salsas: decían una cosa mientras el TOTAL que tenían al lado
- * decía otra. Ahora la etiqueta y el precio salen de la misma función.
+ * Hoy devuelve un conjunto VACÍO (`TOPPINGS_INCLUIDOS` es 0) y por eso ninguna
+ * pantalla marca nada como regalado. Sigue centralizado para que, si vuelve a haber
+ * promoción, la etiqueta y el precio salgan de la misma función y no se contradigan.
  */
 export function idsGratis(toppings: Ingrediente[], incluidos = TOPPINGS_INCLUIDOS): Set<string> {
   return new Set(
@@ -129,8 +127,7 @@ export function calcularTotales(opts: {
 }): Totales {
   const incluidos = opts.incluidos ?? TOPPINGS_INCLUIDOS;
   const prots = (opts.proteinas ?? []).filter(Boolean) as Ingrediente[];
-  // Las SALSAS van incluidas: ni se cobran ni gastan un cupo de cortesía. Si
-  // contaran, elegir dos salsas dejaría al cliente pagando todos sus acompañantes.
+  // Las SALSAS valen $0 en la carta: se filtran para que no ensucien el conteo.
   const tops = soloCobrables(opts.toppings ?? []);
 
   const subtotal =

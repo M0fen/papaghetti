@@ -477,6 +477,85 @@ export async function crearEnredoAction(formData: FormData) {
   revalidatePath("/admin/menu");
 }
 
+/* ------- Precios al vuelo, desde la pantalla de Pedidos ------- */
+
+/**
+ * CAMBIAR NOMBRE Y PRECIO SIN SALIR DE PEDIDOS.
+ *
+ * Sube un ingrediente, corrige un nombre mal escrito, ajusta el plato del día: eso pasa
+ * mientras se está tomando pedidos, no en un rato tranquilo en /admin/menu. Obligar a
+ * cambiar de pantalla, buscar la ficha entre cuarenta y volver acababa en el precio
+ * viejo cobrado toda la noche.
+ *
+ * Es a propósito MÁS ESTRECHA que `savePrecio`: esa lee emoji/foto/activo/agotado del
+ * formulario, así que un formulario mínimo le borraría la foto y desactivaría la ficha.
+ * Aquí solo se tocan los dos campos que el operario está mirando.
+ */
+export async function precioRapidoAction(formData: FormData) {
+  if (!(await guard())) return;
+  const id = String(formData.get("id") ?? "");
+  const esPlato = formData.get("tipo") === "plato";
+  const nombre = String(formData.get("nombre") ?? "").trim();
+  const precio = Math.max(0, Math.round(Number(formData.get("precio") ?? 0)));
+  if (!id || !nombre || !Number.isFinite(precio)) {
+    await avisar("Falta el nombre o el precio no es un número.");
+    return;
+  }
+  const ok = await intentar(
+    () =>
+      esPlato ? updateEnredo(id, { nombre, precio }) : updateIngrediente(id, { nombre, precio }),
+    `${nombre} · ${precio.toLocaleString("es-CO")}`,
+  );
+  if (!ok) return;
+  reflejar();
+  revalidatePath("/admin/pedidos");
+  revalidatePath("/admin/menu");
+  revalidatePath("/pedir");
+}
+
+/**
+ * DAR DE ALTA UN PRODUCTO CON LO MÍNIMO: nombre, precio y en qué parte de la carta va.
+ *
+ * Un plato creado así no lleva componentes, o sea que no descuenta despensa — igual que
+ * los platos de cocina que ya existen. Se vende bien y su ficha técnica se completa
+ * después en /admin/recetas, sin bloquear la venta de hoy.
+ */
+export async function productoRapidoAction(formData: FormData) {
+  if (!(await guard())) return;
+  const nombre = String(formData.get("nombre") ?? "").trim();
+  const precio = Math.max(0, Math.round(Number(formData.get("precio") ?? 0)));
+  const donde = String(formData.get("donde") ?? "topping");
+  if (!nombre) {
+    await avisar("Ponle un nombre al producto.");
+    return;
+  }
+  const ok = await intentar(
+    () =>
+      donde === "plato"
+        ? createEnredo({
+            nombre,
+            gancho: "",
+            baseId: "",
+            proteinaId: "",
+            toppingIds: [],
+            precio,
+          })
+        : createIngrediente({
+            categoria: donde as Categoria,
+            nombre,
+            precio,
+            emoji: "",
+          }),
+    `Listo: ${nombre} ya se puede vender.`,
+  );
+  if (!ok) return;
+  reflejar();
+  revalidatePath("/admin/pedidos");
+  revalidatePath("/admin/menu");
+  revalidatePath("/admin/recetas");
+  revalidatePath("/pedir");
+}
+
 export async function eliminarEnredoAction(formData: FormData) {
   if (!(await guard())) return;
   const id = String(formData.get("id") ?? "");

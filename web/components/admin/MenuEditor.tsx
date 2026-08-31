@@ -101,7 +101,7 @@ function IngCard({ ing }: { ing: Ingrediente }) {
           </div>
           <label className="field field--price">
             <span>Precio</span>
-            <input type="number" name="precio" defaultValue={ing.precio} min={0} step={500} className="admin-input" aria-label="Precio" />
+            <input type="number" name="precio" defaultValue={ing.precio} min={0} step="any" className="admin-input" aria-label="Precio" />
           </label>
           <div className="mcard__checks">
             <label className="admin-check">
@@ -139,7 +139,7 @@ function EnredoCard({ enredo, catalog }: { enredo: EnredoInsignia; catalog: Cata
           <span className="mcard__recipe">{base} · {prot}</span>
           <label className="field field--price">
             <span>Precio</span>
-            <input type="number" name="precio" defaultValue={enredo.precio} min={0} step={500} className="admin-input" aria-label="Precio" />
+            <input type="number" name="precio" defaultValue={enredo.precio} min={0} step="any" className="admin-input" aria-label="Precio" />
           </label>
           <div className="mcard__acts">
             <button className="btn btn--primary btnmini" type="submit"><span>Guardar</span></button>
@@ -172,7 +172,7 @@ function NuevoIngrediente({ onDone }: { onDone: () => void }) {
           </div>
           <label className="field field--price">
             <span>Precio</span>
-            <input type="number" name="precio" className="admin-input" placeholder="0" min={0} step={500} aria-label="Precio" />
+            <input type="number" name="precio" className="admin-input" placeholder="0" min={0} step="any" aria-label="Precio" />
           </label>
           <button className="btn btn--primary btnmini" type="submit"><span>Crear ingrediente</span></button>
         </div>
@@ -197,7 +197,7 @@ function NuevoEnredo({ catalog, onDone }: { catalog: Catalog; onDone: () => void
             <input name="nombre" className="admin-input" placeholder="Nombre del plato" aria-label="Nombre" required style={{ flex: 1, minWidth: 140 }} />
             <label className="field field--price">
               <span>Precio</span>
-              <input type="number" name="precio" className="admin-input" placeholder="0" min={0} step={500} aria-label="Precio" />
+              <input type="number" name="precio" className="admin-input" placeholder="0" min={0} step="any" aria-label="Precio" />
             </label>
           </div>
           <input name="gancho" className="admin-input" placeholder="Gancho (ej: El Eje Cafetero en un bowl)" aria-label="Gancho" />

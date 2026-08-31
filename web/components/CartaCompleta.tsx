@@ -11,7 +11,7 @@
  * termómetro del antojo del juego.
  */
 
-import { formatCOP, TOPPINGS_INCLUIDOS, type Ingrediente } from "@/lib/menu";
+import { formatCOP, type Ingrediente } from "@/lib/menu";
 import { notaDe } from "@/lib/copy";
 import { EJES, saborDe } from "@/lib/sabor";
 import Reveal from "./Reveal";
@@ -28,12 +28,7 @@ const GRUPOS = [
     nota: "incluidas",
     tono: "perejil",
   },
-  {
-    k: "topping" as const,
-    titulo: "Los acompañantes",
-    nota: `${TOPPINGS_INCLUIDOS} de cortesía`,
-    tono: "oro",
-  },
+  { k: "topping" as const, titulo: "Los acompañantes", nota: "suma los que quieras", tono: "oro" },
 ];
 
 /* La hebrita que se DIBUJA bajo el título de cada grupo al entrar en viewport
@@ -63,7 +58,7 @@ export default function CartaCompleta({
 }) {
   const juego = useJuegoOpcional();
   /* Las salsas viven dentro del array `toppings` del catálogo, pero en la carta son
-     su propio bloque: van incluidas y no gastan cortesía. */
+     su propio bloque: valen $0 y se leen mejor lejos de lo que sí se cobra. */
   const porGrupo = {
     base: bases,
     proteina: proteinas,
@@ -80,9 +75,8 @@ export default function CartaCompleta({
             Todo lo que puede entrar en tu caja
           </h2>
           <p className="lead">
-            Precios por ingrediente. Las salsas van incluidas y los{" "}
-            {TOPPINGS_INCLUIDOS} acompañantes más caros van por cuenta
-            de la casa, siempre.
+            Precios por ingrediente, sin letra chica: cada cosa que sumas a tu caja vale
+            lo que dice aquí. Las salsas van con el plato.
           </p>
         </Reveal>
 
@@ -130,7 +124,7 @@ export default function CartaCompleta({
                         <IngImg ing={ing} className="carta__chipart" />
                         <b>{ing.nombre}</b>
                         <span className="carta__chipprecio">
-                          {ing.agotado ? "agotado" : ing.precio === 0 ? "gratis" : `+${formatCOP(ing.precio)}`}
+                          {ing.agotado ? "agotado" : ing.precio === 0 ? "incluido" : `+${formatCOP(ing.precio)}`}
                         </span>
                       </li>
                     ))}
@@ -159,7 +153,7 @@ export default function CartaCompleta({
                             {ing.agotado
                               ? "agotado hoy"
                               : ing.precio === 0
-                                ? "gratis"
+                                ? "incluido"
                                 : g.k === "base"
                                   ? formatCOP(ing.precio)
                                   : `+${formatCOP(ing.precio)}`}
