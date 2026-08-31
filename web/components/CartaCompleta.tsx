@@ -22,7 +22,18 @@ import { useJuegoOpcional } from "./JuegoProvider";
 const GRUPOS = [
   { k: "base" as const, titulo: "Las bases", nota: "elige 1", tono: "oro" },
   { k: "proteina" as const, titulo: "Las proteínas", nota: "hasta 2", tono: "pomodoro" },
-  { k: "topping" as const, titulo: "Los toppings", nota: `${TOPPINGS_INCLUIDOS} de cortesía`, tono: "perejil" },
+  {
+    k: "salsa" as const,
+    titulo: "Las salsas",
+    nota: "incluidas",
+    tono: "perejil",
+  },
+  {
+    k: "topping" as const,
+    titulo: "Los acompañantes",
+    nota: `${TOPPINGS_INCLUIDOS} de cortesía`,
+    tono: "oro",
+  },
 ];
 
 /* La hebrita que se DIBUJA bajo el título de cada grupo al entrar en viewport
@@ -51,7 +62,14 @@ export default function CartaCompleta({
   toppings: Ingrediente[];
 }) {
   const juego = useJuegoOpcional();
-  const porGrupo = { base: bases, proteina: proteinas, topping: toppings };
+  /* Las salsas viven dentro del array `toppings` del catálogo, pero en la carta son
+     su propio bloque: van incluidas y no gastan cortesía. */
+  const porGrupo = {
+    base: bases,
+    proteina: proteinas,
+    salsa: toppings.filter((t) => t.categoria === "salsa"),
+    topping: toppings.filter((t) => t.categoria !== "salsa"),
+  };
 
   return (
     <section className="section" id="carta">
@@ -82,7 +100,25 @@ export default function CartaCompleta({
                   </span>
                   <span className="badge badge--nota">{g.nota}</span>
                 </h3>
-                {esTopping ? (
+                {g.k === "salsa" ? (
+                  /* LAS SALSAS SE LEEN, NO SE MIRAN. Siete charcos de color casi
+                     iguales no aportan nada: aquí manda el nombre, con una hebra del
+                     color de la salsa como única marca. */
+                  <ul className="carta__salsas">
+                    {items.map((ing) => (
+                      <li
+                        className={`carta__salsa ${ing.agotado ? "is-agotado" : ""}`}
+                        key={ing.id}
+                        style={{ ["--c" as string]: ing.color }}
+                      >
+                        <span className="carta__salsahebra" aria-hidden />
+                        <b>{ing.nombre}</b>
+                        {ing.descripcion && <em>{ing.descripcion}</em>}
+                        {ing.agotado && <span className="carta__salsano">hoy no</span>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : esTopping ? (
                   /* TOPPINGS COMPACTOS: la nota sensorial vive en el juego/armador; aquí la
                      carta respira — chips densos, el sprite hace su twirl al tocarlo */
                   <ul className="carta__chips">

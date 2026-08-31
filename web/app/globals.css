@@ -5865,3 +5865,44 @@ body.enreda-jugando .sticky-pedir {
 .chipbtn__img { width: 26px; height: 26px; object-fit: contain; vertical-align: -7px; margin-right: 2px; }
 .npedido__chips .chipbtn { padding-block: 5px; }
 .inscard__emoji img { width: 22px; height: 22px; object-fit: contain; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LAS SALSAS EN LA CARTA — se leen, no se miran
+   Siete charcos de color casi iguales no aportan nada; el nombre sí.
+   ══════════════════════════════════════════════════════════════════════════ */
+.carta__salsas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 8px;
+}
+.carta__salsa {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  padding: 11px 14px 11px 17px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(30, 22, 17, 0.08);
+  overflow: hidden;
+}
+.carta__salsahebra {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--c, #f2a516);
+}
+.carta__salsa b { font-size: 0.94rem; line-height: 1.25; }
+.carta__salsa em { font-style: normal; font-size: 0.79rem; opacity: 0.62; line-height: 1.4; }
+.carta__salsa.is-agotado { opacity: 0.5; }
+.carta__salsano {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pg-pomodoro, #d1381f);
+}

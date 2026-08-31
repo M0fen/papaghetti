@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatCOP, estadoLabel, type EnredoInsignia, type EstadoPedido, type Ingrediente } from "@/lib/menu";
 import PlatosCarta from "@/components/PlatosCarta";
+import Salsas from "@/components/Salsas";
 import { calcularTotales, idsGratis } from "@/lib/precios";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { nuevaClave } from "@/lib/idem";
@@ -124,6 +125,7 @@ export default function EmplataClient({
   const [referencia, setReferencia] = useState("");
   const [notas, setNotas] = useState("");
   const [verCarta, setVerCarta] = useState(false);
+  const [verSalsas, setVerSalsas] = useState(false);
   /** Idempotencia: se rellena al enviar, no en el render. Ver lib/idem.ts. */
   const idem = useRef("");
   const [estado, setEstado] = useState<EstadoPedido>("recibido");
@@ -427,7 +429,7 @@ export default function EmplataClient({
                 </small>
               </h2>
               <div className="emp-grid">
-                {toppings.map((i) => {
+                {toppings.filter((t) => t.categoria !== "salsa").map((i) => {
                   const k = idxTop(i.id);
                   const activo = k >= 0;
                   const gratis = activo && k < incluidos;
@@ -442,6 +444,21 @@ export default function EmplataClient({
             </section>
             <div className="emp-espaciador" />
           </main>
+
+          {/* Las salsas, en su propio apartado y sin iconos: son una elección, no
+              algo que se apila. */}
+          <div className="emp-salsas2d">
+            <Salsas
+              salsas={toppings.filter((t) => t.categoria === "salsa")}
+              elegidas={toppingIds}
+              onToggle={(id) =>
+                setToppingIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+              }
+              abierta={verSalsas}
+              onAbrir={() => setVerSalsas(true)}
+              onCerrar={() => setVerSalsas(false)}
+            />
+          </div>
 
           {/* Dónde está y qué debemos saber: sin esto el pedido llega anónimo. */}
           <section className="emp-donde">

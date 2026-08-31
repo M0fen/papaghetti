@@ -30,6 +30,7 @@ import {
 } from "@/lib/menu";
 import { calcularTotales, faltaParaMinimo, idsGratis, soloCobrables } from "@/lib/precios";
 import PlatosCarta from "@/components/PlatosCarta";
+import Salsas from "@/components/Salsas";
 import { creaPostFx } from "./postfx";
 import { EJES, perfilDe, rasgoDominante, saborDe, tituloAntojo, type Sabor } from "@/lib/sabor";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
@@ -1167,6 +1168,14 @@ export default function EmplataGame(props: {
   const [pidiendoDatos, setPidiendoDatos] = useState(false);
   /** La carta de platos listos (combos, ensaladas, a la carta): capa DOM, no toca el canvas. */
   const [verCarta, setVerCarta] = useState(false);
+  const [verSalsas, setVerSalsas] = useState(false);
+  /** Las salsas de la carta, fuera del carrusel: tienen su propio apartado. */
+  const salsasCarta = useMemo(() => toppings.filter((t) => t.categoria === "salsa"), [toppings]);
+  const alternarSalsa = useCallback(
+    (id: string) =>
+      setToppingIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])),
+    [],
+  );
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   /* Por QR el cliente está SENTADO: el tipo nace en "En el local". Antes nacía en
      "domicilio" y, como la hoja de datos no se abría por QR, nadie lo cambiaba: la
@@ -2590,7 +2599,10 @@ export default function EmplataGame(props: {
       [...l].sort((a, b) => Number(!!a.agotado) - Number(!!b.agotado));
     const basesO = ordenar(bases);
     const proteinasO = ordenar(proteinas);
-    const toppingsO = ordenar(toppings);
+    /* Las SALSAS salen del carrusel: no son algo que se apila en la caja, son una
+       elección, y siete charcos de color casi idénticos competían con lo que sí se
+       cobra. Viven en su propia hoja (components/Salsas.tsx), sin iconos. */
+    const toppingsO = ordenar(toppings.filter((t) => t.categoria !== "salsa"));
     const listaActiva = (): Ingrediente[] =>
       sel.current.tab === 0 ? basesO : sel.current.tab === 1 ? proteinasO : toppingsO;
 
@@ -6391,7 +6403,17 @@ export default function EmplataGame(props: {
       </p>
 
       {!pedido ? (
-        <footer className="emp-bar emp-bar--game">
+        <footer className="emp-bar emp-bar--game emp-bar--con-salsas">
+          <Salsas
+            salsas={salsasCarta}
+            elegidas={toppingIds}
+            onToggle={alternarSalsa}
+            abierta={verSalsas}
+            onAbrir={() => setVerSalsas(true)}
+            onCerrar={() => setVerSalsas(false)}
+            parte="franja"
+          />
+          <div className="emp-bar__fila">
           <div className="emp-total">
             {/* El hueco del aviso existe SIEMPRE (con nbsp si no hay nada que decir):
                 así la barra mide igual en todos los estados y el canvas no se re-hornea. */}
@@ -6430,6 +6452,7 @@ export default function EmplataGame(props: {
           >
             {enviando ? "SELLANDO…" : (<><IcoSello /> EMPLATAR</>)}
           </button>
+          </div>
         </footer>
       ) : (
         <footer className="emp-bar emp-bar--game emp-bar--espera">
@@ -6470,6 +6493,17 @@ export default function EmplataGame(props: {
           </div>
         </footer>
       )}
+
+      {/* LA HOJA DE SALSAS, por encima de todo. */}
+      <Salsas
+        salsas={salsasCarta}
+        elegidas={toppingIds}
+        onToggle={alternarSalsa}
+        abierta={verSalsas}
+        onAbrir={() => setVerSalsas(true)}
+        onCerrar={() => setVerSalsas(false)}
+        parte="hoja"
+      />
 
       {/* LA CARTA DE PLATOS LISTOS: capa DOM encima del canvas, cero riesgo para el
           loop de render. El pedido sale por el mismo enviarPedido con enredoId. */}
