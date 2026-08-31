@@ -28,7 +28,7 @@ type Filtro = "todos" | EstadoPedido | "porpagar";
 
 /**
  * El comprobante en texto, listo para WhatsApp, al número que el cliente dejó en su
- * propio pedido. La misma información del papel: sin propina escondida y con el aviso
+ * propio pedido. La misma información del papel, con el aviso
  * de que este comprobante no es un documento fiscal.
  */
 function waComprobante(p: Pedido): string {
@@ -47,8 +47,6 @@ function waComprobante(p: Pedido): string {
     p.impuesto ? linea("Impuesto", p.impuesto) : "",
     p.domicilio ? linea("Domicilio", p.domicilio) : "",
     `*TOTAL: ${formatCOP(consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0))}*`,
-    p.propina ? linea("Propina voluntaria", p.propina) : "",
-    p.propina ? `*Recibido: ${formatCOP(p.total)}*` : "",
     "",
     "Comprobante interno. No es factura electrónica.",
     "¡Gracias por venir!",
@@ -217,13 +215,12 @@ function OrderCard({ p }: { p: Pedido }) {
         {p.pago === "pendiente" && p.estado !== "cancelado" && (
           <form action={cobrarAction} className="ocard__cobrar">
             <input type="hidden" name="id" value={p.id} />
-            {/* step="any": con step=500 el navegador rechazaba en silencio una propina de
-                2.300 o un descuento de 1.200 — se tocaba el método de pago y el cobro
-                simplemente no ocurría, sin ningún mensaje. */}
-            <label className="ocard__pd">
-              Propina
-              <input type="number" name="propina" min={0} step="any" defaultValue={0} aria-label="Propina" />
-            </label>
+            {/* AQUÍ NO SE COBRA PROPINA. Papaghetti no la maneja: no se sugiere, no se
+                teclea y no sale en el papel. El campo se quitó entero en vez de solo
+                esconderlo del comprobante — una propina cobrada que el papel no
+                muestra es un total que no cuadra con lo que el cliente leyó.
+                step="any" en el descuento: con step=500 el navegador rechazaba en
+                silencio $1.200 y el cobro simplemente no ocurría, sin ningún mensaje. */}
             <label className="ocard__pd">
               Descuento
               <input type="number" name="descuento" min={0} step="any" defaultValue={0} aria-label="Descuento" />

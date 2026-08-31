@@ -5792,31 +5792,213 @@ body.enreda-jugando .sticky-pedir {
    Sale en papel térmico de 80mm y también en A4 desde cualquier navegador.
    NO es factura electrónica ni documento equivalente: ver el componente.
    ══════════════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════════
+   EL COMPROBANTE EN PAPEL
+   ══════════════════════════════════════════════════════════════════════════
+   272px = 72mm EXACTOS a 96dpi, que es el área útil real de una térmica de 80mm.
+   O sea que lo que se ve en pantalla es el papel a tamaño 1:1, sin sorpresas al
+   imprimir.
+
+   CERO GRISES, y esto no es gusto: una térmica de 203dpi no sabe hacer grises, los
+   simula con puntos sueltos y un texto al 70% sale como una mancha sucia. Toda la
+   jerarquía se hace con TAMAÑO, PESO, VERSALITAS y AIRE — nunca bajando el color.
+   Por eso aquí no hay ni una opacidad, ni un fondo gris, ni una sombra.
+   ══════════════════════════════════════════════════════════════════════════ */
 .cbte-wrap { display: grid; justify-items: center; gap: 18px; }
-.cbte-acciones { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-.cbte {
-  width: 100%;
-  max-width: 320px;
-  background: #fff;
-  color: #111;
-  border: 1px solid rgba(30, 22, 17, 0.12);
-  border-radius: 10px;
-  padding: 18px 16px 14px;
-  font-family: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
-  font-size: 12.5px;
-  line-height: 1.42;
+.cbte-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
 }
-/* El sello de anulado: negro sobre el papel, imposible de no ver, y se imprime igual
-   (los navegadores respetan `border` y `color` aunque quiten fondos). */
+/* Selector de papel: la térmica del POS o la hoja de una impresora normal. */
+.cbte-papel {
+  display: inline-flex;
+  border: 2px solid var(--pg-linea, rgba(30, 22, 17, 0.16));
+  border-radius: 999px;
+  overflow: hidden;
+}
+.cbte-papel button {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: inherit;
+  padding: 0 14px;
+  min-height: 42px;
+  cursor: pointer;
+}
+.cbte-papel button.is-on { background: var(--pg-espresso, #1e1611); color: var(--pg-crema, #fbf1de); }
+.cbte-wa { display: inline-flex; gap: 6px; align-items: center; }
+.cbte-wa input {
+  min-height: 44px;
+  width: 190px;
+  padding: 0 12px;
+  border-radius: 11px;
+  border: 2px solid var(--pg-linea, rgba(30, 22, 17, 0.16));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.cbte-wa .is-off { opacity: 0.45; pointer-events: none; }
+
+.cbte {
+  width: 272px; /* = 72mm a 96dpi: la maqueta es el papel */
+  background: #fff;
+  color: #000;
+  border: 1px solid rgba(30, 22, 17, 0.14);
+  border-radius: 4px;
+  padding: 18px 16px 22px;
+  font-family: var(--pg-font-body);
+  font-size: 12px;
+  line-height: 1.45;
+  /* Cifras de ancho fijo: sin esto, el punto de los miles baila de renglón en
+     renglón y la columna de precios deja de leerse como columna. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ── Cabecera: el logo manda, los datos susurran ── */
+.cbte__h { display: grid; justify-items: center; gap: 8px; }
+.cbte__logo { width: 174px; height: auto; display: block; }
+.cbte__datos {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  margin: 0;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+/* ── La hebra: el fideo de la casa como único separador ── */
+.cbte__hebra {
+  display: block;
+  width: 100%;
+  height: 8px;
+  margin: 11px 0;
+  color: #000;
+}
+/* `preserveAspectRatio="none"` estira el viewBox 2x en horizontal: sin esto el
+   trazo se deforma y se adelgaza hasta entrecortarse en el papel. */
+.cbte__hebra path {
+  vector-effect: non-scaling-stroke;
+  /* `fill:none` defensivo: hoy lo pone el atributo del componente, pero el día que
+     alguien copie el marcado sin él, la ondita se rellena y sale un pegote negro. */
+  fill: none;
+}
+.cbte__hebra--corta { width: 46%; margin-inline: auto; height: 6px; }
+
+/* ── Título y folio ── */
+.cbte__tit {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.cbte__tit b {
+  font-family: var(--pg-font-display);
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* ── Ficha del pedido ── */
+.cbte__meta { margin: 8px 0 0; display: grid; gap: 2px; }
+.cbte__meta > div { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.cbte__meta dt {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.cbte__meta dd { margin: 0; font-size: 11.5px; text-align: right; }
+
+/* ── Los platos ──
+   Tres columnas con la de cantidad RESERVADA aunque venga vacía: así el nombre de
+   un plato sin cantidad arranca en el mismo eje que uno con "2×", y la descripción
+   cuelga bajo el nombre y no bajo el número. */
+.cbte__items { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.cbte__items li {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 6px;
+  align-items: baseline;
+}
+.cbte__cant { font-weight: 800; font-size: 12px; }
+.cbte__nom { display: grid; gap: 1px; min-width: 0; font-weight: 700; font-size: 12.5px; }
+.cbte__nom em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 10px;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+}
+.cbte__val { font-weight: 700; white-space: nowrap; }
+/* Una nota de cocina sí merece la única línea recta del papel. */
+.cbte__nota {
+  margin: 8px 0 0;
+  padding-left: 7px;
+  border-left: 2px solid #000;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+/* ── Sumas ── */
+.cbte__sumas { display: grid; gap: 2px; }
+.cbte__linea { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; }
+
+/* EL TOTAL es el único salto de escala del papel: se encuentra sin buscarlo, y sin
+   necesidad de un recuadro que compita con él. */
+.cbte__total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 9px;
+  padding: 7px 0;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+}
+.cbte__total span { font-size: 10px; font-weight: 700; letter-spacing: 0.18em; }
+.cbte__total b { font-family: var(--pg-font-display); font-size: 21px; line-height: 1; }
+
+.cbte__pago {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+.cbte__pago span { font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase; font-size: 9px; }
+.cbte__pago b { font-weight: 800; }
+
+/* ── Pie ── */
+.cbte__pie { text-align: center; }
+.cbte__pie p { margin: 0; }
+.cbte__aviso { font-size: 8.5px; line-height: 1.45; letter-spacing: 0.01em; }
+.cbte__gracias {
+  font-family: var(--pg-font-display);
+  font-size: 13px;
+  margin-top: 8px !important;
+}
+
+/* ── Anulado / devuelto ── */
 .cbte__anulado {
-  border: 2px solid #111;
-  border-radius: 6px;
+  border: 2px solid #000;
+  border-radius: 3px;
   padding: 8px 10px;
   margin-bottom: 12px;
   text-align: center;
   font-weight: 800;
   letter-spacing: 0.14em;
-  font-size: 14px;
+  font-size: 13px;
 }
 .cbte__anulado em {
   display: block;
@@ -5824,66 +6006,70 @@ body.enreda-jugando .sticky-pedir {
   font-style: normal;
   font-weight: 400;
   letter-spacing: 0;
-  font-size: 10.5px;
+  font-size: 10px;
   line-height: 1.35;
 }
-.cbte--anulado .cbte__total,
-.cbte--anulado .cbte__item b { text-decoration: line-through; }
-.cbte__h { display: grid; text-align: center; gap: 1px; margin-bottom: 10px; }
-.cbte__negocio { font-size: 16px; letter-spacing: 0.04em; }
-.cbte__h span { font-size: 11px; opacity: 0.75; }
-.cbte__tit {
-  text-align: center;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  font-size: 11.5px;
-  padding: 5px 0;
-  border-block: 1px dashed rgba(0, 0, 0, 0.35);
-  margin-bottom: 8px;
-}
-.cbte__meta,
-.cbte__item,
-.cbte__linea,
-.cbte__total { display: flex; justify-content: space-between; gap: 10px; }
-.cbte__meta { font-size: 11.5px; }
-.cbte__meta span { opacity: 0.7; }
-.cbte__item { margin-top: 2px; font-weight: 700; }
-.cbte__sub { font-size: 11px; opacity: 0.78; padding-left: 8px; }
-.cbte__sep { border: 0; border-top: 1px dashed rgba(0, 0, 0, 0.35); margin: 9px 0; }
-.cbte__linea { font-size: 12px; }
-.cbte__linea--prop { margin-top: 6px; }
-.cbte__total {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(0, 0, 0, 0.5);
-  font-size: 15px;
-  font-weight: 800;
-}
-.cbte__pie { margin-top: 12px; text-align: center; font-size: 10px; line-height: 1.5; }
-.cbte__pie p { margin: 3px 0; }
-.cbte__aviso { opacity: 0.72; }
-.cbte__gracias { font-size: 12px; font-weight: 700; margin-top: 7px !important; }
+.cbte--anulado .cbte__total b,
+.cbte--anulado .cbte__val { text-decoration: line-through; }
 
+/* En pantalla, la hoja normal se previsualiza más ancha para que se entienda. */
+.cbte--hoja { width: 340px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   IMPRESIÓN
+   ══════════════════════════════════════════════════════════════════════════
+   El `@page` (tamaño de papel) lo escribe el propio componente según el botón que
+   el operario eligió: aquí solo va la forma del papel.
+
+   OJO con el bloque global de impresión: pone `.printable { position:absolute;
+   left:0; top:0; width:100%; padding:20px }`. Para el comprobante hay que
+   deshacerlo entero o el tiquete sale estirado a lo ancho de la hoja. */
 @media print {
-  /* `size: 80mm auto` NO es válido (auto no se combina con una longitud): el
-     navegador descarta la regla entera y sale en carta. Dos longitudes sí valen. */
-  @page { size: 80mm 297mm; margin: 0; }
-  html, body { background: #fff !important; margin: 0; padding: 0; }
-  /* Fuera todo el cromo del panel: solo se imprime el papel. */
-  .adminx__sidebar, .adminx__topbar, .adminx__alarma, .adminx__aviso,
-  .no-print, .ghettia, .ghettia__fab { display: none !important; }
-  .adminx, .adminx__main, .adminx__content { display: block !important; padding: 0 !important; margin: 0 !important; max-width: none !important; }
-  .cbte {
-    width: 72mm; /* área imprimible real de una térmica de 80mm */
-    max-width: none;
+  html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+  /* `min-height: 0` NO es cosmético: el panel es `min-height: 100svh`, y el bloque
+     global de impresión oculta el cromo con `visibility`, que NO saca nada del
+     layout. Resultado: el documento seguía midiendo una pantalla de alto y la
+     térmica —que imprime sobre rollo continuo— escupía un palmo de papel en blanco
+     detrás de cada tiquete. Con `display:none` en el cromo y la altura mínima
+     anulada, el papel mide lo que mide el comprobante. */
+  .adminx, .adminx__main, .adminx__content, .cbte-wrap {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+  /* Fuera del flujo, no solo invisibles: si solo se ocultan siguen ocupando alto. */
+  .adminx__side, .adminx__topbar, .adminx__alarma, .adminx__aviso,
+  .ghettia, .ghettia-fab, .no-print { display: none !important; }
+  .cbte.printable {
+    position: static !important;
     border: 0;
     border-radius: 0;
-    padding: 4mm 3mm;
-    font-size: 12px;
+    box-shadow: none;
+    /* El margen de abajo NO es estético: la cuchilla de una térmica se come los
+       últimos milímetros, y sin este colchón el corte se lleva el "¡Gracias por
+       venir!" y a veces el aviso legal. */
+    padding: 4mm 3mm 12mm;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    /* El cabezal térmico quema puntos: el antialias gris del navegador solo
+       ensucia los bordes de las letras. */
+    -webkit-font-smoothing: none;
   }
+  /* Térmica de 80mm: 72mm útiles, pegado al margen izquierdo. */
+  .cbte--termica.printable { width: 72mm !important; margin: 0 !important; }
+  /* Hoja normal: el mismo tiquete, centrado y con un poco más de cuerpo. */
+  .cbte--hoja.printable {
+    width: 80mm !important;
+    margin: 0 auto !important;
+    font-size: 10.5pt;
+    padding-bottom: 6mm;
+  }
+  .cbte__logo { width: 46mm; }
 }
+
 
 /* El logo real en el panel y en la entrada */
 .adminx__logo { width: 152px; height: auto; display: block; }

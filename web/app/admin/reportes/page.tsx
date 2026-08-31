@@ -213,6 +213,7 @@ export default async function FinanzasPage({
             <span>Impuesto recaudado (de la DIAN)</span><b>{formatCOP(impuestoRecaudado)}</b>
           </div>
           <div className="fin-flow__item">
+            {/* Solo aparece si algún pedido viejo la trae: hoy no se cobra propina. */}
             <span>Propinas (del personal)</span><b>{formatCOP(propinas)}</b>
           </div>
           <div className="fin-flow__item">

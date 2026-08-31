@@ -50,10 +50,6 @@ export default async function AjustesPage() {
               <input className="admin-input" type="number" name="impuestoPct" min={0} max={30} defaultValue={ajustes.impuestoPct} />
             </label>
             <label className="field">
-              <span>Propina sugerida %</span>
-              <input className="admin-input" type="number" name="propinaSugeridaPct" min={0} max={30} defaultValue={ajustes.propinaSugeridaPct} />
-            </label>
-            <label className="field">
               <span>Número de mesas</span>
               <input className="admin-input" type="number" name="numMesas" min={0} max={60} defaultValue={ajustes.numMesas} />
             </label>

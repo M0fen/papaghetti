@@ -180,9 +180,10 @@ export async function cobrarAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const metodo = String(formData.get("metodo") ?? "") as MetodoPago;
   if (!id || !metodo) return;
-  const propina = Number(formData.get("propina") ?? 0);
   const descuento = Number(formData.get("descuento") ?? 0);
-  await operar(() => cobrarPedido(id, metodo, propina, descuento), `Cobrado #${id}`);
+  // Propina 0 SIEMPRE: Papaghetti no la maneja. El parámetro sigue en `cobrarPedido`
+  // porque hay pedidos viejos que la llevan y sus totales no se pueden reescribir.
+  await operar(() => cobrarPedido(id, metodo, 0, descuento), `Cobrado #${id}`);
 }
 
 /** Admin: cancela un pedido (con motivo, y devolviendo la despensa si no se cocinó). */

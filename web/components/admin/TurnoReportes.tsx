@@ -155,7 +155,11 @@ export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
                     <tr><td>Ventas netas (sin impuesto)</td><td><b>{formatCOP(ventasHoy)}</b></td></tr>
                     <tr><td>Ticket promedio</td><td>{formatCOP(ticket)}</td></tr>
                     <tr><td>Impuesto recaudado</td><td>{formatCOP(sum(validos, (p) => p.impuesto))}</td></tr>
-                    <tr><td>Propinas</td><td>{formatCOP(sum(validos, (p) => p.propina))}</td></tr>
+                    {/* Papaghetti no cobra propina: la fila solo sale si algún pedido
+                        anterior a esa decisión todavía la trae. */}
+                    {sum(validos, (p) => p.propina ?? 0) > 0 && (
+                      <tr><td>Propinas</td><td>{formatCOP(sum(validos, (p) => p.propina))}</td></tr>
+                    )}
                   </tbody>
                 </table>
                 <h4>Caja por método</h4>

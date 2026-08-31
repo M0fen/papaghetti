@@ -10,18 +10,24 @@
  * o una resolución de numeración: imitar un documento fiscal sin serlo es peor que
  * no entregar nada. El consecutivo es interno y así lo dice.
  *
- * La PROPINA va en línea aparte, después del total del consumo, con el aviso de que
- * es voluntaria (Ley 1935 de 2018 obliga a informarlo).
+ * IMPRIMIR SALÍA EN BLANCO. Hay un `@media print` global que oculta todo
+ * (`body * { visibility: hidden }`) y solo deja ver lo que lleva la clase
+ * `printable`. El comprobante no la llevaba, así que el papel salía vacío: 38 de sus
+ * 38 elementos en `visibility: hidden`. Ahora la lleva, y el bloque de impresión
+ * propio decide el tamaño de papel.
  *
- * Imprime en papel térmico de 80mm y también en A4 desde cualquier navegador.
+ * DOS PAPELES, porque hay dos realidades: la térmica de 80mm de un POS y la hoja
+ * normal de una impresora de oficina, que es con lo que se abre el primer día. El
+ * selector cambia la regla `@page` de verdad — no es un maquillaje de CSS.
  */
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   formatCOP,
   lineasDe,
   metodoLabel,
   tipoLabel,
+  whatsappValido,
   type Ajustes,
   type Pedido,
 } from "@/lib/menu";
@@ -47,8 +53,36 @@ const PARTES = new Intl.DateTimeFormat("es-CO", {
 function hora(iso: string) {
   const p: Record<string, string> = {};
   for (const x of PARTES.formatToParts(new Date(iso))) p[x.type] = x.value;
-  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
+  return `${p.day}/${p.month}/${p.year} · ${p.hour}:${p.minute}`;
 }
+
+/**
+ * LA HEBRA: el mismo fideo que recorre el sitio, aquí como separador.
+ *
+ * Es la única "textura" que se permite el papel. Una línea punteada es ruido de
+ * formulario; esta ondita dice Papaghetti sin gritar, y una térmica la imprime
+ * perfecta porque es un trazo negro de 1px, no una trama de grises.
+ */
+function Hebra({ corta }: { corta?: boolean }) {
+  return (
+    <svg
+      className={`cbte__hebra ${corta ? "cbte__hebra--corta" : ""}`}
+      viewBox="0 0 130 8"
+      preserveAspectRatio="none"
+      aria-hidden
+    >
+      <path
+        d="M1 4 Q 17 0.5 33 4 T 65 4 T 97 4 T 129 4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.1}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+type Papel = "termica" | "hoja";
 
 export default function Comprobante({
   pedido: p,
@@ -60,14 +94,46 @@ export default function Comprobante({
   /** Abre el diálogo de impresión al entrar (se llega desde el botón de la caja). */
   auto?: boolean;
 }) {
+  const [papel, setPapel] = useState<Papel>("termica");
+  const [tel, setTel] = useState(p.telefono ?? "");
+  const [pidiendoTel, setPidiendoTel] = useState(false);
+  const hoja = useRef<HTMLElement>(null);
+
+  /**
+   * IMPRIMIR MIDIENDO EL PAPEL PRIMERO.
+   *
+   * Una térmica imprime sobre ROLLO CONTINUO: no hay hoja que llenar, corta donde se
+   * le diga. Con una altura de página fija (297mm) cada tiquete de 14cm se llevaba
+   * otros 15cm de papel en blanco antes del corte. Así que antes de abrir el diálogo
+   * se mide lo que ocupa el comprobante y se escribe ESA altura en la regla `@page`.
+   *
+   * Se toca el DOM a mano en vez de pasar por el estado porque `window.print()` es
+   * síncrono: si el tamaño de página dependiera de un re-render de React, el diálogo
+   * se abriría con la regla anterior.
+   */
+  const imprimir = () => {
+    const el = hoja.current;
+    const est = document.getElementById("pg-page") as HTMLStyleElement | null;
+    if (el && est) {
+      if (papel === "termica") {
+        // px → mm a 96dpi, más el colchón que se come la cuchilla al cortar.
+        const mm = Math.ceil((el.offsetHeight / 96) * 25.4) + 14;
+        est.textContent = `@page { size: 80mm ${mm}mm; margin: 0; }`;
+      } else {
+        est.textContent = "@page { size: auto; margin: 12mm; }";
+      }
+    }
+    window.print();
+  };
+
   useEffect(() => {
     if (auto) {
-      const t = setTimeout(() => window.print(), 350);
+      const t = setTimeout(imprimir, 350);
       return () => clearTimeout(t);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto]);
 
-  // Solo lo que de verdad se cobró: sin impuesto no se pinta la línea (no "$0").
   const consumo = p.subtotal - (p.descuento ?? 0);
   const lineas: { k: string; v: number }[] = [
     { k: "Consumo", v: p.subtotal },
@@ -75,7 +141,7 @@ export default function Comprobante({
     ...(p.impuesto ? [{ k: `Impuesto (${a.impuestoPct}%)`, v: p.impuesto }] : []),
     ...(p.domicilio ? [{ k: "Domicilio", v: p.domicilio }] : []),
   ];
-  const totalConsumo = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);
+  const total = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);
 
   /* UN PEDIDO CANCELADO NO PUEDE IMPRIMIR UN PAPEL QUE PAREZCA UN CONSUMO VÁLIDO.
      Se cancelaba un pedido, se abría su comprobante y salía idéntico a los demás:
@@ -84,44 +150,111 @@ export default function Comprobante({
   const anulado = p.estado === "cancelado";
   const devuelto = p.pago === "devuelto";
 
-  const texto = [
-    `*${a.negocio || "Papaghetti"}* — comprobante N° ${p.consecutivo ?? p.id}`,
-    devuelto
-      ? `*** DINERO DEVUELTO (${formatCOP(p.devolucion?.monto ?? p.total)}) ***`
-      : anulado
-        ? "*** PEDIDO ANULADO — NO ES UN CONSUMO ***"
-        : "",
-    hora(p.creadoEn),
-    "",
-    ...lineasDe(p).flatMap((l) => [
-      `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}  ${formatCOP(l.precio * l.cantidad)}`,
-      l.detalle ? `   ${l.detalle}` : "",
-    ]),
-    "",
-    ...lineas.map((l) => `${l.k}: ${formatCOP(l.v)}`),
-    `TOTAL: ${formatCOP(totalConsumo)}`,
-    p.propina ? `Propina voluntaria: ${formatCOP(p.propina)}` : "",
-    p.propina ? `Recibido: ${formatCOP(p.total)}` : "",
-    "",
-    "¡Gracias por venir!",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const texto = useMemo(
+    () =>
+      [
+        `*${a.negocio || "Papaghetti"}*`,
+        `Comprobante N° ${p.consecutivo ?? p.id} · ${hora(p.creadoEn)}`,
+        devuelto
+          ? `*** DINERO DEVUELTO (${formatCOP(p.devolucion?.monto ?? p.total)}) ***`
+          : anulado
+            ? "*** PEDIDO ANULADO — NO ES UN CONSUMO ***"
+            : "",
+        "",
+        ...lineasDe(p).flatMap((l) => [
+          `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}   ${formatCOP(l.precio * l.cantidad)}`,
+          l.detalle ? `   _${l.detalle}_` : "",
+        ]),
+        "",
+        ...lineas.map((l) => `${l.k}: ${formatCOP(l.v)}`),
+        `*TOTAL: ${formatCOP(total)}*`,
+        "",
+        `Pago: ${
+          p.pago === "devuelto"
+            ? "devuelto"
+            : p.pago === "pagado"
+              ? p.metodoPago
+                ? metodoLabel[p.metodoPago]
+                : "pagado"
+              : "PENDIENTE"
+        }`,
+        "",
+        "Comprobante interno de control. No es factura electrónica de venta ni documento equivalente P.O.S.",
+        "¡Gracias por venir!",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [p, a.negocio, total, anulado, devuelto],
+  );
 
-  const wa = p.telefono
-    ? `https://wa.me/${p.telefono.replace(/\D/g, "")}?text=${encodeURIComponent(texto)}`
-    : null;
+  const soloDigitos = tel.replace(/\D/g, "");
+  const waHref = `https://wa.me/${soloDigitos.length === 10 ? `57${soloDigitos}` : soloDigitos}?text=${encodeURIComponent(texto)}`;
+  const telOk = whatsappValido(tel);
 
   return (
     <>
+      {/* El tamaño de papel se escribe de verdad en la regla @page: es lo único que
+          hace que el navegador saque una tira de 80mm en vez de una carta. La altura
+          exacta la calcula `imprimir()` justo antes de abrir el diálogo. */}
+      <style id="pg-page">{
+        papel === "termica"
+          ? "@page { size: 80mm 297mm; margin: 0; }"
+          : "@page { size: auto; margin: 12mm; }"
+      }</style>
+
       <div className="cbte-acciones no-print">
-        <button className="btn btn--primary" type="button" onClick={() => window.print()}>
-          <span>🖨️ Imprimir</span>
+        <div className="cbte-papel" role="group" aria-label="Tamaño de papel">
+          <button
+            type="button"
+            className={papel === "termica" ? "is-on" : ""}
+            onClick={() => setPapel("termica")}
+          >
+            Térmica 80mm
+          </button>
+          <button
+            type="button"
+            className={papel === "hoja" ? "is-on" : ""}
+            onClick={() => setPapel("hoja")}
+          >
+            Hoja normal
+          </button>
+        </div>
+        <button className="btn btn--primary" type="button" onClick={imprimir}>
+          <span>Imprimir</span>
         </button>
-        {wa && (
-          <a className="btn btn--ghost" href={wa} target="_blank" rel="noopener noreferrer">
+        {/* WhatsApp SIEMPRE. Antes el botón solo existía si el pedido traía teléfono,
+            o sea casi nunca: en el mostrador nadie lo pide. Si no hay número, se
+            escribe aquí y ya. */}
+        {p.telefono ? (
+          <a className="btn btn--gold" href={waHref} target="_blank" rel="noopener noreferrer">
             <span>Enviar por WhatsApp</span>
           </a>
+        ) : !pidiendoTel ? (
+          <button className="btn btn--gold" type="button" onClick={() => setPidiendoTel(true)}>
+            <span>Enviar por WhatsApp</span>
+          </button>
+        ) : (
+          <span className="cbte-wa">
+            <input
+              type="tel"
+              inputMode="numeric"
+              autoFocus
+              value={tel}
+              onChange={(e) => setTel(e.target.value)}
+              placeholder="Número de WhatsApp"
+              aria-label="Número de WhatsApp del cliente"
+            />
+            <a
+              className={`btn btn--gold ${telOk ? "" : "is-off"}`}
+              href={telOk ? waHref : undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-disabled={!telOk}
+            >
+              <span>Enviar</span>
+            </a>
+          </span>
         )}
         <button
           className="btn btn--ghost"
@@ -135,7 +268,12 @@ export default function Comprobante({
         </a>
       </div>
 
-      <article className={`cbte ${anulado ? "cbte--anulado" : ""}`}>
+      {/* `printable` es lo que lo hace visible al imprimir: sin esa clase el papel
+          salía en blanco (ver la cabecera de este archivo). */}
+      <article
+        ref={hoja}
+        className={`cbte printable cbte--${papel} ${anulado ? "cbte--anulado" : ""}`}
+      >
         {anulado && (
           <div className="cbte__anulado" role="alert">
             {devuelto ? "DINERO DEVUELTO" : "PEDIDO ANULADO"}
@@ -156,88 +294,84 @@ export default function Comprobante({
             </em>
           </div>
         )}
+
         <header className="cbte__h">
-          <b className="cbte__negocio">{a.negocio || "Papaghetti"}</b>
-          {a.razonSocial && <span>{a.razonSocial}</span>}
-          {a.nit && <span>NIT {a.nit}</span>}
-          {a.direccion && <span>{a.direccion}</span>}
-          {(a.telefonoLocal || a.whatsapp) && <span>Tel. {a.telefonoLocal || a.whatsapp}</span>}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="cbte__logo" src="/logo-papaghetti-bn.png" alt={a.negocio || "Papaghetti"} />
+          <p className="cbte__datos">
+            {a.razonSocial && <span>{a.razonSocial}</span>}
+            {a.nit && <span>NIT {a.nit}</span>}
+            {a.direccion && <span>{a.direccion}</span>}
+            {(a.telefonoLocal || a.whatsapp) && <span>Tel. {a.telefonoLocal || a.whatsapp}</span>}
+          </p>
         </header>
 
-        <div className="cbte__tit">COMPROBANTE DE CONSUMO</div>
+        <Hebra />
 
-        <div className="cbte__meta">
-          <span>N° interno</span>
-          <b>{p.consecutivo ?? p.id}</b>
+        <div className="cbte__tit">
+          Comprobante de consumo
+          <b>N° {p.consecutivo ?? p.id}</b>
         </div>
-        <div className="cbte__meta">
-          <span>Fecha</span>
-          <b>{hora(p.creadoEn)}</b>
-        </div>
-        <div className="cbte__meta">
-          <span>Servicio</span>
-          <b>{tipoLabel[p.tipo]}</b>
-        </div>
-        {p.referencia && (
-          <div className="cbte__meta">
-            <span>Ubicación</span>
-            <b>{p.referencia}</b>
+
+        <dl className="cbte__meta">
+          <div>
+            <dt>Fecha</dt>
+            <dd>{hora(p.creadoEn)}</dd>
           </div>
-        )}
-        {p.cliente && (
-          <div className="cbte__meta">
-            <span>Cliente</span>
-            <b>{p.cliente}</b>
+          <div>
+            <dt>Servicio</dt>
+            <dd>{tipoLabel[p.tipo]}</dd>
           </div>
-        )}
-
-        <hr className="cbte__sep" />
-
-        {/* RENGLÓN A RENGLÓN. Antes el papel ponía el nombre de la base con el subtotal
-            ENTERO al lado y los extras debajo sin precio: el cliente leía "$34.400" como
-            si fuera el precio de la papa criolla. Con varios platos ya era ilegible. */}
-        {lineasDe(p).map((l, i) => (
-          <div key={i}>
-            <div className="cbte__item">
-              <span>
-                {l.cantidad > 1 && <b className="cbte__x">{l.cantidad}×</b>} {l.nombre}
-              </span>
-              <b>{formatCOP(l.precio * l.cantidad)}</b>
+          {p.referencia && (
+            <div>
+              <dt>Ubicación</dt>
+              <dd>{p.referencia}</dd>
             </div>
-            {l.detalle && <div className="cbte__sub">{l.detalle}</div>}
-          </div>
-        ))}
-        {p.notas && <div className="cbte__sub">Nota: {p.notas}</div>}
+          )}
+          {p.cliente && (
+            <div>
+              <dt>Cliente</dt>
+              <dd>{p.cliente}</dd>
+            </div>
+          )}
+        </dl>
 
-        <hr className="cbte__sep" />
+        <Hebra corta />
 
-        {lineas.map((l) => (
-          <div className="cbte__linea" key={l.k}>
-            <span>{l.k}</span>
-            <b>{formatCOP(l.v)}</b>
-          </div>
-        ))}
+        {/* Renglón a renglón. Antes el papel ponía el nombre de la base con el subtotal
+            ENTERO al lado y los extras debajo sin precio: el cliente leía "$34.400"
+            como si fuera el precio de la papa criolla. */}
+        <ul className="cbte__items">
+          {lineasDe(p).map((l, i) => (
+            <li key={i}>
+              <span className="cbte__cant">{l.cantidad > 1 ? `${l.cantidad}×` : ""}</span>
+              <span className="cbte__nom">
+                {l.nombre}
+                {l.detalle && <em>{l.detalle}</em>}
+              </span>
+              <span className="cbte__val">{formatCOP(l.precio * l.cantidad)}</span>
+            </li>
+          ))}
+        </ul>
+        {p.notas && <p className="cbte__nota">Nota: {p.notas}</p>}
+
+        <Hebra corta />
+
+        <div className="cbte__sumas">
+          {lineas.map((l) => (
+            <div className="cbte__linea" key={l.k}>
+              <span>{l.k}</span>
+              <b>{formatCOP(l.v)}</b>
+            </div>
+          ))}
+        </div>
+
         <div className="cbte__total">
           <span>TOTAL</span>
-          <b>{formatCOP(totalConsumo)}</b>
+          <b>{formatCOP(total)}</b>
         </div>
 
-        {/* La propina va DESPUÉS del total del consumo y siempre se puede no pagar. */}
-        {p.propina > 0 && (
-          <>
-            <div className="cbte__linea cbte__linea--prop">
-              <span>Propina voluntaria</span>
-              <b>{formatCOP(p.propina)}</b>
-            </div>
-            <div className="cbte__total">
-              <span>RECIBIDO</span>
-              <b>{formatCOP(p.total)}</b>
-            </div>
-          </>
-        )}
-
-        <hr className="cbte__sep" />
-        <div className="cbte__meta">
+        <div className="cbte__pago">
           <span>Pago</span>
           <b>
             {p.pago === "devuelto"
@@ -250,8 +384,9 @@ export default function Comprobante({
           </b>
         </div>
 
+        <Hebra />
+
         <footer className="cbte__pie">
-          <p>La propina es voluntaria. Usted decide si la paga y por cuánto.</p>
           <p className="cbte__aviso">
             Documento interno de control. No es factura electrónica de venta ni documento
             equivalente P.O.S.
