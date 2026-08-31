@@ -1,4 +1,4 @@
-import { getCatalog } from "@/lib/catalog";
+import { getCatalog, estadoPersistencia } from "@/lib/catalog";
 import { whatsappValido } from "@/lib/menu";
 import { saveAjustes, toggleAbiertoAction } from "../actions";
 import PromosEditor from "@/components/admin/PromosEditor";
@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AjustesPage() {
   const { ajustes } = await getCatalog();
+  const persistencia = await estadoPersistencia();
   const abierto = ajustes.abierto !== false;
 
   return (
@@ -106,6 +107,24 @@ export default async function AjustesPage() {
 
         <button className="btn btn--primary" type="submit"><span>Guardar cambios</span></button>
       </form>
+
+      {/* DÓNDE SE GUARDA. "¿Esto está guardando bien?" no puede ser una pregunta que
+          el dueño tenga que adivinar: si el POS pierde el turno se entera al día
+          siguiente, y ya es tarde. */}
+      <section className={`persis ${persistencia.durable && persistencia.ok ? "is-ok" : "is-mal"}`}>
+        <div className="persis__head">
+          <span className="persis__dot" aria-hidden />
+          <h2>Dónde se guarda todo</h2>
+          <b>{persistencia.nombre}</b>
+        </div>
+        <p className="persis__txt">{persistencia.detalle}</p>
+        {persistencia.ok && (
+          <p className="persis__meta">
+            {persistencia.pedidos} pedidos guardados · {persistencia.peso}
+            {persistencia.backend === "blob" && " · copia de seguridad diaria automática"}
+          </p>
+        )}
+      </section>
     </section>
   );
 }

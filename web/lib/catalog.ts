@@ -364,7 +364,60 @@ async function writeSupabase(cat: Catalog): Promise<void> {
  * pero el panel muestra la alarma y aquí queda el rastro en los logs.
  */
 export function persistenciaEnRiesgo(): boolean {
-  return Boolean(process.env.VERCEL) && !supabaseEnabled();
+  return Boolean(process.env.VERCEL) && !supabaseEnabled() && !blobEnabled();
+}
+
+/**
+ * DÓNDE SE ESTÁ GUARDANDO, dicho en voz alta.
+ *
+ * "¿Esto está guardando bien?" es la pregunta que un dueño no debería tener que
+ * adivinar: si el POS pierde el turno, se entera al día siguiente y ya es tarde.
+ * Esto hace una lectura REAL y reporta el backend, el peso del documento y cuántos
+ * pedidos hay dentro.
+ */
+export async function estadoPersistencia(): Promise<{
+  backend: "supabase" | "blob" | "archivo";
+  nombre: string;
+  durable: boolean;
+  ok: boolean;
+  detalle: string;
+  pedidos?: number;
+  peso?: string;
+}> {
+  const backend = supabaseEnabled() ? "supabase" : blobEnabled() ? "blob" : "archivo";
+  const nombre =
+    backend === "supabase"
+      ? "Supabase"
+      : backend === "blob"
+        ? "Almacén de Vercel"
+        : process.env.VERCEL
+          ? "Disco temporal (/tmp)"
+          : "Archivo local";
+  const durable = backend !== "archivo" || !process.env.VERCEL;
+  try {
+    olvidar();
+    const cat = await read();
+    const peso = Math.round(JSON.stringify(cat).length / 1024);
+    return {
+      backend,
+      nombre,
+      durable,
+      ok: true,
+      detalle: durable
+        ? "Los pedidos y la caja sobreviven a los reinicios."
+        : "OJO: en Vercel esto es efímero. Lo de hoy se pierde al reiniciar.",
+      pedidos: cat.pedidos.length,
+      peso: `${peso} KB`,
+    };
+  } catch (e) {
+    return {
+      backend,
+      nombre,
+      durable,
+      ok: false,
+      detalle: `No se pudo leer: ${(e as Error)?.message ?? e}`,
+    };
+  }
 }
 if (persistenciaEnRiesgo()) {
   console.warn(

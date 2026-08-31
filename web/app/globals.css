@@ -5483,3 +5483,21 @@ body.enreda-jugando .sticky-pedir {
 }
 .kds-salida:hover { opacity: 1; background: rgba(30, 22, 17, 0.16); }
 .kds-abrir { display: flex; justify-content: flex-end; margin-bottom: -6px; }
+
+/* --- Dónde se guarda todo (Ajustes): la salud del cerebro, en una tarjeta --- */
+.persis {
+  margin-top: 22px;
+  border-radius: 16px;
+  padding: 16px 18px;
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  background: #fff;
+}
+.persis.is-ok { border-left: 3px solid var(--pg-perejil, #5a8c3c); }
+.persis.is-mal { border-left: 3px solid var(--pg-pomodoro, #d1381f); background: #fff9f8; }
+.persis__head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.persis__head h2 { font-size: 1rem; margin: 0; }
+.persis__head b { margin-left: auto; font-size: 0.9rem; }
+.persis__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--pg-perejil, #5a8c3c); }
+.persis.is-mal .persis__dot { background: var(--pg-pomodoro, #d1381f); }
+.persis__txt { margin: 8px 0 0; font-size: 0.88rem; opacity: 0.75; }
+.persis__meta { margin: 4px 0 0; font-size: 0.78rem; opacity: 0.55; font-variant-numeric: tabular-nums; }
