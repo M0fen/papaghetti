@@ -154,8 +154,11 @@ export default function Comprobante({
        ventana para maquetar imprime un documento de altura cero: rollo en blanco.
        Con 340×700 aparcado a -10000px no hay caso posible en que el contenido mida 0,
        y lo que se mide en las pruebas es lo mismo que sale por la impresora. */
+    /* Sin opacity:0: aparcado fuera de pantalla ya es invisible, y cada propiedad de
+       compositado del padre entre el documento y la impresora es una variable menos
+       que pueda torcerse (y una foto real más en las pruebas). */
     marco.style.cssText =
-      "position:fixed;left:-10000px;top:0;width:340px;height:700px;border:0;opacity:0;pointer-events:none";
+      "position:fixed;left:-10000px;top:0;width:340px;height:700px;border:0;pointer-events:none";
     document.body.appendChild(marco);
 
     const doc = marco.contentDocument;
