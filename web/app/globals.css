@@ -6659,3 +6659,14 @@ body.enreda-jugando .sticky-pedir {
   line-height: 1.4;
   opacity: 0.7;
 }
+
+/* La ayuda de impresión: visible sin gritar, y solo en pantalla. */
+.cbte-ayuda {
+  flex: 1 1 100%;
+  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  opacity: 0.7;
+  max-width: 460px;
+  margin: 0 auto;
+}

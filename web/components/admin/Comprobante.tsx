@@ -109,28 +109,28 @@ export default function Comprobante({
   const hoja = useRef<HTMLElement>(null);
 
   /**
-   * IMPRIMIR MIDIENDO EL PAPEL PRIMERO.
+   * IMPRIMIR CON EL PAPEL QUE EL DRIVER CONOCE.
    *
-   * Una térmica imprime sobre ROLLO CONTINUO: no hay hoja que llenar, corta donde se
-   * le diga. Con una altura de página fija (297mm) cada tiquete de 14cm se llevaba
-   * otros 15cm de papel en blanco antes del corte. Así que antes de abrir el diálogo
-   * se mide lo que ocupa el comprobante y se escribe ESA altura en la regla `@page`.
-   *
-   * Se toca el DOM a mano en vez de pasar por el estado porque `window.print()` es
-   * síncrono: si el tamaño de página dependiera de un re-render de React, el diálogo
-   * se abriría con la regla anterior.
+   * La térmica va a 80×297mm fijos porque es el preset que traen los drivers de
+   * Windows; una altura inventada por tiquete hacía que el driver descartara el
+   * trabajo en silencio (vista previa perfecta, papel que nunca sale). La "hoja
+   * normal" no fija tamaño: usa el papel del propio driver, que es el último
+   * salvavidas si ni siquiera el preset de 80mm existe en esa impresora.
    */
   const imprimir = () => {
     const el = hoja.current;
     if (!el) return;
 
-    /* La altura del papel: una térmica imprime sobre ROLLO CONTINUO, no sobre hojas.
-       Con una altura fija cada tiquete de 14cm se llevaba otros 15cm en blanco antes
-       del corte. `+14mm` es el colchón que se come la cuchilla. */
-    const mm = Math.ceil((el.offsetHeight / 96) * 25.4) + 14;
+    /* 80×297 FIJO, y no la altura medida del tiquete. La versión anterior calculaba
+       una página de 80×162mm, 80×182mm… distinta por tiquete, para no gastar rollo.
+       Resultado real: la vista previa salía perfecta y EL PAPEL NUNCA SALÍA. Un
+       driver de Windows solo acepta los tamaños de papel declarados en su GPD, y
+       una térmica trae "80 x 297 mm" o "80 x rollo" — un 80×162 inventado se
+       descarta sin error. Es el síntoma de manual: el autotest imprime, el trabajo
+       del software no. El rollo que sobre lo corta el driver, que para eso es rollo. */
     const page =
       papel === "termica"
-        ? `@page { size: 80mm ${mm}mm; margin: 0; }`
+        ? "@page { size: 80mm 297mm; margin: 0; }"
         : "@page { size: auto; margin: 12mm; }";
 
     /* Las MISMAS hojas de estilo de la página, para que el tiquete del iframe se
@@ -293,7 +293,7 @@ export default function Comprobante({
     <>
       {/* El tamaño de papel se escribe de verdad en la regla @page: es lo único que
           hace que el navegador saque una tira de 80mm en vez de una carta. La altura
-          exacta la calcula `imprimir()` justo antes de abrir el diálogo. */}
+          exacta la fija `imprimir()` justo antes de abrir el diálogo. */}
       <style id="pg-page">{
         papel === "termica"
           ? "@page { size: 80mm 297mm; margin: 0; }"
@@ -320,6 +320,16 @@ export default function Comprobante({
         <button className="btn btn--primary" type="button" onClick={imprimir}>
           <span>Imprimir</span>
         </button>
+        {/* La instrucción del caso real: vista previa bien + papel que no sale =
+            el DRIVER no tiene el papel del rollo configurado. Se dice aquí, donde
+            está el que sufre el problema, no en un manual que nadie abre. */}
+        {papel === "termica" && (
+          <small className="cbte-ayuda">
+            ¿La vista previa sale bien pero el papel no? En Windows: Impresoras → tu
+            térmica → Preferencias → papel <b>80 × 297&nbsp;mm</b> (o &quot;80mm
+            Roll&quot;). Si no existe, prueba con <b>Hoja normal</b> aquí arriba.
+          </small>
+        )}
         {/* WhatsApp SIEMPRE. Antes el botón solo existía si el pedido traía teléfono,
             o sea casi nunca: en el mostrador nadie lo pide. Si no hay número, se
             escribe aquí y ya. */}
