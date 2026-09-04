@@ -298,6 +298,35 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete):
   return final;
 }
 
+/**
+ * BLANCO Y NEGRO PUROS, para el cabezal térmico.
+ *
+ * Un cabezal quema un punto o no lo quema: no existe el gris. Cuando le llega el
+ * antialias del navegador (bordes de letra en gris), el driver lo convierte con un
+ * tramado que ensucia el contorno de cada glifo — texto "peludo", que es lo que se ve
+ * en muchos tiquetes web. Un umbral limpio antes de mandar la imagen deja cada borde
+ * decidido. En pantalla se sigue mostrando la versión suave; esta es solo para el
+ * papel térmico y para el archivo descargado.
+ */
+export function binarizar(origen: HTMLCanvasElement, umbral = 150): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = origen.width;
+  c.height = origen.height;
+  const ctx = c.getContext("2d")!;
+  ctx.drawImage(origen, 0, 0);
+  const img = ctx.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    // luminancia aproximada; el alfa ya es opaco (se pintó blanco debajo)
+    const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    const v = lum < umbral ? 0 : 255;
+    d[i] = d[i + 1] = d[i + 2] = v;
+    d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
 /** Carga una imagen y resuelve con ella, o con null si no se pudo. Nunca rechaza. */
 export function cargarImagen(src: string): Promise<HTMLImageElement | null> {
   return new Promise((res) => {

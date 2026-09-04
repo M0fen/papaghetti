@@ -40,7 +40,7 @@ import {
   type Ajustes,
   type Pedido,
 } from "@/lib/menu";
-import { dibujarTiquete, cargarImagen } from "@/lib/tiquete-imagen";
+import { dibujarTiquete, cargarImagen, binarizar } from "@/lib/tiquete-imagen";
 
 /**
  * La fecha, ARMADA A MANO a partir de las piezas.
@@ -113,6 +113,10 @@ export default function Comprobante({
      cambia el pedido: sirve para imprimir, descargar y ver en pantalla, así que lo
      que se ve es EXACTAMENTE lo que sale. */
   const [png, setPng] = useState<string | null>(null);
+  /* La misma imagen en blanco y negro PUROS: es la que va a la térmica y al archivo.
+     El cabezal no sabe de grises; el antialias de pantalla le sale como texto
+     "peludo". En pantalla se ve la suave, que es más bonita. */
+  const [pngTermica, setPngTermica] = useState<string | null>(null);
   useEffect(() => {
     let vivo = true;
     (async () => {
@@ -125,6 +129,7 @@ export default function Comprobante({
       if (!vivo) return;
       const c = dibujarTiquete({ pedido: p, ajustes: a, logo });
       setPng(c.toDataURL("image/png"));
+      setPngTermica(binarizar(c).toDataURL("image/png"));
     })();
     return () => {
       vivo = false;
@@ -148,23 +153,28 @@ export default function Comprobante({
    * derecho. Nada queda oculto donde no se pueda rescatar.
    */
   const imprimir = () => {
-    if (!png) return;
-    const page =
-      papel === "termica"
-        ? "@page { size: 80mm 297mm; margin: 0; }"
-        : "@page { size: auto; margin: 10mm; }";
+    if (!png || !pngTermica) return;
+    const termica = papel === "termica";
+    const page = termica
+      ? "@page { size: 80mm 297mm; margin: 0; }"
+      : "@page { size: auto; margin: 10mm; }";
+    /* TÉRMICA: 72mm EXACTOS y centrados, no "100%". El rollo mide 80mm pero el
+       cabezal solo imprime 72 (576 puntos); si la imagen ocupa los 80, el driver
+       recorta 4mm por cada lado y se lleva el margen del texto. A 72mm, los 576px
+       del canvas caen uno a uno sobre los 576 puntos del cabezal — sin reescalar,
+       sin moiré — y los 4mm sobrantes por lado quedan de aire. Si el driver declara
+       el papel a 72mm en vez de 80, 72mm sigue siendo el 100%: cabe igual.
+       HOJA NORMAL: a todo lo ancho, grande y entera. */
+    const ancho = termica ? "width:72mm;margin:0 auto" : "width:100%";
+    const src = termica ? pngTermica : png;
     const html =
       `<!doctype html><html lang="es"><head><meta charset="utf-8">` +
       `<title>Comprobante N° ${p.consecutivo ?? p.id}</title>` +
       `<style>${page}
         html,body{margin:0;padding:0;background:#fff}
-        /* A TODO LO ANCHO del papel que sea. En una térmica el ancho es 80mm y el
-           tiquete lo llena; en una carta se ve grande pero entero. Nunca "un
-           fragmento del lienzo", que es lo que salía con el HTML a 72mm dentro de
-           una hoja carta. */
-        img{display:block;width:100%;height:auto}
+        img{display:block;${ancho};height:auto}
         @media print{ body,img{visibility:visible !important;display:block !important} }
-      </style></head><body><img src="${png}" alt="Comprobante"></body></html>`;
+      </style></head><body><img src="${src}" alt="Comprobante"></body></html>`;
 
     const ventana = window.open("", "_blank");
     if (ventana && ventana.document) {
@@ -308,17 +318,17 @@ export default function Comprobante({
             Hoja normal
           </button>
         </div>
-        <button className="btn btn--primary" type="button" onClick={imprimir} disabled={!png}>
-          <span>{png ? "Imprimir" : "Preparando…"}</span>
+        <button className="btn btn--primary" type="button" onClick={imprimir} disabled={!png || !pngTermica}>
+          <span>{png && pngTermica ? "Imprimir" : "Preparando…"}</span>
         </button>
         {/* La misma imagen, como archivo. Es el salvavidas que no depende de NADA
             del navegador: Windows imprime una foto en cualquier impresora con
             "ajustar al marco", y si la térmica se niega desde Chrome, desde el visor
             de fotos sale. */}
-        {png && (
+        {pngTermica && (
           <a
             className="btn btn--ghost"
-            href={png}
+            href={pngTermica}
             download={`comprobante-${p.consecutivo ?? p.id}.png`}
           >
             <span>Descargar imagen</span>
