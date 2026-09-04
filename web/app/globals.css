@@ -6670,3 +6670,26 @@ body.enreda-jugando .sticky-pedir {
   max-width: 460px;
   margin: 0 auto;
 }
+
+/* ── El tiquete como imagen ──
+   Lo que se ve es lo que sale: la misma imagen que se imprime. El artículo HTML
+   queda debajo, fuera de la vista pero disponible para lectores de pantalla,
+   "Copiar texto" y Ctrl+P (ahí sí manda el bloque de impresión de siempre). */
+.cbte-imagen {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  border: 1px solid rgba(30, 22, 17, 0.12);
+  border-radius: 10px;
+  background: #fff;
+}
+.cbte--respaldo {
+  position: absolute !important;
+  left: -10000px !important;
+  top: 0 !important;
+}
+@media print {
+  .cbte-imagen { display: none !important; }
+  .cbte--respaldo { position: static !important; left: auto !important; }
+}

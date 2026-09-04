@@ -40,6 +40,7 @@ import {
   type Ajustes,
   type Pedido,
 } from "@/lib/menu";
+import { dibujarTiquete, cargarImagen } from "@/lib/tiquete-imagen";
 
 /**
  * La fecha, ARMADA A MANO a partir de las piezas.
@@ -108,128 +109,118 @@ export default function Comprobante({
   const [pidiendoTel, setPidiendoTel] = useState(false);
   const hoja = useRef<HTMLElement>(null);
 
+  /* La imagen del tiquete, ya dibujada. Se hace una vez al montar y cada vez que
+     cambia el pedido: sirve para imprimir, descargar y ver en pantalla, así que lo
+     que se ve es EXACTAMENTE lo que sale. */
+  const [png, setPng] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        await (document as Document & { fonts?: FontFaceSet }).fonts?.ready;
+      } catch {
+        /* sin API de fuentes: se dibuja con las del sistema */
+      }
+      const logo = await cargarImagen("/logo-papaghetti-bn.png");
+      if (!vivo) return;
+      const c = dibujarTiquete({ pedido: p, ajustes: a, logo });
+      setPng(c.toDataURL("image/png"));
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [p, a]);
+
   /**
-   * IMPRIMIR CON EL PAPEL QUE EL DRIVER CONOCE.
+   * IMPRIMIR LA IMAGEN, Y NADA MÁS.
    *
-   * La térmica va a 80×297mm fijos porque es el preset que traen los drivers de
-   * Windows; una altura inventada por tiquete hacía que el driver descartara el
-   * trabajo en silencio (vista previa perfecta, papel que nunca sale). La "hoja
-   * normal" no fija tamaño: usa el papel del propio driver, que es el último
-   * salvavidas si ni siquiera el preset de 80mm existe en esa impresora.
+   * Tres versiones anteriores imprimían HTML+CSS —la página, luego un iframe con
+   * las hojas de estilo copiadas— y las tres acabaron en el mismo sitio: papel en
+   * blanco o solo el logo. Entre un documento HTML y una térmica hay demasiadas
+   * manos (el @media print global, la regla @page, el driver de Windows y sus
+   * papeles declarados, "gráficos en segundo plano") y cada una puede dejar caer el
+   * texto sin avisar. El logo llegaba porque es una IMAGEN.
+   *
+   * Así que se manda un documento que solo contiene una imagen a todo lo ancho. Un
+   * driver imprime un bitmap igual que imprime su autotest. Y se abre en una
+   * PESTAÑA visible, no en un iframe escondido: si el diálogo fallara, el operario
+   * tiene el tiquete delante y puede imprimirlo con Ctrl+P o guardarlo con clic
+   * derecho. Nada queda oculto donde no se pueda rescatar.
    */
   const imprimir = () => {
-    const el = hoja.current;
-    if (!el) return;
-
-    /* 80×297 FIJO, y no la altura medida del tiquete. La versión anterior calculaba
-       una página de 80×162mm, 80×182mm… distinta por tiquete, para no gastar rollo.
-       Resultado real: la vista previa salía perfecta y EL PAPEL NUNCA SALÍA. Un
-       driver de Windows solo acepta los tamaños de papel declarados en su GPD, y
-       una térmica trae "80 x 297 mm" o "80 x rollo" — un 80×162 inventado se
-       descarta sin error. Es el síntoma de manual: el autotest imprime, el trabajo
-       del software no. El rollo que sobre lo corta el driver, que para eso es rollo. */
+    if (!png) return;
     const page =
       papel === "termica"
         ? "@page { size: 80mm 297mm; margin: 0; }"
-        : "@page { size: auto; margin: 12mm; }";
+        : "@page { size: auto; margin: 10mm; }";
+    const html =
+      `<!doctype html><html lang="es"><head><meta charset="utf-8">` +
+      `<title>Comprobante N° ${p.consecutivo ?? p.id}</title>` +
+      `<style>${page}
+        html,body{margin:0;padding:0;background:#fff}
+        /* A TODO LO ANCHO del papel que sea. En una térmica el ancho es 80mm y el
+           tiquete lo llena; en una carta se ve grande pero entero. Nunca "un
+           fragmento del lienzo", que es lo que salía con el HTML a 72mm dentro de
+           una hoja carta. */
+        img{display:block;width:100%;height:auto}
+        @media print{ body,img{visibility:visible !important;display:block !important} }
+      </style></head><body><img src="${png}" alt="Comprobante"></body></html>`;
 
-    /* Las MISMAS hojas de estilo de la página, para que el tiquete del iframe se
-       vea exactamente igual que el de la pantalla. */
-    const hojas = [...document.querySelectorAll('link[rel="stylesheet"]')]
-      .map((l) => `<link rel="stylesheet" href="${(l as HTMLLinkElement).href}">`)
-      .join("");
+    const ventana = window.open("", "_blank");
+    if (ventana && ventana.document) {
+      ventana.document.open();
+      ventana.document.write(html);
+      ventana.document.close();
+      const img = ventana.document.querySelector("img");
+      const lanzar = () => {
+        try {
+          ventana.focus();
+          ventana.print();
+        } catch {
+          /* el operario ve el tiquete en la pestaña y puede imprimir con Ctrl+P */
+        }
+      };
+      if (img && !img.complete) img.addEventListener("load", lanzar, { once: true });
+      else setTimeout(lanzar, 50);
+      return;
+    }
 
+    /* Ventana bloqueada (popups): un iframe con SOLO la imagen. Sigue siendo un
+       bitmap, sigue sin depender de CSS: es tan robusto como la pestaña. */
     const marco = document.createElement("iframe");
-    /* La clase importa: `:has(.cbte)` NO puede mirar dentro de un iframe, así que para
-       la regla estructural de impresión este marco es un hijo más del body sin tiquete
-       — y lo ocultaría, dejando su documento sin maquetar (altura 0 = rollo en
-       blanco) en cualquier motor que aplique el medio print al padre. Se excluye por
-       nombre en el CSS global. */
     marco.className = "cbte-print-frame";
     marco.setAttribute("aria-hidden", "true");
-    marco.setAttribute("tabindex", "-1");
-    /* CON TAMAÑO REAL, aparcado fuera de la pantalla — no 0×0. Un iframe de 0×0 tiene
-       una vista de 0×0, y aunque la impresión de verdad re-maqueta contra el tamaño
-       de @page, cualquier motor (o emulación, o versión vieja) que use la vista de la
-       ventana para maquetar imprime un documento de altura cero: rollo en blanco.
-       Con 340×700 aparcado a -10000px no hay caso posible en que el contenido mida 0,
-       y lo que se mide en las pruebas es lo mismo que sale por la impresora. */
-    /* Sin opacity:0: aparcado fuera de pantalla ya es invisible, y cada propiedad de
-       compositado del padre entre el documento y la impresora es una variable menos
-       que pueda torcerse (y una foto real más en las pruebas). */
     marco.style.cssText =
-      "position:fixed;left:-10000px;top:0;width:340px;height:700px;border:0;pointer-events:none";
+      "position:fixed;left:-10000px;top:0;width:400px;height:800px;border:0;pointer-events:none";
     document.body.appendChild(marco);
-
     const doc = marco.contentDocument;
     if (!doc) {
       marco.remove();
-      window.print(); // si el navegador no deja iframes, al menos que imprima algo
       return;
     }
     doc.open();
-    doc.write(
-      `<!doctype html><html lang="es"><head><meta charset="utf-8">${hojas}` +
-        `<style>${page}
-         html,body{margin:0;padding:0;background:#fff}
-         /* El bloque global de impresión apaga TODO el body con \`visibility\` y solo
-            revive lo que lleva \`printable\`. Aquí dentro no hay nada más que el
-            tiquete, así que se anula entero: es justo la regla que lo dejaba en
-            blanco cuando el navegador no aplicaba bien la excepción. */
-         @media print {
-           body, body * { visibility: visible !important; }
-           /* La clase repetida sube la especificidad por encima de cualquier regla
-              global de ocultar (las de \`body:has(...) > *\` pesan (0,2,1); esto pesa
-              (0,3,1)). Este documento SOLO contiene el tiquete: aquí nada tiene
-              permiso para esconderlo, hoy ni cuando alguien toque el CSS global. */
-           body > .cbte.cbte.cbte { display: block !important; }
-         }
-         .cbte { border:0 !important; border-radius:0 !important; box-shadow:none !important; }
-        </style></head><body>${el.outerHTML}</body></html>`,
-    );
+    doc.write(html);
     doc.close();
-
-    /* Hay que esperar a que las hojas de estilo del iframe carguen: si se imprime
-       antes, sale el tiquete sin estilos (que es otra forma de salir mal). */
+    const img = doc.querySelector("img");
     const lanzar = () => {
       try {
         marco.contentWindow?.focus();
         marco.contentWindow?.print();
       } finally {
-        // Se quita DESPUÉS del diálogo; en Chrome print() es bloqueante, en otros no.
-        setTimeout(() => marco.remove(), 1500);
+        setTimeout(() => marco.remove(), 2000);
       }
     };
-    const links = [...doc.querySelectorAll("link")];
-    let faltan = links.length;
-    if (!faltan) {
-      lanzar();
-      return;
-    }
-    const listo = () => {
-      faltan -= 1;
-      if (faltan <= 0) setTimeout(lanzar, 60);
-    };
-    for (const l of links) {
-      l.addEventListener("load", listo, { once: true });
-      l.addEventListener("error", listo, { once: true });
-    }
-    // Red lenta o una hoja que nunca resuelve: se imprime igual, no se cuelga.
-    setTimeout(() => {
-      if (faltan > 0) {
-        faltan = 0;
-        lanzar();
-      }
-    }, 2500);
+    if (img && !img.complete) img.addEventListener("load", lanzar, { once: true });
+    else setTimeout(lanzar, 50);
   };
 
   useEffect(() => {
-    if (auto) {
-      const t = setTimeout(imprimir, 350);
+    if (auto && png) {
+      const t = setTimeout(imprimir, 250);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto]);
+  }, [auto, png]);
 
   const consumo = p.subtotal - (p.descuento ?? 0);
   const lineas: { k: string; v: number }[] = [
@@ -317,17 +308,30 @@ export default function Comprobante({
             Hoja normal
           </button>
         </div>
-        <button className="btn btn--primary" type="button" onClick={imprimir}>
-          <span>Imprimir</span>
+        <button className="btn btn--primary" type="button" onClick={imprimir} disabled={!png}>
+          <span>{png ? "Imprimir" : "Preparando…"}</span>
         </button>
+        {/* La misma imagen, como archivo. Es el salvavidas que no depende de NADA
+            del navegador: Windows imprime una foto en cualquier impresora con
+            "ajustar al marco", y si la térmica se niega desde Chrome, desde el visor
+            de fotos sale. */}
+        {png && (
+          <a
+            className="btn btn--ghost"
+            href={png}
+            download={`comprobante-${p.consecutivo ?? p.id}.png`}
+          >
+            <span>Descargar imagen</span>
+          </a>
+        )}
         {/* La instrucción del caso real: vista previa bien + papel que no sale =
             el DRIVER no tiene el papel del rollo configurado. Se dice aquí, donde
             está el que sufre el problema, no en un manual que nadie abre. */}
         {papel === "termica" && (
           <small className="cbte-ayuda">
-            ¿La vista previa sale bien pero el papel no? En Windows: Impresoras → tu
-            térmica → Preferencias → papel <b>80 × 297&nbsp;mm</b> (o &quot;80mm
-            Roll&quot;). Si no existe, prueba con <b>Hoja normal</b> aquí arriba.
+            Se imprime como una sola imagen a todo lo ancho del papel. Si la térmica no
+            responde desde el navegador: <b>Descargar imagen</b> y abrirla en el visor
+            de fotos de Windows → Imprimir → &quot;ajustar al marco&quot;.
           </small>
         )}
         {/* WhatsApp SIEMPRE. Antes el botón solo existía si el pedido traía teléfono,
@@ -377,9 +381,16 @@ export default function Comprobante({
 
       {/* `printable` es lo que lo hace visible al imprimir: sin esa clase el papel
           salía en blanco (ver la cabecera de este archivo). */}
+      {/* En pantalla se muestra LA IMAGEN: es la misma que se imprime, se descarga y
+          se manda, así que lo que se ve es exactamente lo que sale. El artículo de
+          abajo queda para lectores de pantalla, copiar texto y Ctrl+P. */}
+      {png && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className="cbte-imagen" src={png} alt={`Comprobante N° ${p.consecutivo ?? p.id}`} />
+      )}
       <article
         ref={hoja}
-        className={`cbte printable cbte--${papel} ${anulado ? "cbte--anulado" : ""}`}
+        className={`cbte printable cbte--${papel} ${anulado ? "cbte--anulado" : ""} ${png ? "cbte--respaldo" : ""}`}
       >
         {anulado && (
           <div className="cbte__anulado" role="alert">
