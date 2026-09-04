@@ -6689,6 +6689,17 @@ body.enreda-jugando .sticky-pedir {
   left: -10000px !important;
   top: 0 !important;
 }
+/* Un botón que se lee como enlace, dentro de la ayuda: imprime el patrón de prueba. */
+.cbte-link {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: var(--pg-pomodoro, #d1381f);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
 @media print {
   .cbte-imagen { display: none !important; }
   .cbte--respaldo { position: static !important; left: auto !important; }

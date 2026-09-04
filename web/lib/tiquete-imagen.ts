@@ -327,6 +327,76 @@ export function binarizar(origen: HTMLCanvasElement, umbral = 150): HTMLCanvasEl
   return c;
 }
 
+/**
+ * EL PATRÓN DE CALIBRACIÓN: lo que se imprime para saber, en un solo papel, cómo
+ * está llegando el bitmap al cabezal.
+ *
+ *  · Una REGLA en milímetros con marca cada mm y número cada 10: si al medir con
+ *    una regla de verdad los "10" caen a 10 mm, los 576 px van uno a uno sobre los
+ *    576 puntos; si caen a 11, el driver está reescalando (papel de 80 mm elegido
+ *    en vez de 72, o "ajustar a la página" activo).
+ *  · Marcas en x=0 y x=575: si falta alguna, el driver recorta ese borde.
+ *  · Un TABLERO de 1 px: nítido = 1:1; gris o con bandas = remuestreo o dithering.
+ *  · Texto de 16, 20 y 24 px, para ver qué tamaño se lee bien en ESTE cabezal.
+ */
+export function dibujarCalibracion(): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = ANCHO_TIQUETE;
+  c.height = 560;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "center";
+  ctx.font = `800 26px ${CUERPO}`;
+  ctx.fillText("PATRÓN DE PRUEBA · 576 puntos = 72 mm", ANCHO_TIQUETE / 2, 40);
+
+  // Bordes: si uno no sale, ese lado se recorta.
+  ctx.fillRect(0, 0, 3, c.height);
+  ctx.fillRect(ANCHO_TIQUETE - 3, 0, 3, c.height);
+
+  // Regla: 8 px = 1 mm.
+  const y0 = 70;
+  ctx.fillRect(0, y0, ANCHO_TIQUETE, 2);
+  ctx.font = `700 18px ${CUERPO}`;
+  for (let mm = 0; mm <= 72; mm++) {
+    const x = mm * 8;
+    const alto = mm % 10 === 0 ? 26 : mm % 5 === 0 ? 16 : 8;
+    ctx.fillRect(Math.min(x, ANCHO_TIQUETE - 2), y0, 2, alto);
+    if (mm % 10 === 0 && mm < 72) ctx.fillText(String(mm), x + (mm === 0 ? 10 : 0), y0 + 46);
+  }
+  ctx.fillText("72", ANCHO_TIQUETE - 14, y0 + 46);
+
+  // Tablero de 1 px: la prueba de remuestreo.
+  const yt = 140;
+  ctx.font = `600 18px ${CUERPO}`;
+  ctx.textAlign = "left";
+  ctx.fillText("Tablero 1 px (debe verse nítido, no gris):", 22, yt - 8);
+  for (let y = 0; y < 40; y++) {
+    for (let x = 0; x < ANCHO_TIQUETE - 44; x++) {
+      if ((x + y) % 2 === 0) ctx.fillRect(22 + x, yt + y, 1, 1);
+    }
+  }
+  // Líneas verticales de 1 px separadas 2 px: si salen bandas, hay escalado.
+  const yl = yt + 56;
+  ctx.fillText("Líneas de 1 px:", 22, yl - 8);
+  for (let x = 22; x < ANCHO_TIQUETE - 22; x += 3) ctx.fillRect(x, yl, 1, 40);
+
+  // Tamaños de texto.
+  let y = yl + 80;
+  for (const px of [16, 20, 24, 30]) {
+    ctx.font = `600 ${px}px ${CUERPO}`;
+    ctx.fillText(`Texto de ${px} px · Papaghetti 0123456789`, 22, y);
+    y += px + 14;
+  }
+  ctx.font = `500 17px ${CUERPO}`;
+  ctx.fillText("Si la regla no llega a 72: el driver recorta.", 22, y + 10);
+  ctx.fillText("Si el 10 no mide 10 mm: hay reescalado.", 22, y + 34);
+  ctx.fillText("Si el tablero sale gris: hay tramado.", 22, y + 58);
+
+  return binarizar(c);
+}
+
 /** Carga una imagen y resuelve con ella, o con null si no se pudo. Nunca rechaza. */
 export function cargarImagen(src: string): Promise<HTMLImageElement | null> {
   return new Promise((res) => {

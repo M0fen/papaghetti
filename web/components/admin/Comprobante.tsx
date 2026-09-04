@@ -40,7 +40,7 @@ import {
   type Ajustes,
   type Pedido,
 } from "@/lib/menu";
-import { dibujarTiquete, cargarImagen, binarizar } from "@/lib/tiquete-imagen";
+import { dibujarTiquete, cargarImagen, binarizar, dibujarCalibracion } from "@/lib/tiquete-imagen";
 
 /**
  * La fecha, ARMADA A MANO a partir de las piezas.
@@ -152,29 +152,50 @@ export default function Comprobante({
    * tiene el tiquete delante y puede imprimirlo con Ctrl+P o guardarlo con clic
    * derecho. Nada queda oculto donde no se pueda rescatar.
    */
-  const imprimir = () => {
-    if (!png || !pngTermica) return;
-    const termica = papel === "termica";
+  /**
+   * Manda a imprimir un documento que solo contiene UNA imagen.
+   *
+   * SIN `size` EN LA TÉRMICA, a propósito. La investigación con las fichas de los
+   * fabricantes lo dejó claro: Epson y Bixolon declaran los papeles "80 × 297" y
+   * "80 × 3276" (rollo continuo), Bixolon arranca por defecto en 3276, y los drivers
+   * genéricos de Xprinter recomiendan pasar a 3276 para que no corten a media
+   * comanda. Y Chrome, cuando la página CSS no coincide con el papel que tiene
+   * elegido el driver, la ENCOGE o la CENTRA (kCenterShrinkToFitPaper): eso es
+   * exactamente "el tiquete en un fragmento del lienzo". Sin `size`, Chrome usa el
+   * papel del propio driver, sea el que sea, y no puede haber desajuste. La única
+   * decisión que queda es del driver, y se toma una vez en sus preferencias.
+   *
+   * `max-width:100%`: si alguien cambia los márgenes del diálogo, Chrome ignora el
+   * @page y el área útil se estrecha; con esto el tiquete se encoge un poco en vez
+   * de perder el borde derecho. `width:72mm` sigue siendo el objetivo: 576 px sobre
+   * los 576 puntos del cabezal, uno a uno.
+   */
+  const imprimirImagen = (src: string, termica: boolean, titulo: string) => {
     const page = termica
-      ? "@page { size: 80mm 297mm; margin: 0; }"
+      ? "@page { margin: 0; }"
       : "@page { size: auto; margin: 10mm; }";
-    /* TÉRMICA: 72mm EXACTOS y centrados, no "100%". El rollo mide 80mm pero el
-       cabezal solo imprime 72 (576 puntos); si la imagen ocupa los 80, el driver
-       recorta 4mm por cada lado y se lleva el margen del texto. A 72mm, los 576px
-       del canvas caen uno a uno sobre los 576 puntos del cabezal — sin reescalar,
-       sin moiré — y los 4mm sobrantes por lado quedan de aire. Si el driver declara
-       el papel a 72mm en vez de 80, 72mm sigue siendo el 100%: cabe igual.
-       HOJA NORMAL: a todo lo ancho, grande y entera. */
-    const ancho = termica ? "width:72mm;margin:0 auto" : "width:100%";
-    const src = termica ? pngTermica : png;
+    const ancho = termica ? "width:72mm;max-width:100%;margin:0 auto" : "width:100%";
     const html =
       `<!doctype html><html lang="es"><head><meta charset="utf-8">` +
-      `<title>Comprobante N° ${p.consecutivo ?? p.id}</title>` +
+      `<title>${titulo}</title>` +
       `<style>${page}
         html,body{margin:0;padding:0;background:#fff}
         img{display:block;${ancho};height:auto}
         @media print{ body,img{visibility:visible !important;display:block !important} }
-      </style></head><body><img src="${src}" alt="Comprobante"></body></html>`;
+      </style></head><body><img src="${src}" alt="${titulo}"></body></html>`;
+
+    /* ESPERAR A LA IMAGEN, DE VERDAD. En un popup rellenado con document.write,
+       print() no espera a que una <img data:> esté decodificada: el estado
+       "cargando" es de navegación y document.open no lo activa. Se decodifica
+       explícitamente y se deja pasar un par de cuadros antes de imprimir. */
+    const cuando = async (w: Window, img: HTMLImageElement | null) => {
+      try {
+        if (img) await img.decode();
+      } catch {
+        /* imagen ya lista, o navegador sin decode(): seguimos */
+      }
+      await new Promise<void>((r) => w.requestAnimationFrame(() => w.requestAnimationFrame(() => r())));
+    };
 
     const ventana = window.open("", "_blank");
     if (ventana && ventana.document) {
@@ -182,21 +203,20 @@ export default function Comprobante({
       ventana.document.write(html);
       ventana.document.close();
       const img = ventana.document.querySelector("img");
-      const lanzar = () => {
+      cuando(ventana, img).then(() => {
         try {
           ventana.focus();
           ventana.print();
         } catch {
           /* el operario ve el tiquete en la pestaña y puede imprimir con Ctrl+P */
         }
-      };
-      if (img && !img.complete) img.addEventListener("load", lanzar, { once: true });
-      else setTimeout(lanzar, 50);
+      });
       return;
     }
 
-    /* Ventana bloqueada (popups): un iframe con SOLO la imagen. Sigue siendo un
-       bitmap, sigue sin depender de CSS: es tan robusto como la pestaña. */
+    /* Ventana bloqueada (popups): un iframe con SOLO la imagen. Con tamaño real y
+       aparcado fuera de pantalla — nunca display:none, que deja el documento sin
+       maquetar y Blink imprime en blanco. */
     const marco = document.createElement("iframe");
     marco.className = "cbte-print-frame";
     marco.setAttribute("aria-hidden", "true");
@@ -204,24 +224,36 @@ export default function Comprobante({
       "position:fixed;left:-10000px;top:0;width:400px;height:800px;border:0;pointer-events:none";
     document.body.appendChild(marco);
     const doc = marco.contentDocument;
-    if (!doc) {
+    const w = marco.contentWindow;
+    if (!doc || !w) {
       marco.remove();
       return;
     }
     doc.open();
     doc.write(html);
     doc.close();
-    const img = doc.querySelector("img");
-    const lanzar = () => {
+    cuando(w, doc.querySelector("img")).then(() => {
       try {
-        marco.contentWindow?.focus();
-        marco.contentWindow?.print();
+        w.focus();
+        w.print();
       } finally {
         setTimeout(() => marco.remove(), 2000);
       }
-    };
-    if (img && !img.complete) img.addEventListener("load", lanzar, { once: true });
-    else setTimeout(lanzar, 50);
+    });
+  };
+
+  const imprimir = () => {
+    if (!png || !pngTermica) return;
+    const termica = papel === "termica";
+    imprimirImagen(termica ? pngTermica : png, termica, `Comprobante N° ${p.consecutivo ?? p.id}`);
+  };
+
+  /* El patrón de calibración: una regla en milímetros y un tablero de 1 px. En un
+     solo papel se ve si el driver recorta los bordes (la regla no llega a 72) o si
+     está reescalando (el tablero sale gris o con bandas en vez de nítido). Es la
+     prueba que puede hacer quien esté delante de la impresora, sin nadie más. */
+  const calibrar = () => {
+    imprimirImagen(dibujarCalibracion().toDataURL("image/png"), true, "Patrón de calibración");
   };
 
   useEffect(() => {
@@ -339,9 +371,15 @@ export default function Comprobante({
             está el que sufre el problema, no en un manual que nadie abre. */}
         {papel === "termica" && (
           <small className="cbte-ayuda">
-            Se imprime como una sola imagen a todo lo ancho del papel. Si la térmica no
-            responde desde el navegador: <b>Descargar imagen</b> y abrirla en el visor
-            de fotos de Windows → Imprimir → &quot;ajustar al marco&quot;.
+            Se imprime como una sola imagen de 72&nbsp;mm. En el diálogo de Chrome:
+            márgenes <b>Ninguno</b>, escala 100, sin encabezados. En Windows, en las
+            preferencias de la térmica, papel <b>80 × 3276&nbsp;mm</b> (rollo continuo) si
+            existe, o 80 × 297. Con la impresora delante,{" "}
+            <button type="button" className="cbte-link" onClick={calibrar}>
+              imprime el patrón de prueba
+            </button>
+            : la regla debe llegar a 72 y el tablero salir nítido. Si nada sale desde el
+            navegador: <b>Descargar imagen</b> y abrirla en Fotos de Windows.
           </small>
         )}
         {/* WhatsApp SIEMPRE. Antes el botón solo existía si el pedido traía teléfono,
