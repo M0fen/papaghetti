@@ -144,6 +144,7 @@ function migrate(cat: Catalog): Catalog {
     if (typeof q.propina !== "number") q.propina = 0;
     if (typeof q.descuento !== "number") q.descuento = 0;
   });
+  if (!Array.isArray(cat.archivoMeses)) cat.archivoMeses = [];
   return cat;
 }
 
@@ -383,6 +384,103 @@ async function writeSupabase(cat: Catalog): Promise<void> {
   if (error) throw new Error(`No se pudo guardar en Supabase: ${error.message}`);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   DOCUMENTOS AUXILIARES
+
+   El cerebro es UN documento, pero no todo cabe en él para siempre: los
+   comprobantes viejos se mudan a un documento por mes (ver ARCHIVO DE
+   COMPROBANTES). Estas tres funciones leen, escriben y borran un documento
+   auxiliar con el MISMO backend que el cerebro: fila propia en Supabase, blob
+   propio en Vercel, archivo propio en data/. En Blob la escritura es condicional
+   (compare-and-swap) sobre la última lectura de ESA clave.
+   ══════════════════════════════════════════════════════════════════════════ */
+const etagsAux = new Map<string, string>();
+const rutaBlobAux = (clave: string) => `cerebro/${clave}.json`;
+const rutaFileAux = (clave: string) => path.join(DATA_DIR, `${clave}.json`);
+
+async function leerDoc<T>(clave: string): Promise<T | null> {
+  if (supabaseEnabled()) {
+    const sb = supabaseAdmin();
+    const { data, error } = await sb.from(CATALOG_TABLE).select("data").eq("id", clave).maybeSingle();
+    if (error) throw new Error(`Supabase no respondió (${clave}): ${error.message}`);
+    return (data?.data as T | undefined) ?? null;
+  }
+  if (blobEnabled()) {
+    const { get } = await import("@vercel/blob");
+    try {
+      const b = await conReintento(() => get(rutaBlobAux(clave), { access: "private", useCache: false }));
+      if (!b || b.statusCode !== 200 || !b.stream) return null;
+      etagsAux.set(clave, (b.blob?.etag ?? "").replace(/^W\//, ""));
+      return JSON.parse(await new Response(b.stream).text()) as T;
+    } catch (e) {
+      if ((e as Error)?.name === "BlobNotFoundError") return null;
+      throw e;
+    }
+  }
+  try {
+    return JSON.parse(await fs.readFile(rutaFileAux(clave), "utf8")) as T;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    throw e;
+  }
+}
+
+async function escribirDoc<T>(clave: string, doc: T): Promise<void> {
+  if (supabaseEnabled()) {
+    const sb = supabaseAdmin();
+    const { error } = await sb
+      .from(CATALOG_TABLE)
+      .upsert({ id: clave, data: doc, updated_at: new Date().toISOString() });
+    if (error) throw new Error(`No se pudo guardar ${clave} en Supabase: ${error.message}`);
+    return;
+  }
+  if (blobEnabled()) {
+    const { put } = await import("@vercel/blob");
+    const etag = etagsAux.get(clave);
+    const r = await conReintento(() =>
+      put(rutaBlobAux(clave), JSON.stringify(doc), {
+        access: "private",
+        contentType: "application/json",
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        cacheControlMaxAge: 0,
+        ...(etag ? { ifMatch: etag } : {}),
+      }),
+    );
+    etagsAux.set(clave, (r.etag ?? "").replace(/^W\//, ""));
+    return;
+  }
+  const ruta = rutaFileAux(clave);
+  await fs.mkdir(path.dirname(ruta), { recursive: true });
+  const tmp = `${ruta}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(doc), "utf8");
+  await fs.rename(tmp, ruta);
+}
+
+async function borrarDoc(clave: string): Promise<void> {
+  etagsAux.delete(clave);
+  if (supabaseEnabled()) {
+    const sb = supabaseAdmin();
+    const { error } = await sb.from(CATALOG_TABLE).delete().eq("id", clave);
+    if (error) throw new Error(`No se pudo borrar ${clave} en Supabase: ${error.message}`);
+    return;
+  }
+  if (blobEnabled()) {
+    const { del } = await import("@vercel/blob");
+    try {
+      await del(rutaBlobAux(clave));
+    } catch (e) {
+      if ((e as Error)?.name !== "BlobNotFoundError") throw e;
+    }
+    return;
+  }
+  try {
+    await fs.unlink(rutaFileAux(clave));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
+  }
+}
+
 /**
  * ¿Estamos en Vercel SIN Supabase? Entonces el cerebro escribe en /tmp, que es
  * efímero y distinto por instancia de lambda: el pedido que entra por QR puede no
@@ -491,6 +589,8 @@ function conLoVivo(snap: Catalog, vivo: Catalog): Catalog {
     pedidos: vivo.pedidos ?? [],
     movimientos: vivo.movimientos ?? [],
     leads: vivo.leads ?? [],
+    // El índice del archivo tampoco se "deshace": los meses archivados existen.
+    archivoMeses: vivo.archivoMeses ?? [],
   };
 }
 
@@ -574,12 +674,26 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
         return delta === 0 ? { ...m, stock: a.stock } : { ...m, stock: Math.max(0, Number((a.stock + delta).toFixed(3))) };
       })
     : mio.insumos;
+  /* NO RESUCITAR. Si un pedido estaba en mi copia y en la que leí (base) pero YA NO
+     está en el documento actual, es que otra instancia lo sacó a propósito (lo
+     archivó, o puso el negocio en cero) mientras yo tenía la copia abierta. Volver a
+     meterlo por el mero hecho de traerlo en `mio` deshacía ese trabajo: el cerebro
+     nunca bajaba del tope y los archivados reaparecían. Solo se conserva si YO lo
+     cambié (devolver, cancelar): entonces mi cambio vale más que el recorte, y el
+     archivo se pondrá al día en el siguiente lote. */
+  const enActual = new Set((actual.pedidos ?? []).map((p) => p.id));
+  const enBase = new Map((base?.pedidos ?? []).map((p) => [p.id, JSON.stringify(p)]));
+  const misPedidos = (mio.pedidos ?? []).filter(
+    (p) => enActual.has(p.id) || !base || !enBase.has(p.id) || enBase.get(p.id) !== JSON.stringify(p),
+  );
   return {
     ...mio,
     insumos,
-    pedidos: recientes(unir(actual.pedidos ?? [], mio.pedidos ?? []), (p) => p.creadoEn),
+    pedidos: recientes(unir(actual.pedidos ?? [], misPedidos), (p) => p.creadoEn),
     movimientos: recientes(unir(actual.movimientos ?? [], mio.movimientos ?? []), (m) => m.fecha),
     leads: recientes(unir(actual.leads ?? [], mio.leads ?? []), (l) => l.creadoEn),
+    // Los meses archivados solo crecen: la unión es lo correcto.
+    archivoMeses: [...new Set([...(actual.archivoMeses ?? []), ...(mio.archivoMeses ?? [])])].sort(),
   };
 }
 
@@ -603,6 +717,9 @@ async function commit(
       // Con el documento ya fusionado y dentro del candado: aquí y solo aquí se
       // decide qué número de comprobante lleva cada pedido.
       asegurarConsecutivos(doc.pedidos ?? []);
+      /* Y aquí, con el documento definitivo, se mudan al archivo los comprobantes
+         que ya no caben. Si el archivo falla, el documento se queda entero. */
+      await archivarYRecortar(doc);
       /* `sinDeshacer` es para el borrón y cuenta nueva. El resto del tiempo guardar
          la foto anterior es lo correcto, pero al poner el negocio en cero esa foto
          contiene justo lo que se quiso borrar: un "Deshacer" devolvería la despensa
@@ -1023,25 +1140,160 @@ const MAX_PROTEINAS = 4;
 const MAX_LINEAS = 20;
 const MAX_POR_LINEA = 30;
 
+/* ══════════════════════════════════════════════════════════════════════════
+   EL ARCHIVO DE COMPROBANTES
+
+   El cerebro guarda como mucho 2.000 pedidos. Antes era 200 a secas y el corte se
+   hacía sin mirar el estado: el pedido 201 expulsaba al más viejo aunque estuviera
+   SIN COBRAR. Luego se conservaron 2.000 y solo caían los CERRADOS — pero caían:
+   el comprobante dejaba de existir, y a los dos meses el historial ya no tenía lo
+   que el contador pide a fin de mes.
+
+   Ahora lo que sale del cerebro SE MUDA a un documento por mes del mismo almacén
+   (`comprobantes-YYYY-MM`), y el cerebro solo apunta qué meses existen
+   (`archivoMeses`). Un comprobante no se pierde nunca; cambia de cajón.
+
+   Reglas:
+   · Por LOTES: al pasar de 2.300 se baja a 2.000. Una escritura al archivo cada
+     varios cientos de pedidos, no una por pedido.
+   · Solo salen los CERRADOS (pagados o cancelados), los más antiguos primero. Una
+     deuda viva no se archiva nunca, tenga la edad que tenga.
+   · Primero se ESCRIBE en el archivo, se RELEE para comprobar que llegó, y solo
+     entonces se saca del cerebro. Si el archivo falla, el cerebro se queda entero y
+     se reintenta en el siguiente commit. Perder un pedido por ahorrarse una lectura, no.
+   · El archivo se une POR ID: repetir un archivado es inocuo, y la versión más
+     nueva (la que viene del cerebro) manda sobre la que ya estaba.
+
+   Sigue siendo un puente mientras el cerebro sea un documento único; el arreglo de
+   fondo es sacar `pedidos` a su propia tabla en Supabase.
+   ══════════════════════════════════════════════════════════════════════════ */
+export const PEDIDOS_CAP = 2000;
+const MARGEN_RECORTE = 300;
+export interface ArchivoMes {
+  mes: string;
+  pedidos: Pedido[];
+}
+/** El mes de negocio ("YYYY-MM", hora de Pereira) de una fecha ISO. */
+export const mesNegocio = (iso: string): string => diaNegocio(iso).slice(0, 7);
+const claveMes = (mes: string) => `comprobantes-${mes}`;
+const cerrado = (p: Pedido) => p.pago === "pagado" || p.estado === "cancelado";
+const masNuevoPrimero = (a: Pedido, b: Pedido) => b.creadoEn.localeCompare(a.creadoEn);
+
 /**
- * Tope de pedidos guardados. Antes era 200 a secas y el corte se hacía sin mirar el
- * estado: el pedido 201 expulsaba al más viejo aunque estuviera SIN COBRAR, y con él
- * desaparecía la única forma de cobrarlo. Ahora se conservan 2.000 y, si hay que
- * recortar, solo caen los CERRADOS (pagados o cancelados) — nunca una deuda viva.
- *
- * Esto es un puente mientras el cerebro sea un documento único; el arreglo real es
- * sacar `pedidos` a su propia tabla en Supabase.
+ * Separa lo que se queda en el cerebro de lo que se va al archivo. PURA: los vivos
+ * se quedan siempre; del resto, los más nuevos hasta llenar el tope.
  */
-const PEDIDOS_CAP = 2000;
-function recortarPedidos(lista: Pedido[]): Pedido[] {
-  if (lista.length <= PEDIDOS_CAP) return lista;
-  const cerrado = (p: Pedido) => p.pago === "pagado" || p.estado === "cancelado";
-  const vivos = lista.filter((p) => !cerrado(p));
-  const cerrados = lista.filter(cerrado);
-  // Los vivos SIEMPRE se conservan; el recorte se lo comen los cerrados más antiguos.
-  return [...vivos, ...cerrados.slice(0, Math.max(0, PEDIDOS_CAP - vivos.length))].sort((a, b) =>
-    b.creadoEn.localeCompare(a.creadoEn),
+export function recortarPedidos(lista: Pedido[], cap = PEDIDOS_CAP): { quedan: Pedido[]; salen: Pedido[] } {
+  if (lista.length <= cap) return { quedan: lista, salen: [] };
+  const porFecha = [...lista].sort(masNuevoPrimero);
+  const vivos = porFecha.filter((p) => !cerrado(p));
+  const cerrados = porFecha.filter(cerrado);
+  const sitio = Math.max(0, cap - vivos.length);
+  return {
+    quedan: [...vivos, ...cerrados.slice(0, sitio)].sort(masNuevoPrimero),
+    salen: cerrados.slice(sitio),
+  };
+}
+
+/** Une pedidos por id (`nuevos` manda), más nuevo primero. */
+const unirPedidos = (previos: Pedido[], nuevos: Pedido[]): Pedido[] =>
+  unir(previos, nuevos).sort(masNuevoPrimero);
+
+/** Escribe un lote en el documento de su mes y comprueba releyendo que llegó entero. */
+async function archivarMes(mes: string, lote: Pedido[]): Promise<boolean> {
+  const clave = claveMes(mes);
+  for (let intento = 0; intento < 3; intento++) {
+    try {
+      const previo = (await leerDoc<ArchivoMes>(clave))?.pedidos ?? [];
+      await escribirDoc<ArchivoMes>(clave, { mes, pedidos: unirPedidos(previo, lote) });
+      const releido = new Set(((await leerDoc<ArchivoMes>(clave))?.pedidos ?? []).map((p) => p.id));
+      if (lote.every((p) => releido.has(p.id))) return true;
+    } catch (e) {
+      const conflicto =
+        (e as Error)?.name === "BlobPreconditionFailedError" ||
+        /precondition|ifMatch|412/i.test((e as Error)?.message ?? "");
+      if (!conflicto) {
+        console.warn(`[papaghetti] no se pudo archivar ${mes}:`, (e as Error)?.message ?? e);
+        return false;
+      }
+      etagsAux.delete(clave); // otra instancia escribió ese mes: se relee y se repite
+    }
+  }
+  return false;
+}
+
+/**
+ * Dentro del candado de commit y sobre el documento ya fusionado: si sobran
+ * pedidos, los archiva por mes y deja en el cerebro solo los que caben. Si algún
+ * mes no se pudo archivar, el cerebro se queda como estaba.
+ */
+async function archivarYRecortar(doc: Catalog): Promise<void> {
+  const lista = doc.pedidos ?? [];
+  if (lista.length <= PEDIDOS_CAP + MARGEN_RECORTE) return;
+  const { quedan, salen } = recortarPedidos(lista);
+  if (!salen.length) return;
+  const porMes = new Map<string, Pedido[]>();
+  for (const p of salen) {
+    const m = mesNegocio(p.creadoEn);
+    porMes.set(m, [...(porMes.get(m) ?? []), p]);
+  }
+  const meses = new Set(doc.archivoMeses ?? []);
+  let todoBien = true;
+  for (const [mes, lote] of porMes) {
+    if (await archivarMes(mes, lote)) meses.add(mes);
+    else todoBien = false;
+  }
+  doc.archivoMeses = [...meses].sort();
+  if (todoBien) doc.pedidos = quedan;
+}
+
+/** Los meses que tienen comprobantes archivados, del más antiguo al más nuevo. */
+export async function mesesArchivados(): Promise<string[]> {
+  return [...((await read()).archivoMeses ?? [])].sort();
+}
+
+/** Los comprobantes archivados cuyo MES cae dentro del rango de días (inclusive). */
+export async function pedidosArchivados(desdeDia?: string, hastaDia?: string): Promise<Pedido[]> {
+  const meses = ((await read()).archivoMeses ?? []).filter(
+    (m) => (!desdeDia || m >= desdeDia.slice(0, 7)) && (!hastaDia || m <= hastaDia.slice(0, 7)),
   );
+  const docs = await Promise.all(meses.map((m) => leerDoc<ArchivoMes>(claveMes(m))));
+  return docs.flatMap((d) => d?.pedidos ?? []);
+}
+
+/**
+ * TODOS los comprobantes entre dos días de negocio (inclusive): los del cerebro y
+ * los del archivo, sin repetidos (si uno está en los dos sitios, manda el del
+ * cerebro, que es el más reciente). El archivo solo se lee si el rango llega más
+ * atrás que el cerrado más antiguo que sigue en el cerebro.
+ */
+export async function comprobantesEntre(desdeDia: string, hastaDia: string): Promise<Pedido[]> {
+  const cat = await read();
+  const enRango = (p: Pedido) => {
+    const d = diaNegocio(p.creadoEn);
+    return d >= desdeDia && d <= hastaDia;
+  };
+  const vivos = cat.pedidos.filter(enRango);
+  if (!cat.archivoMeses?.length) return vivos.sort(masNuevoPrimero);
+  const cerradosVivos = cat.pedidos.filter(cerrado);
+  const corte = cerradosVivos.length
+    ? diaNegocio(cerradosVivos[cerradosVivos.length - 1].creadoEn)
+    : hastaDia;
+  if (desdeDia > corte) return vivos.sort(masNuevoPrimero);
+  const archivados = (await pedidosArchivados(desdeDia, hastaDia < corte ? hastaDia : corte)).filter(enRango);
+  return unirPedidos(archivados, vivos);
+}
+
+/** Un pedido por id: primero el cerebro, luego el archivo del mes más nuevo al más viejo. */
+export async function buscarPedido(id: string): Promise<Pedido | undefined> {
+  const cat = await read();
+  const vivo = cat.pedidos.find((p) => p.id === id);
+  if (vivo) return vivo;
+  for (const mes of [...(cat.archivoMeses ?? [])].sort().reverse()) {
+    const p = (await leerDoc<ArchivoMes>(claveMes(mes)))?.pedidos.find((x) => x.id === id);
+    if (p) return p;
+  }
+  return undefined;
 }
 
 /** Descuenta de la despensa los insumos de la receta de un componente. */
@@ -1325,7 +1577,8 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
     idemKey,
   };
 
-  cat.pedidos = recortarPedidos([pedido, ...cat.pedidos]);
+  // El recorte (y el archivado) lo hace commit(), sobre el documento ya fusionado.
+  cat.pedidos = [pedido, ...cat.pedidos];
   await commit(
     cat,
     `Nuevo pedido #${pedido.id}${platos > 1 ? ` · ${platos} platos` : ""} (${formatCOP(pedido.total)})`,
@@ -1854,6 +2107,9 @@ export async function ponerACero(): Promise<Catalog> {
      resucitaría los pedidos de prueba que acabamos de borrar. */
   cat.undo = [];
   cat.redo = [];
+  /* El archivo de comprobantes también: son pedidos de prueba mudados de cajón. */
+  for (const mes of cat.archivoMeses ?? []) await borrarDoc(claveMes(mes));
+  cat.archivoMeses = [];
   for (const i of cat.insumos) i.stock = 0;
   for (const g of ["bases", "proteinas", "toppings"] as const) {
     for (const it of cat[g]) {

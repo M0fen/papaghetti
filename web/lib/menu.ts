@@ -742,6 +742,13 @@ export interface Catalog {
   ajustes: Ajustes;
   /** Arqueos de caja, el más reciente primero. */
   arqueos?: Arqueo[];
+  /**
+   * Meses ("YYYY-MM") que tienen comprobantes ARCHIVADOS fuera del cerebro. El
+   * documento principal guarda como mucho 2.000 pedidos; lo que sale de ahí se muda a
+   * un documento por mes del mismo almacén y aquí queda apuntado qué meses existen,
+   * para no tener que preguntarle al almacén. Ver `archivarYRecortar` en catalog.ts.
+   */
+  archivoMeses?: string[];
   /** Bitácora de acciones (más reciente primero). */
   historial?: HistItem[];
   /** Pilas de snapshots para deshacer/rehacer (sin sus propias pilas). */

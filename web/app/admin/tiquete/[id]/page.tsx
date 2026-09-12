@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getCatalog } from "@/lib/catalog";
+import { getCatalog, buscarPedido } from "@/lib/catalog";
 import Comprobante from "@/components/admin/Comprobante";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +13,9 @@ export default async function TiquetePage({
 }) {
   const { id } = await params;
   const { imprimir } = await searchParams;
-  const cat = await getCatalog();
-  const pedido = cat.pedidos.find((p) => p.id === id.toUpperCase());
+  /* `buscarPedido` mira también el ARCHIVO: un comprobante de hace tres meses ya no
+     está en el cerebro, pero se tiene que poder reimprimir igual. */
+  const [cat, pedido] = await Promise.all([getCatalog(), buscarPedido(id.toUpperCase())]);
   if (!pedido) notFound();
 
   return (
