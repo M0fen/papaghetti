@@ -41,6 +41,9 @@ import {
   type Pedido,
 } from "@/lib/menu";
 import { dibujarTiquete, cargarImagen, binarizar, dibujarCalibracion } from "@/lib/tiquete-imagen";
+import { imprimirImagen } from "@/lib/imprimir-imagen";
+import ImpresionDirecta from "@/components/admin/ImpresionDirecta";
+import type { Bitmap } from "@/lib/escpos";
 
 /**
  * La fecha, ARMADA A MANO a partir de las piezas.
@@ -117,6 +120,9 @@ export default function Comprobante({
      El cabezal no sabe de grises; el antialias de pantalla le sale como texto
      "peludo". En pantalla se ve la suave, que es más bonita. */
   const [pngTermica, setPngTermica] = useState<string | null>(null);
+  /* El canvas binarizado en sí: es lo que se convierte a ESC/POS para el camino
+     directo (Bluetooth / serie), sin pasar por PNG. */
+  const [canvasTermica, setCanvasTermica] = useState<HTMLCanvasElement | null>(null);
   useEffect(() => {
     let vivo = true;
     (async () => {
@@ -128,8 +134,10 @@ export default function Comprobante({
       const logo = await cargarImagen("/logo-papaghetti-bn.png");
       if (!vivo) return;
       const c = dibujarTiquete({ pedido: p, ajustes: a, logo });
+      const bin = binarizar(c);
       setPng(c.toDataURL("image/png"));
-      setPngTermica(binarizar(c).toDataURL("image/png"));
+      setPngTermica(bin.toDataURL("image/png"));
+      setCanvasTermica(bin);
     })();
     return () => {
       vivo = false;
@@ -152,94 +160,13 @@ export default function Comprobante({
    * tiene el tiquete delante y puede imprimirlo con Ctrl+P o guardarlo con clic
    * derecho. Nada queda oculto donde no se pueda rescatar.
    */
-  /**
-   * Manda a imprimir un documento que solo contiene UNA imagen.
-   *
-   * SIN `size` EN LA TÉRMICA, a propósito. La investigación con las fichas de los
-   * fabricantes lo dejó claro: Epson y Bixolon declaran los papeles "80 × 297" y
-   * "80 × 3276" (rollo continuo), Bixolon arranca por defecto en 3276, y los drivers
-   * genéricos de Xprinter recomiendan pasar a 3276 para que no corten a media
-   * comanda. Y Chrome, cuando la página CSS no coincide con el papel que tiene
-   * elegido el driver, la ENCOGE o la CENTRA (kCenterShrinkToFitPaper): eso es
-   * exactamente "el tiquete en un fragmento del lienzo". Sin `size`, Chrome usa el
-   * papel del propio driver, sea el que sea, y no puede haber desajuste. La única
-   * decisión que queda es del driver, y se toma una vez en sus preferencias.
-   *
-   * `max-width:100%`: si alguien cambia los márgenes del diálogo, Chrome ignora el
-   * @page y el área útil se estrecha; con esto el tiquete se encoge un poco en vez
-   * de perder el borde derecho. `width:72mm` sigue siendo el objetivo: 576 px sobre
-   * los 576 puntos del cabezal, uno a uno.
-   */
-  const imprimirImagen = (src: string, termica: boolean, titulo: string) => {
-    const page = termica
-      ? "@page { margin: 0; }"
-      : "@page { size: auto; margin: 10mm; }";
-    const ancho = termica ? "width:72mm;max-width:100%;margin:0 auto" : "width:100%";
-    const html =
-      `<!doctype html><html lang="es"><head><meta charset="utf-8">` +
-      `<title>${titulo}</title>` +
-      `<style>${page}
-        html,body{margin:0;padding:0;background:#fff}
-        img{display:block;${ancho};height:auto}
-        @media print{ body,img{visibility:visible !important;display:block !important} }
-      </style></head><body><img src="${src}" alt="${titulo}"></body></html>`;
-
-    /* ESPERAR A LA IMAGEN, DE VERDAD. En un popup rellenado con document.write,
-       print() no espera a que una <img data:> esté decodificada: el estado
-       "cargando" es de navegación y document.open no lo activa. Se decodifica
-       explícitamente y se deja pasar un par de cuadros antes de imprimir. */
-    const cuando = async (w: Window, img: HTMLImageElement | null) => {
-      try {
-        if (img) await img.decode();
-      } catch {
-        /* imagen ya lista, o navegador sin decode(): seguimos */
-      }
-      await new Promise<void>((r) => w.requestAnimationFrame(() => w.requestAnimationFrame(() => r())));
-    };
-
-    const ventana = window.open("", "_blank");
-    if (ventana && ventana.document) {
-      ventana.document.open();
-      ventana.document.write(html);
-      ventana.document.close();
-      const img = ventana.document.querySelector("img");
-      cuando(ventana, img).then(() => {
-        try {
-          ventana.focus();
-          ventana.print();
-        } catch {
-          /* el operario ve el tiquete en la pestaña y puede imprimir con Ctrl+P */
-        }
-      });
-      return;
-    }
-
-    /* Ventana bloqueada (popups): un iframe con SOLO la imagen. Con tamaño real y
-       aparcado fuera de pantalla — nunca display:none, que deja el documento sin
-       maquetar y Blink imprime en blanco. */
-    const marco = document.createElement("iframe");
-    marco.className = "cbte-print-frame";
-    marco.setAttribute("aria-hidden", "true");
-    marco.style.cssText =
-      "position:fixed;left:-10000px;top:0;width:400px;height:800px;border:0;pointer-events:none";
-    document.body.appendChild(marco);
-    const doc = marco.contentDocument;
-    const w = marco.contentWindow;
-    if (!doc || !w) {
-      marco.remove();
-      return;
-    }
-    doc.open();
-    doc.write(html);
-    doc.close();
-    cuando(w, doc.querySelector("img")).then(() => {
-      try {
-        w.focus();
-        w.print();
-      } finally {
-        setTimeout(() => marco.remove(), 2000);
-      }
-    });
+  /** El bitmap binarizado como píxeles crudos, para el codificador ESC/POS. */
+  const getBitmap = (): Bitmap | null => {
+    if (!canvasTermica) return null;
+    const ctx = canvasTermica.getContext("2d");
+    if (!ctx) return null;
+    const d = ctx.getImageData(0, 0, canvasTermica.width, canvasTermica.height);
+    return { width: d.width, height: d.height, data: d.data };
   };
 
   const imprimir = () => {
@@ -379,9 +306,11 @@ export default function Comprobante({
               imprime el patrón de prueba
             </button>
             : la regla debe llegar a 72 y el tablero salir nítido. Si nada sale desde el
-            navegador: <b>Descargar imagen</b> y abrirla en Fotos de Windows.
+            navegador: <b>Descargar imagen</b> y abrirla en Fotos de Windows, o prueba el
+            camino directo de aquí abajo.
           </small>
         )}
+        {papel === "termica" && <ImpresionDirecta getBitmap={getBitmap} />}
         {/* WhatsApp SIEMPRE. Antes el botón solo existía si el pedido traía teléfono,
             o sea casi nunca: en el mostrador nadie lo pide. Si no hay número, se
             escribe aquí y ya. */}

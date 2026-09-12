@@ -6705,6 +6705,45 @@ body.enreda-jugando .sticky-pedir {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* ── Impresión directa (Bluetooth / puerto serie): sin driver ni diálogo ── */
+.idirecta {
+  flex: 1 1 100%;
+  max-width: 560px;
+  margin: 4px auto 0;
+  padding: 12px 14px;
+  border: 1px dashed rgba(242, 165, 22, 0.7);
+  border-radius: 12px;
+  background: rgba(242, 165, 22, 0.08);
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+.idirecta__t { margin: 0; font-size: 0.86rem; opacity: 0.85; }
+.idirecta__btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.idirecta__baud { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; opacity: 0.8; }
+.idirecta__baud select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(30, 22, 17, 0.18); background: #fff; }
+.idirecta__msg { margin: 0; font-size: 0.84rem; font-weight: 600; }
+.idirecta__msg.is-ok { color: #235c31; }
+.idirecta__msg.is-error { color: #8c2415; }
+.idirecta__msg.is-trabajando { opacity: 0.7; }
+
+/* ── La página de la impresora ── */
+.impresora { display: grid; gap: 16px; max-width: 760px; }
+.impresora__paso h2 { font-size: 1.1rem; margin: 0 0 8px; }
+.impresora__paso p { margin: 0 0 8px; font-size: 0.92rem; line-height: 1.5; }
+.impresora__clave {
+  border-left: 3px solid var(--pg-pomodoro, #d1381f);
+  padding: 8px 12px;
+  background: rgba(209, 56, 31, 0.06);
+  border-radius: 0 10px 10px 0;
+}
+.impresora__btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.impresora__lee { font-size: 0.88rem; opacity: 0.85; }
+.impresora__nota { font-size: 0.8rem; opacity: 0.65; }
+.impresora__vista { display: grid; gap: 6px; justify-items: start; }
+.impresora__k { margin: 0; font-size: 0.7rem; letter-spacing: 0.12em; font-weight: 800; opacity: 0.55; }
+.impresora__vista img { width: 288px; height: auto; border: 1px solid rgba(30, 22, 17, 0.12); border-radius: 8px; background: #fff; }
 @media print {
   .cbte-imagen { display: none !important; }
   .cbte--respaldo { position: static !important; left: auto !important; }

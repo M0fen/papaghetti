@@ -19,6 +19,9 @@ const NAV = [
   { href: "/admin/reportes", label: "Finanzas", icon: "💰" },
   { href: "/admin/historial", label: "Historial", icon: "🕘" },
   { href: "/admin/ajustes", label: "Ajustes", icon: "⚙️" },
+  /* La impresora con página propia: el diagnóstico paso a paso y el patrón de
+     prueba, para quien esté delante de la térmica sin nadie al lado. */
+  { href: "/admin/impresora", label: "Impresora", icon: "🖨️" },
   { href: "/admin/ayuda", label: "Ayuda", icon: "❓" },
 ];
 
