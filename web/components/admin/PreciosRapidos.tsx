@@ -127,13 +127,21 @@ export default function PreciosRapidos({
   proteinas,
   toppings,
   platos,
+  inline = false,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
   platos: EnredoInsignia[];
+  /**
+   * Como PÁGINA en vez de como hoja flotante: sin fondo oscuro, sin botón de cerrar
+   * y siempre abierta. Es lo que usa /admin/precios. La hoja flotante que sale del
+   * lápiz de Pedidos sigue existiendo para corregir un precio sin dejar la caja;
+   * esta es para sentarse a repasar la carta entera.
+   */
+  inline?: boolean;
 }) {
-  const [abierto, setAbierto] = useState(false);
+  const [abierto, setAbierto] = useState(inline);
   const [q, setQ] = useState("");
   const [nuevo, setNuevo] = useState(false);
 
@@ -191,7 +199,7 @@ export default function PreciosRapidos({
     .filter((g) => g.filas.length);
   const cuantos = visibles.reduce((s, g) => s + g.filas.length, 0);
 
-  if (!abierto) {
+  if (!abierto && !inline) {
     return (
       <button type="button" className="btn btn--ghost prq__abrir" onClick={() => setAbierto(true)}>
         <Lapiz />
@@ -201,8 +209,13 @@ export default function PreciosRapidos({
   }
 
   return (
-    <div className="prq" role="dialog" aria-modal="true" aria-label="Precios y productos">
-      <div className="prq__fondo" onClick={() => setAbierto(false)} />
+    <div
+      className={inline ? "prq prq--inline" : "prq"}
+      role={inline ? undefined : "dialog"}
+      aria-modal={inline ? undefined : "true"}
+      aria-label="Precios y productos"
+    >
+      {!inline && <div className="prq__fondo" onClick={() => setAbierto(false)} />}
       <div className="prq__panel">
         <header className="prq__h">
           <div>
@@ -211,13 +224,16 @@ export default function PreciosRapidos({
               <Lapiz size={20} /> Precios y productos
             </h2>
             <p className="prq__sub">
-              Cambia el nombre o el precio y guarda. Se aplica al instante en la carta, en
-              el QR y en los pedidos nuevos; los pedidos ya tomados conservan su precio.
+              Cambia el nombre o el precio y guarda. Se aplica al instante en el menú
+              interactivo del QR, en la página web y en los pedidos nuevos; los pedidos ya
+              tomados conservan su precio.
             </p>
           </div>
-          <button type="button" className="prq__x" onClick={() => setAbierto(false)} aria-label="Cerrar">
-            ×
-          </button>
+          {!inline && (
+            <button type="button" className="prq__x" onClick={() => setAbierto(false)} aria-label="Cerrar">
+              ×
+            </button>
+          )}
         </header>
 
         <div className="prq__buscar">

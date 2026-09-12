@@ -7,6 +7,9 @@ import logo from "@/public/logo-papaghetti.webp";
 const NAV = [
   { href: "/admin", label: "Resumen", icon: "◉", exact: true },
   { href: "/admin/pedidos", label: "Pedidos", icon: "🧾" },
+  /* Precios con entrada propia: lo que el dueño más cambia y lo que primero tiene
+     que encontrar. La misma hoja del lápiz de Pedidos, pero como página. */
+  { href: "/admin/precios", label: "Precios", icon: "💲" },
   { href: "/admin/cocina", label: "Cocina", icon: "🍳" },
   { href: "/admin/mesas", label: "Salón", icon: "🍽️" },
   { href: "/admin/inventario", label: "Inventario", icon: "📦" },
