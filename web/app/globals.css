@@ -6793,3 +6793,94 @@ body.enreda-jugando .sticky-pedir {
   .cbte-imagen { display: none !important; }
   .cbte--respaldo { position: static !important; left: auto !important; }
 }
+
+/* ── Comprobantes: el archivo (todo en servidor, estado en la URL) ── */
+.cbtes__panel { display: grid; gap: 12px; margin-bottom: 14px; }
+.cbtes__buscar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.cbtes__buscar input[type="search"] { flex: 1 1 260px; min-height: 48px; font-size: 1.05rem; }
+.cbtes__seg { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.cbtes__seg .seg { flex-wrap: wrap; }
+.cbtes__seg .seg__item { min-width: 0; padding: 8px 12px; }
+.cbtes__rango-txt { font-size: 0.86rem; opacity: 0.7; }
+.cbtes__fechas { display: grid; gap: 8px; }
+.cbtes__fechas form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cbtes__fechas span { font-size: 0.86rem; opacity: 0.7; }
+.cbtes__fechas input[type="date"], .cbtes__fechas select { width: auto; min-height: 44px; padding: 8px 10px; font-size: 0.95rem; }
+.cbtes__chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cbtes__chips .fbtn { text-decoration: none; color: inherit; display: inline-flex; align-items: center; gap: 4px; }
+.cbtes__chips .fbtn small { opacity: 0.55; font-weight: 600; font-size: 0.78em; }
+.cbtes__chips--metodos .fbtn { font-size: 0.8rem; padding: 6px 12px; }
+.cbtes__mas summary { cursor: pointer; font-size: 0.86rem; font-weight: 700; opacity: 0.75; list-style: none; padding: 4px 0; }
+.cbtes__mas summary::-webkit-details-marker { display: none; }
+.cbtes__mas summary::before { content: "▸ "; }
+.cbtes__mas[open] summary::before { content: "▾ "; }
+.cbtes__mas form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.cbtes__mas select { width: auto; min-height: 44px; padding: 8px 10px; font-size: 0.95rem; }
+.cbtes__aviso { margin: 0; padding: 10px 14px; border-radius: 10px; background: rgba(242, 165, 22, 0.14); font-size: 0.9rem; }
+.cbtes__aviso a { font-weight: 700; }
+.cbtes__totales { margin-bottom: 6px; }
+.cbtes__totales small { font-size: 0.72em; font-weight: 600; opacity: 0.7; }
+.cbtes__metodos { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.86rem; margin: 6px 0 0; opacity: 0.88; }
+.cbtes__metodos b { font-variant-numeric: tabular-nums; }
+.cbtes__metodos small { opacity: 0.6; }
+.cbtes__control { margin: 8px 0 0; font-size: 0.82rem; opacity: 0.72; line-height: 1.5; }
+.cbtes__control.is-alerta { opacity: 1; color: #8c2415; font-weight: 600; }
+.cbtes__control a { font-weight: 800; }
+.cbtes__dia { margin-top: 18px; }
+.cbtes__dia-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0 0 8px; }
+.cbtes__dia-h h2 { font-size: 1.05rem; margin: 0; text-transform: capitalize; }
+.cbtes__dia-h span { font-size: 0.84rem; opacity: 0.7; }
+.cbtes__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cbte-fila {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  grid-template-areas: "num quien total" "num estado total" "acciones acciones acciones";
+  gap: 4px 12px;
+  align-items: start;
+  background: #fff;
+  border: 1px solid rgba(30, 22, 17, 0.08);
+  border-radius: var(--pg-radius);
+  padding: 12px 14px;
+  box-shadow: var(--pg-shadow);
+}
+.cbte-fila.is-anulado { opacity: 0.65; }
+.cbte-fila__num { grid-area: num; display: flex; flex-direction: column; gap: 2px; }
+.cbte-fila__num a { font-family: var(--pg-font-display); color: var(--pg-pomodoro); font-weight: 800; font-size: 1.1rem; text-decoration: none; }
+.cbte-fila__num small { font-size: 0.78rem; opacity: 0.6; }
+.cbte-fila__num .badge { align-self: flex-start; }
+.cbte-fila__quien { grid-area: quien; min-width: 0; }
+.cbte-fila__quien b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cbte-fila__quien span { display: block; font-size: 0.84rem; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cbte-fila__estado { grid-area: estado; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 0.8rem; }
+.cbte-fila__estado small { opacity: 0.7; }
+.cbte-fila__total { grid-area: total; font-weight: 800; font-variant-numeric: tabular-nums; font-size: 1.05rem; text-align: right; white-space: nowrap; }
+.cbte-fila.is-anulado .cbte-fila__total { text-decoration: line-through; font-weight: 600; }
+.cbte-fila.is-devuelto .cbte-fila__total { color: var(--pg-pomodoro); }
+.cbte-fila__acciones { grid-area: acciones; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.cbte-fila__acciones .btn { text-decoration: none; }
+.cbte-fila__cobrar { flex: 1 1 100%; }
+.cbte-fila__cobrar summary { list-style: none; cursor: pointer; display: inline-flex; }
+.cbte-fila__cobrar summary::-webkit-details-marker { display: none; }
+.cbte-fila__cobrar form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+@media (min-width: 900px) {
+  .cbte-fila { grid-template-columns: 92px minmax(0, 1fr) auto auto; grid-template-areas: "num quien total acciones" "num estado total acciones"; align-items: center; }
+  .cbte-fila__acciones { margin-top: 0; justify-content: flex-end; }
+  .cbte-fila__cobrar { flex: 0 0 auto; }
+  .cbte-fila__cobrar form { position: relative; }
+}
+.cbtes__pag { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin: 16px 0; font-size: 0.88rem; opacity: 0.9; }
+.cbtes__pag nav { display: flex; gap: 8px; align-items: center; }
+.cbtes__vacio { text-align: center; padding: 28px 16px; }
+.cbtes__vacio p { margin: 0 0 12px; font-size: 1rem; }
+.cbtes__vacio div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.cbtes__pie { margin: 18px 0 0; font-size: 0.8rem; opacity: 0.65; line-height: 1.55; }
+@media (max-width: 520px) {
+  .cbte-fila { grid-template-columns: 78px minmax(0, 1fr); grid-template-areas: "num quien" "num estado" "total total" "acciones acciones"; }
+  .cbte-fila__total { text-align: left; }
+  .cbte-fila__acciones .btn { flex: 1 1 auto; justify-content: center; padding-inline: 10px; white-space: nowrap; }
+  .cbtes__csv { width: 100%; justify-content: center; }
+}
+@media (pointer: coarse) {
+  .cbtes__chips .fbtn, .cbtes__seg .seg__item { min-height: 44px; display: inline-flex; align-items: center; }
+  .cbtes__mas summary { min-height: 44px; display: flex; align-items: center; }
+}

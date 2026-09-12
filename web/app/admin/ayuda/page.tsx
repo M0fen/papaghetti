@@ -143,6 +143,17 @@ export default async function AyudaPage() {
         </article>
 
         <article className="ayuda-card">
+          <h3>¿Dónde están &quot;las facturas&quot;?</h3>
+          <p>
+            Lo que aquí se entrega se llama <b>comprobante de consumo</b> (no es factura
+            electrónica). Todos, de cualquier día, están en{" "}
+            <a href="/admin/comprobantes">Comprobantes</a>: se buscan por número, nombre o
+            teléfono, se reimprimen, se mandan por WhatsApp y se <b>exportan a Excel</b> para
+            el contador con lo cobrado por cada método.
+          </p>
+        </article>
+
+        <article className="ayuda-card">
           <h3>La tablet de la cocina</h3>
           <p>
             Abre <a href="/kds">/kds</a> y déjala puesta: es el mismo tablero sin el resto del

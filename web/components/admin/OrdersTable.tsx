@@ -23,38 +23,11 @@ import {
   devolverAction,
 } from "@/app/pedido-actions";
 import { esVenta } from "@/lib/menu";
+/* El texto del comprobante para WhatsApp es el MISMO que el de la página del tiquete
+   (con los avisos de anulado / dinero devuelto): antes aquí había una copia sin ellos. */
+import { waComprobanteHref } from "@/lib/comprobantes";
 
 type Filtro = "todos" | EstadoPedido | "porpagar";
-
-/**
- * El comprobante en texto, listo para WhatsApp, al número que el cliente dejó en su
- * propio pedido. La misma información del papel, con el aviso
- * de que este comprobante no es un documento fiscal.
- */
-function waComprobante(p: Pedido): string {
-  const linea = (k: string, v: number) => `${k}: ${formatCOP(v)}`;
-  const consumo = p.subtotal - (p.descuento ?? 0);
-  const txt = [
-    `*Papaghetti* — comprobante N° ${p.consecutivo ?? p.id}`,
-    "",
-    ...lineasDe(p).flatMap((l) => [
-      `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}  ${formatCOP(l.precio * l.cantidad)}`,
-      l.detalle ? `   ${l.detalle}` : "",
-    ]),
-    "",
-    linea("Consumo", p.subtotal),
-    p.descuento ? linea("Descuento", -p.descuento) : "",
-    p.impuesto ? linea("Impuesto", p.impuesto) : "",
-    p.domicilio ? linea("Domicilio", p.domicilio) : "",
-    `*TOTAL: ${formatCOP(consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0))}*`,
-    "",
-    "Comprobante interno. No es factura electrónica.",
-    "¡Gracias por venir!",
-  ]
-    .filter(Boolean)
-    .join("\n");
-  return `https://wa.me/${p.telefono?.replace(/\D/g, "")}?text=${encodeURIComponent(txt)}`;
-}
 
 export default function OrdersTable({ pedidos }: { pedidos: Pedido[] }) {
   const [filtro, setFiltro] = useState<Filtro>("todos");
@@ -255,10 +228,10 @@ function OrderCard({ p }: { p: Pedido }) {
         </a>
         {/* Y directo al WhatsApp que dejó el cliente en su pedido: un toque, sin
             copiar números a mano. */}
-        {p.telefono && (
+        {waComprobanteHref(p) && (
           <a
             className="btn btn--ghost btnmini"
-            href={waComprobante(p)}
+            href={waComprobanteHref(p) ?? undefined}
             target="_blank"
             rel="noopener noreferrer"
             title={`Enviar el comprobante al ${p.telefono}`}

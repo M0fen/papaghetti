@@ -41,6 +41,7 @@ import {
   type Pedido,
 } from "@/lib/menu";
 import { dibujarTiquete, cargarImagen, binarizar, dibujarCalibracion } from "@/lib/tiquete-imagen";
+import { textoComprobante, waHref as enlaceWa } from "@/lib/comprobantes";
 import { imprimirImagen } from "@/lib/imprimir-imagen";
 import ImpresionDirecta, { type TrabajosDirectos } from "@/components/admin/ImpresionDirecta";
 import { trabajoEscPos, type Bitmap } from "@/lib/escpos";
@@ -102,15 +103,21 @@ export default function Comprobante({
   pedido: p,
   ajustes: a,
   auto,
+  wa,
+  volver = "pedidos",
 }: {
   pedido: Pedido;
   ajustes: Ajustes;
   /** Abre el diálogo de impresión al entrar (se llega desde el botón de la caja). */
   auto?: boolean;
+  /** Llega desde "WhatsApp" de un pedido sin teléfono: arranca pidiendo el número. */
+  wa?: boolean;
+  /** De dónde se vino, para que "Volver" devuelva ahí (la caja o el archivo). */
+  volver?: "pedidos" | "comprobantes";
 }) {
   const [papel, setPapel] = useState<Papel>("termica");
   const [tel, setTel] = useState(p.telefono ?? "");
-  const [pidiendoTel, setPidiendoTel] = useState(false);
+  const [pidiendoTel, setPidiendoTel] = useState(Boolean(wa) && !p.telefono);
   const hoja = useRef<HTMLElement>(null);
 
   /* La imagen del tiquete, ya dibujada. Se hace una vez al montar y cada vez que
@@ -218,46 +225,11 @@ export default function Comprobante({
   const anulado = p.estado === "cancelado";
   const devuelto = p.pago === "devuelto";
 
-  const texto = useMemo(
-    () =>
-      [
-        `*${a.negocio || "Papaghetti"}*`,
-        `Comprobante N° ${p.consecutivo ?? p.id} · ${hora(p.creadoEn)}`,
-        devuelto
-          ? `*** DINERO DEVUELTO (${formatCOP(p.devolucion?.monto ?? p.total)}) ***`
-          : anulado
-            ? "*** PEDIDO ANULADO — NO ES UN CONSUMO ***"
-            : "",
-        "",
-        ...lineasDe(p).flatMap((l) => [
-          `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}   ${formatCOP(l.precio * l.cantidad)}`,
-          l.detalle ? `   _${l.detalle}_` : "",
-        ]),
-        "",
-        ...lineas.map((l) => `${l.k}: ${formatCOP(l.v)}`),
-        `*TOTAL: ${formatCOP(total)}*`,
-        "",
-        `Pago: ${
-          p.pago === "devuelto"
-            ? "devuelto"
-            : p.pago === "pagado"
-              ? p.metodoPago
-                ? metodoLabel[p.metodoPago]
-                : "pagado"
-              : "PENDIENTE"
-        }`,
-        "",
-        "Comprobante interno de control. No es factura electrónica de venta ni documento equivalente P.O.S.",
-        "¡Gracias por venir!",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [p, a.negocio, total, anulado, devuelto],
-  );
+  /* El texto para WhatsApp y el portapapeles sale de la función compartida con la
+     caja y el historial: un solo texto, con los avisos de anulado/devuelto. */
+  const texto = useMemo(() => textoComprobante(p, a), [p, a]);
 
-  const soloDigitos = tel.replace(/\D/g, "");
-  const waHref = `https://wa.me/${soloDigitos.length === 10 ? `57${soloDigitos}` : soloDigitos}?text=${encodeURIComponent(texto)}`;
+  const waHref = enlaceWa(tel, texto);
   const telOk = whatsappValido(tel);
 
   return (
@@ -362,8 +334,8 @@ export default function Comprobante({
         >
           <span>Copiar texto</span>
         </button>
-        <a className="btn btn--ghost" href="/admin/pedidos">
-          <span>← Volver a la caja</span>
+        <a className="btn btn--ghost" href={volver === "comprobantes" ? "/admin/comprobantes" : "/admin/pedidos"}>
+          <span>{volver === "comprobantes" ? "← Volver a comprobantes" : "← Volver a la caja"}</span>
         </a>
       </div>
 

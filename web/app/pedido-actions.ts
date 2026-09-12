@@ -28,6 +28,7 @@ function refrescarPanel() {
   revalidatePath("/admin/cocina");
   revalidatePath("/admin/mesas");
   revalidatePath("/admin/reportes");
+  revalidatePath("/admin/comprobantes");
 }
 
 /** Convierte el "no" del cerebro en un aviso visible del panel, nunca en un 500. */

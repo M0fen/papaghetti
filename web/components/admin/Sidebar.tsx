@@ -7,6 +7,9 @@ import logo from "@/public/logo-papaghetti.webp";
 const NAV = [
   { href: "/admin", label: "Resumen", icon: "◉", exact: true },
   { href: "/admin/pedidos", label: "Pedidos", icon: "🧾" },
+  /* Pedidos es la caja de HOY; Comprobantes es el archivo de todo lo que ha salido:
+     buscar, reimprimir, mandar por WhatsApp y exportar para el contador. */
+  { href: "/admin/comprobantes", label: "Comprobantes", icon: "🗂️" },
   /* Precios con entrada propia: lo que el dueño más cambia y lo que primero tiene
      que encontrar. La misma hoja del lápiz de Pedidos, pero como página. */
   { href: "/admin/precios", label: "Precios", icon: "💲" },

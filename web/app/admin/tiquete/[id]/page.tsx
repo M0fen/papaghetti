@@ -9,10 +9,10 @@ export default async function TiquetePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ imprimir?: string }>;
+  searchParams: Promise<{ imprimir?: string; wa?: string; de?: string }>;
 }) {
   const { id } = await params;
-  const { imprimir } = await searchParams;
+  const { imprimir, wa, de } = await searchParams;
   /* `buscarPedido` mira también el ARCHIVO: un comprobante de hace tres meses ya no
      está en el cerebro, pero se tiene que poder reimprimir igual. */
   const [cat, pedido] = await Promise.all([getCatalog(), buscarPedido(id.toUpperCase())]);
@@ -20,7 +20,13 @@ export default async function TiquetePage({
 
   return (
     <section className="cbte-wrap">
-      <Comprobante pedido={pedido} ajustes={cat.ajustes} auto={imprimir === "1"} />
+      <Comprobante
+        pedido={pedido}
+        ajustes={cat.ajustes}
+        auto={imprimir === "1"}
+        wa={wa === "1"}
+        volver={de === "comprobantes" ? "comprobantes" : "pedidos"}
+      />
     </section>
   );
 }
