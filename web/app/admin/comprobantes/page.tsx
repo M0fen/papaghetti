@@ -1,5 +1,6 @@
-import { getCatalog, comprobantesEntre, mesesArchivados } from "@/lib/catalog";
+import { getCatalog, comprobantesEntre, pedidosArchivados } from "@/lib/catalog";
 import {
+  coincide,
   leerFiltros,
   rangoDe,
   filtrarComprobantes,
@@ -26,7 +27,7 @@ import {
   type Situacion,
   type ParamsCrudos,
 } from "@/lib/comprobantes";
-import { formatCOP, METODOS, metodoLabel, metodoEmoji, TIPOS, tipoLabel, tipoIcon, type Pedido } from "@/lib/menu";
+import { esVenta, formatCOP, METODOS, metodoLabel, metodoEmoji, TIPOS, tipoLabel, tipoIcon, type Pedido } from "@/lib/menu";
 import { diaNegocio } from "@/lib/precios";
 import { cobrarAction } from "@/app/pedido-actions";
 
@@ -67,11 +68,47 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
   const ahora = new Date();
   const hoy = diaNegocio(ahora);
   const rango = rangoDe(f.p, ahora, f.desde, f.hasta);
-  const [cat, enRango, archivados] = await Promise.all([
-    getCatalog(),
-    comprobantesEntre(rango.desde, rango.hasta),
-    mesesArchivados(),
-  ]);
+  const cat = await getCatalog();
+  const archivados = [...(cat.archivoMeses ?? [])].sort();
+  /* Si se buscó algo sin elegir fechas, la búsqueda fue a TODO el archivo: se dice. */
+  const busquedaGlobal = Boolean(f.q) && f.p === "todo" && !sp.p && !sp.mes;
+  const leerTodoElArchivo = sp.archivo === "1";
+
+  /* QUÉ SE LEE. El cerebro tiene los ~2.000 más recientes; el resto vive por meses.
+     · Las deudas vivas nunca se archivan: "por pagar" se resuelve solo con el cerebro.
+     · Una búsqueda sin fechas va ESCALONADA: primero el cerebro; si ahí no está, mes a
+       mes del archivo del más nuevo al más viejo, y se para en el primero que responde
+       (el número de un comprobante es único). ?archivo=1 fuerza leerlo todo.
+     · Cualquier otro rango: comprobantesEntre, que une cerebro y archivo sin repetir. */
+  let enRango: Pedido[];
+  let alcance: "rango" | "recientes" | "mes-archivado" | "todo" = "rango";
+  let mesEncontrado = "";
+  const enDias = (p: Pedido) => {
+    const d = diaNegocio(p.creadoEn);
+    return d >= rango.desde && d <= rango.hasta;
+  };
+  if (f.s === "pendiente") {
+    enRango = cat.pedidos.filter(enDias);
+  } else if (busquedaGlobal && archivados.length && !leerTodoElArchivo) {
+    if (cat.pedidos.some((p) => coincide(p, f.q))) {
+      enRango = cat.pedidos;
+      alcance = "recientes";
+    } else {
+      enRango = [];
+      for (const mes of [...archivados].reverse()) {
+        const delMes = (await pedidosArchivados(`${mes}-01`, `${mes}-01`)).filter((p) => coincide(p, f.q));
+        if (delMes.length) {
+          enRango = delMes;
+          mesEncontrado = mes;
+          alcance = "mes-archivado";
+          break;
+        }
+      }
+    }
+  } else {
+    enRango = await comprobantesEntre(rango.desde, rango.hasta);
+    if (f.p === "todo" && archivados.length) alcance = "todo";
+  }
 
   /* Los conteos de los chips de situación se calculan con TODO menos la situación,
      para que cada chip diga cuántos habría al tocarlo. */
@@ -85,10 +122,13 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
   const dias = agruparPorDia(pagina.items);
   const meses = mesesDisponibles(cat.pedidos, archivados);
   const pendientesViejos = cat.pedidos.filter((p) => situacionDe(p) === "pendiente" && diaNegocio(p.creadoEn) < hoy);
-  /* Si se buscó algo sin elegir fechas, la búsqueda fue a TODO el archivo: se dice. */
-  const busquedaGlobal = Boolean(f.q) && f.p === "todo" && !sp.p && !sp.mes;
+  /* Pagados de antes de que se registrara el método: cuentan como efectivo (igual que
+     el cuadre de caja), pero se dicen para que el dueño sepa que existen. */
+  const sinMetodo = filtrados.filter((p) => p.pago === "pagado" && esVenta(p) && !p.metodoPago).length;
   const csvHref = queryDe(f, {}, "/admin/comprobantes/csv");
   const url = (cambios: Partial<Filtros>) => queryDe(f, cambios);
+  const conArchivo = (u: string) => `${u}${u.includes("?") ? "&" : "?"}archivo=1`;
+  const etiquetaMes = (mes: string) => meses.find((m) => m.valor === mes)?.etiqueta ?? mes;
   const etiquetaRango =
     f.p === "hoy" ? "hoy" : f.p === "ayer" ? "ayer" : f.p === "todo" ? "todas las fechas" : rango.desde === rango.hasta ? diaLegible(rango.desde) : `del ${diaLegible(rango.desde)} al ${diaLegible(rango.hasta)}`;
   const hayAlgo = filtrados.length > 0;
@@ -168,7 +208,11 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
             ))}
           </div>
           <span className="cbtes__rango-txt">
-            {f.p === "todo" ? "Todas las fechas" : rango.desde === rango.hasta ? diaLegible(rango.desde) : `${diaLegible(rango.desde)} → ${diaLegible(rango.hasta)}`}
+            {f.p === "todo"
+              ? `Todas las fechas${archivados.length ? " · incluye el archivo" : ""}`
+              : rango.desde === rango.hasta
+                ? diaLegible(rango.desde)
+                : `${diaLegible(rango.desde)} → ${diaLegible(rango.hasta)}`}
           </span>
         </div>
 
@@ -258,8 +302,23 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
 
         {busquedaGlobal && (
           <p className="cbtes__aviso" role="status">
-            Buscando «{f.q}» en <b>todas las fechas</b>.{" "}
-            <a href={url({ p: "hoy" })}>Solo hoy</a> · <a href={url({ p: "mes" })}>Solo este mes</a>
+            {alcance === "recientes" ? (
+              <>
+                Buscando «{f.q}» entre los <b>comprobantes recientes</b>.{" "}
+                <a href={conArchivo(url({}))}>Buscar también en el archivo</a>
+              </>
+            ) : alcance === "mes-archivado" ? (
+              <>
+                «{f.q}» no está entre los recientes: esto viene del <b>archivo de {etiquetaMes(mesEncontrado)}</b>.{" "}
+                <a href={conArchivo(url({}))}>Buscar en todo el archivo</a>
+              </>
+            ) : (
+              <>
+                Buscando «{f.q}» en <b>todas las fechas</b>
+                {archivados.length ? ", archivo incluido" : ""}.
+              </>
+            )}{" "}
+            · <a href={url({ p: "hoy" })}>Solo hoy</a> · <a href={url({ p: "mes" })}>Solo este mes</a>
           </p>
         )}
       </article>
@@ -297,9 +356,18 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
           <span>
             ticket promedio <b>{formatCOP(resumen.ticketPromedio)}</b>
           </span>
+          {sinMetodo > 0 && (
+            <span>
+              <small>
+                {sinMetodo} pagado{sinMetodo === 1 ? "" : "s"} sin método registrado (cuenta{sinMetodo === 1 ? "" : "n"} como efectivo)
+              </small>
+            </span>
+          )}
         </p>
       )}
-      {hayAlgo && numeracion.desde !== undefined && (
+      {/* Los huecos solo se miran en una vista SIN filtros: con un chip puesto, los
+          números que faltan son simplemente los que el filtro dejó fuera. */}
+      {hayAlgo && !hayFiltros(f) && numeracion.desde !== undefined && (
         <p className={`cbtes__control ${numeracion.faltan.length || numeracion.repetidos.length ? "is-alerta" : ""}`}>
           Numeración: del N° {numeracion.desde} al N° {numeracion.hasta}
           {numeracion.faltan.length === 0 && numeracion.repetidos.length === 0 && numeracion.saltos.length === 0
@@ -337,6 +405,11 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
                 {f.p !== "todo" && (
                   <a className="btn btn--primary btnmini" href={url({ p: "todo" })}>
                     <span>Buscar en todas las fechas</span>
+                  </a>
+                )}
+                {f.p === "todo" && archivados.length > 0 && !leerTodoElArchivo && (
+                  <a className="btn btn--primary btnmini" href={conArchivo(url({}))}>
+                    <span>Revisar todo el archivo, mes a mes</span>
                   </a>
                 )}
                 {hayFiltros(f) && (

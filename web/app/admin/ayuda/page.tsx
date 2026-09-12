@@ -149,7 +149,8 @@ export default async function AyudaPage() {
             electrónica). Todos, de cualquier día, están en{" "}
             <a href="/admin/comprobantes">Comprobantes</a>: se buscan por número, nombre o
             teléfono, se reimprimen, se mandan por WhatsApp y se <b>exportan a Excel</b> para
-            el contador con lo cobrado por cada método.
+            el contador con lo cobrado por cada método. Si Excel abre el archivo en una sola
+            columna: pestaña <b>Datos → Texto en columnas</b>, separador <b>punto y coma</b>.
           </p>
         </article>
 

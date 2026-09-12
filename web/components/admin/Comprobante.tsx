@@ -334,7 +334,19 @@ export default function Comprobante({
         >
           <span>Copiar texto</span>
         </button>
-        <a className="btn btn--ghost" href={volver === "comprobantes" ? "/admin/comprobantes" : "/admin/pedidos"}>
+        {/* Desde el archivo, "Volver" devuelve a LA MISMA VISTA (búsqueda y filtros
+            intactos) si se llegó navegando; en una pestaña nueva no hay a dónde
+            volver y se va a la portada del archivo. */}
+        <a
+          className="btn btn--ghost"
+          href={volver === "comprobantes" ? "/admin/comprobantes" : "/admin/pedidos"}
+          onClick={(e) => {
+            if (volver === "comprobantes" && window.history.length > 1 && document.referrer.includes("/admin/comprobantes")) {
+              e.preventDefault();
+              window.history.back();
+            }
+          }}
+        >
           <span>{volver === "comprobantes" ? "← Volver a comprobantes" : "← Volver a la caja"}</span>
         </a>
       </div>

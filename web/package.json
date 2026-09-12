@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --import ./qa-ts.mjs qa-dominio.mjs && node --import ./qa-ts.mjs qa-pedidos.mjs"
+    "test": "node --import ./qa-ts.mjs qa-dominio.mjs && node --import ./qa-ts.mjs qa-pedidos.mjs && node --import ./qa-ts.mjs qa-comprobantes.mjs && node --import ./qa-ts.mjs qa-escpos.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
