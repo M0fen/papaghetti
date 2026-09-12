@@ -15,7 +15,11 @@ export default function ImpresoraPage() {
     <section>
       <div className="adminx__pageh">
         <h1>Impresora</h1>
-        <p>Tres pasos, en orden. Cada uno descarta una causa antes de pasar al siguiente.</p>
+        <p>
+          Cuatro pasos, en orden. Cada uno descarta una causa antes de pasar al siguiente. El
+          camino directo del paso 3 no necesita driver ni diálogo: si la impresora recibe los
+          bytes, imprime.
+        </p>
       </div>
       <PruebaImpresora />
     </section>

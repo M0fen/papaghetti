@@ -42,8 +42,9 @@ import {
 } from "@/lib/menu";
 import { dibujarTiquete, cargarImagen, binarizar, dibujarCalibracion } from "@/lib/tiquete-imagen";
 import { imprimirImagen } from "@/lib/imprimir-imagen";
-import ImpresionDirecta from "@/components/admin/ImpresionDirecta";
-import type { Bitmap } from "@/lib/escpos";
+import ImpresionDirecta, { type TrabajosDirectos } from "@/components/admin/ImpresionDirecta";
+import { trabajoEscPos, type Bitmap } from "@/lib/escpos";
+import { tiqueteEscPos } from "@/lib/tiquete-escpos";
 
 /**
  * La fecha, ARMADA A MANO a partir de las piezas.
@@ -167,6 +168,16 @@ export default function Comprobante({
     if (!ctx) return null;
     const d = ctx.getImageData(0, 0, canvasTermica.width, canvasTermica.height);
     return { width: d.width, height: d.height, data: d.data };
+  };
+
+  /* Los dos trabajos del camino directo: el tiquete en TEXTO ESC/POS (2 KB, el
+     rápido y el que menos puede fallar) y el mismo bitmap de arriba como raster. */
+  const trabajos: TrabajosDirectos = {
+    texto: () => tiqueteEscPos(p, a),
+    imagen: () => {
+      const bmp = getBitmap();
+      return bmp ? trabajoEscPos(bmp) : null;
+    },
   };
 
   const imprimir = () => {
@@ -310,7 +321,7 @@ export default function Comprobante({
             camino directo de aquí abajo.
           </small>
         )}
-        {papel === "termica" && <ImpresionDirecta getBitmap={getBitmap} />}
+        {papel === "termica" && <ImpresionDirecta trabajos={trabajos} />}
         {/* WhatsApp SIEMPRE. Antes el botón solo existía si el pedido traía teléfono,
             o sea casi nunca: en el mostrador nadie lo pide. Si no hay número, se
             escribe aquí y ya. */}
