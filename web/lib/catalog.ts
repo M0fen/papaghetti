@@ -674,26 +674,35 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
         return delta === 0 ? { ...m, stock: a.stock } : { ...m, stock: Math.max(0, Number((a.stock + delta).toFixed(3))) };
       })
     : mio.insumos;
-  /* NO RESUCITAR. Si un pedido estaba en mi copia y en la que leí (base) pero YA NO
-     está en el documento actual, es que otra instancia lo sacó a propósito (lo
-     archivó, o puso el negocio en cero) mientras yo tenía la copia abierta. Volver a
-     meterlo por el mero hecho de traerlo en `mio` deshacía ese trabajo: el cerebro
-     nunca bajaba del tope y los archivados reaparecían. Solo se conserva si YO lo
-     cambié (devolver, cancelar): entonces mi cambio vale más que el recorte, y el
-     archivo se pondrá al día en el siguiente lote. */
-  const enActual = new Set((actual.pedidos ?? []).map((p) => p.id));
+  /* SOLO LO QUE YO CAMBIÉ. De mi copia viajan los pedidos NUEVOS y los que YO toqué;
+     los que traigo igual que como los leí se dejan como estén AHORA.
+     Son dos fallos en uno:
+     · Un pedido que yo no toqué y que traigo con su valor viejo PISABA el cambio que
+       otra instancia acababa de escribir. El cajero cobraba, entraba un pedido por
+       QR en ese medio segundo, y el cobro desaparecía: el papel decía pagado y la
+       caja seguía debiendo. Igual con cancelar, devolver y avanzar de estado.
+     · Y al revés: un pedido que otra instancia sacó a propósito (lo archivó, o puso
+       el negocio en cero) volvía por el mero hecho de venir en mi copia, así que el
+       cerebro nunca bajaba del tope y los archivados reaparecían.
+     Los dos desaparecen con la misma regla: mando sobre lo que cambié, y sobre nada
+     más. Si yo cambié un pedido que el otro archivó, mi cambio manda y el archivo se
+     pone al día en el siguiente lote. */
   const enBase = new Map((base?.pedidos ?? []).map((p) => [p.id, JSON.stringify(p)]));
   const misPedidos = (mio.pedidos ?? []).filter(
-    (p) => enActual.has(p.id) || !base || !enBase.has(p.id) || enBase.get(p.id) !== JSON.stringify(p),
+    (p) => !base || !enBase.has(p.id) || enBase.get(p.id) !== JSON.stringify(p),
   );
+  /* El índice del archivo, con el mismo criterio: los meses que YO archivé se suman a
+     lo que haya ahora. Con una unión a secas, un "Listo" de la cocina con una copia
+     abierta resucitaba en el índice los meses que `ponerACero` acababa de borrar, y
+     el archivo quedaba apuntando a documentos que ya no existen. */
+  const misMeses = (mio.archivoMeses ?? []).filter((m) => !base || !(base.archivoMeses ?? []).includes(m));
   return {
     ...mio,
     insumos,
     pedidos: recientes(unir(actual.pedidos ?? [], misPedidos), (p) => p.creadoEn),
     movimientos: recientes(unir(actual.movimientos ?? [], mio.movimientos ?? []), (m) => m.fecha),
     leads: recientes(unir(actual.leads ?? [], mio.leads ?? []), (l) => l.creadoEn),
-    // Los meses archivados solo crecen: la unión es lo correcto.
-    archivoMeses: [...new Set([...(actual.archivoMeses ?? []), ...(mio.archivoMeses ?? [])])].sort(),
+    archivoMeses: [...new Set([...(actual.archivoMeses ?? []), ...misMeses])].sort(),
   };
 }
 
@@ -1264,8 +1273,14 @@ export async function pedidosArchivados(desdeDia?: string, hastaDia?: string): P
 /**
  * TODOS los comprobantes entre dos días de negocio (inclusive): los del cerebro y
  * los del archivo, sin repetidos (si uno está en los dos sitios, manda el del
- * cerebro, que es el más reciente). El archivo solo se lee si el rango llega más
- * atrás que el cerrado más antiguo que sigue en el cerebro.
+ * cerebro, que es el más reciente).
+ *
+ * El archivo solo se toca si el rango puede alcanzarlo, y esa frontera la decide EL
+ * ÍNDICE (`archivoMeses`), no lo que haya en el cerebro. Antes se comparaba contra
+ * el cerrado más antiguo que seguía vivo, y eso se movía solo: bastaba cobrar una
+ * deuda de hace tres meses —que nunca se archiva mientras está viva— para que la
+ * frontera saltara hacia atrás y las vistas de los meses archivados de en medio
+ * salieran vacías, como si esos comprobantes no existieran.
  */
 export async function comprobantesEntre(desdeDia: string, hastaDia: string): Promise<Pedido[]> {
   const cat = await read();
@@ -1274,13 +1289,13 @@ export async function comprobantesEntre(desdeDia: string, hastaDia: string): Pro
     return d >= desdeDia && d <= hastaDia;
   };
   const vivos = cat.pedidos.filter(enRango);
-  if (!cat.archivoMeses?.length) return vivos.sort(masNuevoPrimero);
-  const cerradosVivos = cat.pedidos.filter(cerrado);
-  const corte = cerradosVivos.length
-    ? diaNegocio(cerradosVivos[cerradosVivos.length - 1].creadoEn)
-    : hastaDia;
-  if (desdeDia > corte) return vivos.sort(masNuevoPrimero);
-  const archivados = (await pedidosArchivados(desdeDia, hastaDia < corte ? hastaDia : corte)).filter(enRango);
+  const meses = cat.archivoMeses ?? [];
+  if (!meses.length) return vivos.sort(masNuevoPrimero);
+  // Nada archivado puede caer en el rango si el rango empieza después del último mes.
+  const ultimoMes = [...meses].sort()[meses.length - 1];
+  if (desdeDia.slice(0, 7) > ultimoMes) return vivos.sort(masNuevoPrimero);
+  // `pedidosArchivados` ya lee solo los meses que tocan el rango.
+  const archivados = (await pedidosArchivados(desdeDia, hastaDia)).filter(enRango);
   return unirPedidos(archivados, vivos);
 }
 
@@ -1499,7 +1514,7 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
          pedido con referencia es de mesa y el resto es para llevar. Antes caía en
          "domicilio" y le sumaba $5.000 a alguien que estaba sentado en el local. */
   const tipo = input.tipo ?? (input.referencia ? "mesa" : "llevar");
-  const direccion = input.direccion?.trim() || undefined;
+  const direccion = input.direccion?.trim().slice(0, 140) || undefined;
   if (tipo === "domicilio" && !direccion) {
     throw new Error("Necesitamos la dirección de entrega para llevártelo.");
   }
@@ -1554,9 +1569,13 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
     canal: input.canal ?? "web",
     tipo,
     mesa: undefined,
+    /* TODO lo que escribe el cliente va recortado. `referencia` y `notas` ya lo
+       estaban; el nombre, el teléfono y la dirección no, y `enviarPedido` es pública
+       (sin sesión). Un nombre de 900 KB entraba entero al cerebro, se quedaba ahí
+       para siempre —ahora también en el archivo— y salía en el CSV del contador. */
     referencia: input.referencia?.trim().slice(0, 60) || undefined,
-    cliente: input.cliente?.trim() || undefined,
-    telefono: input.telefono?.trim() || undefined,
+    cliente: input.cliente?.trim().slice(0, 60) || undefined,
+    telefono: input.telefono?.trim().slice(0, 20) || undefined,
     direccion,
     notas: input.notas?.trim().slice(0, 200) || undefined,
     estado: "recibido",

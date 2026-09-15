@@ -103,6 +103,9 @@ export default function OrdersTable({ pedidos }: { pedidos: Pedido[] }) {
 }
 
 function OrderCard({ p }: { p: Pedido }) {
+  /* Una sola vez: arma el texto completo del comprobante y esta lista se repinta
+     cada 10 segundos, con una tarjeta por pedido. */
+  const wa = waComprobanteHref(p);
   const activo = p.estado !== "entregado" && p.estado !== "cancelado";
   /* Un pedido ENTREGADO por error (un toque de más en la cocina) no se podía ni
      devolver ni cancelar desde ninguna pantalla: el plato desaparecía del flujo y la
@@ -228,10 +231,10 @@ function OrderCard({ p }: { p: Pedido }) {
         </a>
         {/* Y directo al WhatsApp que dejó el cliente en su pedido: un toque, sin
             copiar números a mano. */}
-        {waComprobanteHref(p) && (
+        {wa && (
           <a
             className="btn btn--ghost btnmini"
-            href={waComprobanteHref(p) ?? undefined}
+            href={wa}
             target="_blank"
             rel="noopener noreferrer"
             title={`Enviar el comprobante al ${p.telefono}`}

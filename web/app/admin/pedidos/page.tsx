@@ -1,4 +1,5 @@
 import { getCatalog } from "@/lib/catalog";
+import { diaNegocio } from "@/lib/precios";
 import OrdersTable from "@/components/admin/OrdersTable";
 import NuevoPedido from "@/components/admin/NuevoPedido";
 import PreciosRapidos from "@/components/admin/PreciosRapidos";
@@ -7,12 +8,28 @@ export const dynamic = "force-dynamic";
 
 export default async function PedidosPage() {
   const cat = await getCatalog();
+  /* LA CAJA ES HOY. Antes esta lista traía los ~2.000 pedidos del cerebro, así que
+     "Cobrado" sumaba semanas enteras y no coincidía con el "Cobrado · hoy" del
+     archivo de comprobantes: dos cifras del mismo día en el mismo panel. Se queda lo
+     de hoy MÁS las deudas vivas de cualquier fecha, que son las únicas que todavía
+     piden algo del cajero. Todo lo demás está en Comprobantes. */
+  const hoy = diaNegocio();
+  const delDia = cat.pedidos.filter(
+    (p) => diaNegocio(p.creadoEn) === hoy || (p.pago === "pendiente" && p.estado !== "cancelado"),
+  );
+  const viejosPorCobrar = delDia.filter((p) => diaNegocio(p.creadoEn) !== hoy).length;
   return (
     <section>
       <div className="adminx__pageh adminx__pageh--row">
         <div>
           <h1>Pedidos</h1>
-          <p>Todo lo que ha entrado, con su estado y canal.</p>
+          <p>
+            La caja de hoy: todo lo que ha entrado, con su estado y canal
+            {viejosPorCobrar > 0
+              ? `, más ${viejosPorCobrar} ${viejosPorCobrar === 1 ? "pedido de otro día que sigue" : "pedidos de otros días que siguen"} por cobrar`
+              : ""}
+            .
+          </p>
         </div>
         {/* La caja es HOY. Lo de otros días (reimprimir, mandar, exportar) vive en el
             archivo de comprobantes; aquí solo el atajo para llegar. */}
@@ -38,7 +55,7 @@ export default async function PedidosPage() {
           platos={cat.enredos}
         />
       </div>
-      <OrdersTable pedidos={cat.pedidos} />
+      <OrdersTable pedidos={delDia} />
     </section>
   );
 }

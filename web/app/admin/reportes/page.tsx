@@ -1,4 +1,4 @@
-import { getCatalog } from "@/lib/catalog";
+import { getCatalog, comprobantesEntre } from "@/lib/catalog";
 import {
   formatCOP,
   formatCantidad,
@@ -7,6 +7,7 @@ import {
   PERIODOS,
   periodoNombre,
   enPeriodo,
+  inicioDe,
   gastoCatLabel,
   gastoCatEmoji,
   GASTO_CATEGORIAS,
@@ -43,8 +44,13 @@ export default async function FinanzasPage({
   const cat = await getCatalog();
   const now = new Date();
 
-  // --- Ventas del período (pedidos no cancelados) ---
-  const pedPer = cat.pedidos.filter(
+  /* --- Ventas del período (pedidos no cancelados) ---
+     Se leen con `comprobantesEntre`, igual que el archivo de comprobantes: el cerebro
+     guarda unos 2.000 pedidos y el resto vive en documentos por mes. Filtrando solo
+     `cat.pedidos`, en cuanto empezara a archivar, el "Mes" de Finanzas y el "Mes" de
+     Comprobantes darían cifras distintas del mismo mes y ninguna de las dos pantallas
+     podría explicar la diferencia. El criterio de qué entra no cambia. */
+  const pedPer = (await comprobantesEntre(diaNegocio(inicioDe(periodo, now)), diaNegocio(now))).filter(
     (p) => p.estado !== "cancelado" && enPeriodo(p.creadoEn, periodo, now)
   );
   const sum = (a: Pedido[], f: (p: Pedido) => number) => a.reduce((s, p) => s + f(p), 0);

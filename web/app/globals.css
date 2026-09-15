@@ -6883,4 +6883,15 @@ body.enreda-jugando .sticky-pedir {
 @media (pointer: coarse) {
   .cbtes__chips .fbtn, .cbtes__seg .seg__item { min-height: 44px; display: inline-flex; align-items: center; }
   .cbtes__mas summary { min-height: 44px; display: flex; align-items: center; }
+  /* Los enlaces de dentro de los avisos ("Verlos", "Solo hoy", "Buscar también en el
+     archivo") eran texto de 20px de alto: la única salida de la alerta y no se podía
+     acertar con el pulgar. El margen negativo crece el área sin mover el texto. */
+  .cbtes__control a,
+  .cbtes__aviso a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 6px;
+    margin-block: -12px;
+  }
 }

@@ -120,6 +120,14 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
   const numeracion = huecosDeConsecutivo(filtrados);
   const pagina = paginar(filtrados, f.pag);
   const dias = agruparPorDia(pagina.items);
+  /* El resumen de cada día se calcula sobre el día ENTERO, no sobre lo que cupo en
+     esta página: un sábado partido en dos páginas enseñaba dos cifras distintas y
+     ninguna era la del día. Cuando se parte, se dice cuántos se ven aquí. */
+  const resumenDelDia = new Map(agruparPorDia(filtrados).map((d) => [d.dia, d.resumen]));
+  const vieneDeAntes = (dia: string) =>
+    pagina.desde > 1 && diaNegocio(filtrados[pagina.desde - 2].creadoEn) === dia;
+  const sigueDespues = (dia: string) =>
+    pagina.hasta < pagina.total && diaNegocio(filtrados[pagina.hasta].creadoEn) === dia;
   const meses = mesesDisponibles(cat.pedidos, archivados);
   const pendientesViejos = cat.pedidos.filter((p) => situacionDe(p) === "pendiente" && diaNegocio(p.creadoEn) < hoy);
   /* Pagados de antes de que se registrara el método: cuentan como efectivo (igual que
@@ -131,6 +139,16 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
   const etiquetaMes = (mes: string) => meses.find((m) => m.valor === mes)?.etiqueta ?? mes;
   const etiquetaRango =
     f.p === "hoy" ? "hoy" : f.p === "ayer" ? "ayer" : f.p === "todo" ? "todas las fechas" : rango.desde === rango.hasta ? diaLegible(rango.desde) : `del ${diaLegible(rango.desde)} al ${diaLegible(rango.hasta)}`;
+  /* La misma etiqueta, pero encajada dentro de una frase ("No hay comprobantes ___").
+     Sin esto salía "No hay comprobantes todas las fechas". */
+  const etiquetaEn =
+    f.p === "todo"
+      ? "en todo el archivo"
+      : f.p === "hoy" || f.p === "ayer"
+        ? etiquetaRango
+        : rango.desde === rango.hasta
+          ? `el ${diaLegible(rango.desde)}`
+          : etiquetaRango;
   const hayAlgo = filtrados.length > 0;
 
   /* Los campos que un formulario GET tiene que arrastrar para no perder el resto. */
@@ -231,7 +249,10 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
             </form>
             {meses.length > 0 && (
               <form method="get" action="/admin/comprobantes">
-                {ocultos(["p"])}
+                {/* Con el rango entre los ocultos: pulsar "Ir" sin elegir mes deja las
+                    fechas como estaban, en vez de mandarte de vuelta a Hoy. Si SÍ se
+                    elige un mes, `mes` manda sobre desde/hasta. */}
+                {ocultos([])}
                 <span>o el mes entero</span>
                 <select className="admin-input" name="mes" defaultValue={mesDe(rango)} aria-label="Mes entero">
                   <option value="">Elegir mes…</option>
@@ -390,7 +411,12 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
       {pendientesViejos.length > 0 && f.s !== "pendiente" && (
         <p className="cbtes__control is-alerta">
           ⚠️ {pendientesViejos.length} por pagar de días anteriores ({formatCOP(pendientesViejos.reduce((s, p) => s + p.total, 0))}).{" "}
-          <a href={queryDe(f, { p: "rango", desde: DIA_CERO, hasta: diaMas(hoy, -1), s: "pendiente", q: "" })}>Verlos</a>
+          {/* La alerta cuenta TODOS los pendientes viejos, así que el enlace tiene que
+              soltar también los filtros de método, servicio y canal: si no, se llegaba
+              a una lista vacía después de leer "hay 3". */}
+          <a href={queryDe(f, { p: "rango", desde: DIA_CERO, hasta: diaMas(hoy, -1), s: "pendiente", q: "", m: "todos", t: "todos", c: "todos" })}>
+            Verlos
+          </a>
         </p>
       )}
 
@@ -399,7 +425,7 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
           {f.q ? (
             <>
               <p>
-                No encontramos nada con «{f.q}» {busquedaGlobal || f.p === "todo" ? "en todo el archivo" : etiquetaRango}.
+                No encontramos nada con «{f.q}» {etiquetaEn}.
               </p>
               <div>
                 {f.p !== "todo" && (
@@ -421,7 +447,7 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
             </>
           ) : f.s !== "todos" || f.m !== "todos" || f.t !== "todos" || f.c !== "todos" ? (
             <>
-              <p>Ningún comprobante con esos filtros {etiquetaRango}.</p>
+              <p>Ningún comprobante con esos filtros {etiquetaEn}.</p>
               <div>
                 <a className="btn btn--ghost btnmini" href={queryDe(f, { s: "todos", m: "todos", t: "todos", c: "todos" })}>
                   <span>Quitar filtros</span>
@@ -430,7 +456,7 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
             </>
           ) : (
             <>
-              <p>{f.p === "hoy" ? "Todavía no hay comprobantes hoy." : `No hay comprobantes ${etiquetaRango}.`}</p>
+              <p>{f.p === "hoy" ? "Todavía no hay comprobantes hoy." : `No hay comprobantes ${etiquetaEn}.`}</p>
               <div>
                 {f.p === "hoy" && (
                   <a className="btn btn--ghost btnmini" href={url({ p: "ayer" })}>
@@ -449,19 +475,24 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
         </article>
       )}
 
-      {dias.map((d, i) => (
+      {dias.map((d) => {
+        const rd = resumenDelDia.get(d.dia) ?? d.resumen;
+        const partido = vieneDeAntes(d.dia) || sigueDespues(d.dia);
+        return (
         <section key={d.dia} className="cbtes__dia">
           <div className="cbtes__dia-h">
             <h2>
               {diaLegible(d.dia)}
               {d.dia === hoy ? " · hoy" : d.dia === diaMas(hoy, -1) ? " · ayer" : ""}
-              {i === 0 && pagina.pag > 1 ? " (continúa)" : ""}
             </h2>
             <span>
-              {d.resumen.cantidad} comprobante{d.resumen.cantidad === 1 ? "" : "s"} · cobrado {formatCOP(d.resumen.cobrado.total)}
-              {d.resumen.pendiente.n > 0 && ` · ${d.resumen.pendiente.n} por pagar`}
-              {d.resumen.devuelto.n > 0 && ` · ${d.resumen.devuelto.n} devuelto${d.resumen.devuelto.n === 1 ? "" : "s"}`}
-              {d.resumen.anulados > 0 && ` · ${d.resumen.anulados} anulado${d.resumen.anulados === 1 ? "" : "s"}`}
+              {rd.cantidad} comprobante{rd.cantidad === 1 ? "" : "s"} · cobrado {formatCOP(rd.cobrado.total)}
+              {rd.pendiente.n > 0 && ` · ${rd.pendiente.n} por pagar`}
+              {rd.devuelto.n > 0 && ` · ${rd.devuelto.n} devuelto${rd.devuelto.n === 1 ? "" : "s"}`}
+              {rd.anulados > 0 && ` · ${rd.anulados} anulado${rd.anulados === 1 ? "" : "s"}`}
+              {/* El día completo manda en las cifras; si está partido entre páginas se
+                  dice cuántos se ven aquí, para que nadie cuente filas y no cuadre. */}
+              {partido && ` · aquí se ven ${d.pedidos.length}${vieneDeAntes(d.dia) ? ", viene de la página anterior" : ""}${sigueDespues(d.dia) ? ", sigue en la siguiente" : ""}`}
             </span>
           </div>
           <ul className="cbtes__lista">
@@ -545,7 +576,8 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
             })}
           </ul>
         </section>
-      ))}
+        );
+      })}
 
       {hayAlgo && (
         <div className="cbtes__pag">
