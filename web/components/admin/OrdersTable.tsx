@@ -11,6 +11,7 @@ import {
   METODOS,
   metodoLabel,
   metodoEmoji,
+  MOTIVOS_DESCUENTO,
   lineasDe,
   type Pedido,
   type EstadoPedido,
@@ -21,6 +22,7 @@ import {
   cobrarAction,
   cancelarAction,
   devolverAction,
+  corregirCobroAction,
 } from "@/app/pedido-actions";
 import { esVenta } from "@/lib/menu";
 /* El texto del comprobante para WhatsApp es el MISMO que el de la página del tiquete
@@ -201,6 +203,20 @@ function OrderCard({ p }: { p: Pedido }) {
               Descuento
               <input type="number" name="descuento" min={0} step="any" defaultValue={0} aria-label="Descuento" />
             </label>
+            {/* Un descuento sin motivo no entra. Era la única salida de dinero que no
+                dejaba una palabra escrita. El servidor solo lo exige si hay descuento,
+                así que el cobro normal no gana ni un toque. */}
+            <label className="ocard__pd">
+              Motivo
+              <select name="motivoDescuento" defaultValue="" aria-label="Motivo del descuento">
+                <option value="">—</option>
+                {MOTIVOS_DESCUENTO.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
             <span className="muted">Cobrar:</span>
             {METODOS.map((m) => (
               <button key={m} className="chipbtn" name="metodo" value={m} type="submit">
@@ -209,6 +225,43 @@ function OrderCard({ p }: { p: Pedido }) {
             ))}
           </form>
         )}
+        {/* CORREGIR EL COBRO: teclear Nequi cuando fue efectivo es el error más común
+            de un mostrador, y hasta ahora la única salida era "Devolver dinero", que
+            anula la venta entera y le entrega al cliente un papel que dice ANULADO.
+            Va plegado a propósito: se usa poco y no debe compartir renglón con nada. */}
+        {p.pago === "pagado" && p.estado !== "cancelado" && (
+          <details className="ocard__corregir">
+            <summary className="btn btn--ghost btnmini">
+              <span>✏️ Corregir cobro</span>
+            </summary>
+            <form action={corregirCobroAction}>
+              <input type="hidden" name="id" value={p.id} />
+              <label className="ocard__pd">
+                Descuento
+                <input type="number" name="descuento" min={0} step="any" defaultValue={p.descuento ?? 0} aria-label="Descuento" />
+              </label>
+              <label className="ocard__pd">
+                Motivo
+                <select name="motivoDescuento" defaultValue={p.motivoDescuento ?? ""} aria-label="Motivo del descuento">
+                  <option value="">—</option>
+                  {MOTIVOS_DESCUENTO.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="muted">Se cobró de verdad con:</span>
+              {METODOS.map((m) => (
+                <button key={m} className={`chipbtn ${p.metodoPago === m ? "is-on" : ""}`} name="metodo" value={m} type="submit">
+                  {metodoEmoji[m]} {metodoLabel[m]}
+                </button>
+              ))}
+              <small className="muted">La hora del cobro no cambia: el dinero entró cuando entró.</small>
+            </form>
+          </details>
+        )}
+
         {/* Devolver un paso: la única salida cuando la cocina avanzó de más. */}
         {corregible && p.estado !== "recibido" && (
           <form action={retrocederPedidoAction}>

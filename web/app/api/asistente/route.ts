@@ -20,7 +20,9 @@ import {
   type Pedido,
   type Periodo,
   type GastoCategoria,
+  ventaNeta,
 } from "@/lib/menu";
+import { diaNegocio } from "@/lib/precios";
 
 export const dynamic = "force-dynamic";
 
@@ -161,14 +163,19 @@ function top(arr: string[]): string {
 }
 
 function resumen(cat: Catalog): string {
-  const hoy = new Date().toDateString();
+  /* EL MISMO DÍA QUE EL RESTO DEL PANEL. Esto contaba con `toDateString()`, que usa la
+     hora del proceso: en Vercel el runtime va en UTC, así que a las 7 de la tarde de
+     Pereira ya había empezado el día siguiente y el asistente contestaba «¿cómo vamos
+     hoy?» con el almuerzo borrado — justo a la hora en que se pregunta. */
+  const hoy = diaNegocio();
   const ped = cat.pedidos;
-  const hoyPed = ped.filter(
-    (p) => new Date(p.creadoEn).toDateString() === hoy && p.estado !== "cancelado"
-  );
+  const hoyPed = ped.filter((p) => diaNegocio(p.creadoEn) === hoy && p.estado !== "cancelado");
   const sum = (arr: typeof ped, f: (p: (typeof ped)[number]) => number) =>
     arr.reduce((s, p) => s + f(p), 0);
-  const ventasHoy = sum(hoyPed, (p) => p.total);
+  /* VENTAS = lo que se queda el negocio, igual que Finanzas: `p.total` lleva dentro el
+     impoconsumo, que es de la DIAN. Sumarlo inflaba la cifra, y como el asistente
+     contesta en frases, era la que se creía. */
+  const ventasHoy = sum(hoyPed, ventaNeta);
   const ticket = hoyPed.length ? Math.round(ventasHoy / hoyPed.length) : 0;
   const activos = ped.filter((p) => p.estado !== "entregado" && p.estado !== "cancelado");
   const porCobrar = activos.filter((p) => p.pago === "pendiente");
@@ -179,14 +186,20 @@ function resumen(cat: Catalog): string {
   const pnl = (periodo: Periodo): string => {
     const pp = ped.filter((p) => p.estado !== "cancelado" && enPeriodo(p.creadoEn, periodo));
     const s = (a: Pedido[], f: (p: Pedido) => number) => a.reduce((x, p) => x + f(p), 0);
-    const v = s(pp, (p) => p.total);
+    const v = s(pp, ventaNeta);
     const cob = s(pp.filter((p) => p.pago === "pagado"), (p) => p.total);
     const cogs = s(pp, (p) => p.costo ?? 0);
     const mp = movs.filter((m) => enPeriodo(m.fecha, periodo));
     const compras = mp.filter((m) => m.tipo === "compra").reduce((x, m) => x + m.monto, 0);
+    /* Los gastos de categoría "insumos" YA cuentan como costo de lo vendido cuando esos
+       insumos se venden: restarlos otra vez los contaba dos veces y la utilidad salía
+       negativa justo el mes que más se abasteció. Es el mismo criterio que Finanzas. */
     const gastos = mp.filter((m) => m.tipo === "gasto").reduce((x, m) => x + m.monto, 0);
+    const gastosOperativos = mp
+      .filter((m) => m.tipo === "gasto" && m.categoria !== "insumos")
+      .reduce((x, m) => x + m.monto, 0);
     const margen = v > 0 ? Math.round(((v - cogs) / v) * 100) : 0;
-    return `${formatCOP(v)} ventas · ${formatCOP(cogs)} costo · ${margen}% margen · ${formatCOP(compras)} compras · ${formatCOP(gastos)} gastos · utilidad ${formatCOP(v - cogs - gastos)}`;
+    return `${formatCOP(v)} ventas (sin impuesto) · ${formatCOP(cogs)} costo · ${margen}% margen · ${formatCOP(compras)} compras · ${formatCOP(gastos)} gastos · utilidad ${formatCOP(v - cogs - gastosOperativos)}`;
   };
 
   const insumos: Insumo[] = cat.insumos ?? [];

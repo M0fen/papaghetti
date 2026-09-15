@@ -243,7 +243,8 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete):
   const consumo = p.subtotal - (p.descuento ?? 0);
   const sumas: [string, number][] = [["Consumo", p.subtotal]];
   if (p.descuento) sumas.push(["Descuento", -p.descuento]);
-  if (p.impuesto) sumas.push([`Impuesto (${a.impuestoPct}%)`, p.impuesto]);
+  // La tarifa congelada en el pedido; la de Ajustes solo para los pedidos viejos.
+  if (p.impuesto) sumas.push([`Impuesto (${p.impuestoPct ?? a.impuestoPct}%)`, p.impuesto]);
   if (p.domicilio) sumas.push(["Domicilio", p.domicilio]);
   for (const [k, v] of sumas) fila(k, formatCOP(v), `500 21px ${CUERPO}`, `700 21px ${CUERPO}`, 28);
   const total = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);

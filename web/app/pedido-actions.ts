@@ -182,9 +182,36 @@ export async function cobrarAction(formData: FormData) {
   const metodo = String(formData.get("metodo") ?? "") as MetodoPago;
   if (!id || !metodo) return;
   const descuento = Number(formData.get("descuento") ?? 0);
+  const motivo = String(formData.get("motivoDescuento") ?? "").trim();
   // Propina 0 SIEMPRE: Papaghetti no la maneja. El parámetro sigue en `cobrarPedido`
   // porque hay pedidos viejos que la llevan y sus totales no se pueden reescribir.
-  await operar(() => cobrarPedido(id, metodo, 0, descuento), `Cobrado #${id}`);
+  await operar(() => cobrarPedido(id, metodo, 0, descuento, false, motivo), `Cobrado #${id}`);
+}
+
+/**
+ * CORREGIR UN COBRO YA HECHO: el error más común de un mostrador es teclear Nequi
+ * cuando fue efectivo.
+ *
+ * El cerebro lo soportaba desde siempre —`cobrarPedido` acepta `corregir`— pero nadie
+ * había tendido el cable desde un botón, así que la única salida era "Devolver dinero":
+ * eso anula la venta entera, la saca del turno y le entrega al cliente un papel que
+ * dice PEDIDO ANULADO. Y mientras tanto el mensaje de error del servidor, el pie de
+ * Comprobantes y el manual de Ayuda le prometían al operario una función que no
+ * existía. Un panel que promete lo que no hace enseña a no creerle a los avisos.
+ *
+ * La hora del cobro NO se mueve al corregir: el dinero entró cuando entró.
+ */
+export async function corregirCobroAction(formData: FormData) {
+  if (!(await authed())) return;
+  const id = String(formData.get("id") ?? "");
+  const metodo = String(formData.get("metodo") ?? "") as MetodoPago;
+  if (!id || !metodo) return;
+  const descuento = Number(formData.get("descuento") ?? 0);
+  const motivo = String(formData.get("motivoDescuento") ?? "").trim();
+  await operar(
+    () => cobrarPedido(id, metodo, 0, descuento, true, motivo),
+    `Cobro de #${id} corregido`,
+  );
 }
 
 /** Admin: cancela un pedido (con motivo, y devolviendo la despensa si no se cocinó). */

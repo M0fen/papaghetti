@@ -42,6 +42,7 @@ import {
   deleteMovimiento,
   deshacer,
   rehacer,
+  guardarFoto,
 } from "@/lib/catalog";
 import type {
   EstadoLead,
@@ -87,14 +88,16 @@ export async function avisar(texto: string, tipo: "ok" | "error" = "error") {
  * 640px vive solo en el navegador (ImageUpload), o sea del lado de quien envía. Un data
  * URI de 5MB se replicaba en cada snapshot de undo y acababa dentro del HTML público.
  */
-function fotoValida(raw: FormData | string | null): string | undefined {
+async function fotoValida(raw: FormData | string | null, id = "ficha"): Promise<string | undefined> {
   const v = typeof raw === "string" ? raw.trim() : "";
   if (!v) return undefined;
   const esData = /^data:image\/(jpeg|png|webp|avif);base64,[A-Za-z0-9+/=]+$/.test(v);
   const esUrl = /^https?:\/\/[^\s"'<>]+$/i.test(v) || /^\/[^\s"'<>]*$/.test(v);
   if (!esData && !esUrl) return undefined;
   if (v.length > 300_000) return undefined; // ~220KB de imagen: de sobra para una ficha
-  return v;
+  /* La imagen se sube como archivo aparte y aquí solo queda su dirección: dentro del
+     cerebro pesaba más que todo lo demás junto. */
+  return guardarFoto(v, id);
 }
 
 /** Ejecuta una mutación del cerebro y convierte su error en un aviso visible. */
@@ -145,7 +148,7 @@ export async function savePrecio(formData: FormData) {
   await updateIngrediente(id, {
     nombre: String(formData.get("nombre") ?? "").trim() || "—",
     emoji: String(formData.get("emoji") ?? "").trim() || "🍽️",
-    foto: fotoValida(String(formData.get("foto") ?? "")),
+    foto: await fotoValida(String(formData.get("foto") ?? ""), id),
     precio: Math.max(0, Number(formData.get("precio") ?? 0)),
     activo: formData.get("activo") === "on",
     agotado: formData.get("agotado") === "on",
@@ -177,7 +180,7 @@ export async function saveEnredo(formData: FormData) {
     nombre: String(formData.get("nombre") ?? ""),
     gancho: String(formData.get("gancho") ?? ""),
     precio: Math.max(0, Number(formData.get("precio") ?? 0)),
-    foto: fotoValida(String(formData.get("foto") ?? "")),
+    foto: await fotoValida(String(formData.get("foto") ?? ""), id),
   });
   reflejar();
   revalidatePath("/admin/menu");
@@ -215,6 +218,10 @@ export async function saveAjustes(formData: FormData) {
     negocio: String(formData.get("negocio") ?? "").trim() || "Papaghetti",
     whatsapp: String(formData.get("whatsapp") ?? "").trim(),
     direccion: String(formData.get("direccion") ?? "").trim(),
+    /* Los tres del comprobante. Se imprimían desde siempre y no se podían escribir. */
+    razonSocial: String(formData.get("razonSocial") ?? "").trim().slice(0, 80),
+    nit: String(formData.get("nit") ?? "").trim().slice(0, 24),
+    telefonoLocal: String(formData.get("telefonoLocal") ?? "").trim().slice(0, 24),
     horarios: String(formData.get("horarios") ?? "").trim(),
     numMesas: Math.max(0, Math.min(60, Number(formData.get("numMesas") ?? 0))),
     impuestoPct: Math.max(0, Math.min(30, Number(formData.get("impuestoPct") ?? 0))),
@@ -441,7 +448,7 @@ export async function crearIngredienteAction(formData: FormData) {
     nombre,
     precio: Number(formData.get("precio") ?? 0),
     emoji: String(formData.get("emoji") ?? "").trim(),
-    foto: fotoValida(String(formData.get("foto") ?? "")),
+    foto: await fotoValida(String(formData.get("foto") ?? ""), nombre),
   });
   reflejar();
   revalidatePath("/admin/menu");
@@ -474,7 +481,7 @@ export async function crearEnredoAction(formData: FormData) {
       .map((s) => s.trim())
       .filter(Boolean),
     precio: Number(formData.get("precio") ?? 0),
-    foto: fotoValida(String(formData.get("foto") ?? "")),
+    foto: await fotoValida(String(formData.get("foto") ?? ""), nombre),
   });
   reflejar();
   revalidatePath("/admin/menu");

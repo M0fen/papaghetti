@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getCatalog } from "@/lib/catalog";
+import { getCatalogPublico } from "@/lib/catalog";
 import { TOPPINGS_INCLUIDOS } from "@/lib/menu";
 import EmplataSwitch from "../m/[mesa]/EmplataSwitch";
 import "../m/[mesa]/emplata.css";
@@ -23,7 +23,12 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function PedirPage() {
-  const cat = await getCatalog();
+  /* CATÁLOGO PÚBLICO, no el cerebro entero. Esta página se abre escaneando el QR de la
+     mesa, así que todo lo que reciba viaja dentro de su código fuente. Con `getCatalog`
+     viajaban la RECETA de cada componente —qué insumo y cuánta cantidad lleva una
+     porción, que es el saber hacer del negocio— y las existencias. El propio cerebro
+     declara la regla que se estaba rompiendo: ninguna ruta pública llama a getCatalog. */
+  const cat = await getCatalogPublico();
   const activos = (list: typeof cat.bases) => list.filter((i) => i.activo);
 
   return (

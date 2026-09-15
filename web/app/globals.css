@@ -6895,3 +6895,25 @@ body.enreda-jugando .sticky-pedir {
     margin-block: -12px;
   }
 }
+
+/* ── Corregir un cobro ya hecho: plegado, porque se usa poco y mueve plata ── */
+.ocard__corregir { flex: 1 1 100%; }
+.ocard__corregir summary { list-style: none; cursor: pointer; display: inline-flex; }
+.ocard__corregir summary::-webkit-details-marker { display: none; }
+.ocard__corregir form {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-top: 10px; padding: 12px 14px;
+  border: 1px dashed rgba(200, 50, 30, 0.45);
+  border-radius: 12px; background: rgba(200, 50, 30, 0.05);
+}
+.ocard__corregir form small { flex: 1 1 100%; font-size: 0.78rem; }
+.ocard__corregir .chipbtn.is-on { border-color: var(--pg-pomodoro); background: #fff6ea; font-weight: 800; }
+.ocard__pd select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(30, 22, 17, 0.18); background: #fff; }
+@media (pointer: coarse) {
+  .ocard__corregir summary, .ocard__pd select { min-height: 44px; }
+}
+
+/* ── Ventas por hora: más barras y más finas que la de 7 días ── */
+.chart--horas .chart__col { min-width: 0; }
+.chart--horas .chart__lbl { font-size: 0.62rem; }
+.chart--horas .chart__bar.is-pico { background: var(--pg-pomodoro); }

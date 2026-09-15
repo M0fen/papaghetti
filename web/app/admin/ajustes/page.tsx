@@ -109,7 +109,30 @@ export default async function AjustesPage() {
             </label>
             <label className="field">
               <span>Dirección</span>
-              <input className="admin-input" name="direccion" defaultValue={ajustes.direccion} />
+              <input className="admin-input" name="direccion" defaultValue={ajustes.direccion} placeholder="Calle 00 # 00-00, barrio" />
+              <small className="field__nota">
+                Con calle y número. Una zona («Zona Circunvalar») no le sirve a Google para medir
+                cercanía, y es lo que decide si apareces cuando alguien busca comida cerca.
+              </small>
+            </label>
+            {/* ESTOS TRES SE IMPRIMEN EN CADA COMPROBANTE y no había dónde escribirlos:
+                el modelo los tenía, el papel los pintaba, el formulario no existía y la
+                acción de guardar no los leía. El Resumen mostraba además una tarea
+                permanente «Completa el NIT» que enlazaba aquí, a un campo inexistente. */}
+            <label className="field">
+              <span>Razón social</span>
+              <input className="admin-input" name="razonSocial" defaultValue={ajustes.razonSocial ?? ""} placeholder="Como aparece en el RUT" />
+            </label>
+            <label className="field">
+              <span>NIT</span>
+              <input className="admin-input" name="nit" defaultValue={ajustes.nit ?? ""} placeholder="901.234.567-8" />
+            </label>
+            <label className="field">
+              <span>Teléfono del local</span>
+              <input className="admin-input" name="telefonoLocal" defaultValue={ajustes.telefonoLocal ?? ""} inputMode="tel" placeholder="606 333 4455" />
+              <small className="field__nota">
+                El que se imprime en el comprobante. Si lo dejas vacío se usa el WhatsApp.
+              </small>
             </label>
             <label className="field field--full">
               <span>Horarios</span>

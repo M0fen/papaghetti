@@ -92,7 +92,9 @@ export default async function AyudaPage() {
           <p>
             <b>Avancé de más:</b> el botón <b>← Devolver</b> en Pedidos o en Cocina.
             <br />
-            <b>Cobré mal:</b> vuelve a cobrar con el método correcto (queda en el historial).
+            <b>Cobré mal:</b> en el pedido, <b>✏️ Corregir cobro</b> y elige el método correcto.
+            La hora del cobro no cambia y queda en el historial. No uses «Devolver dinero»
+            para esto: eso anula la venta entera.
             <br />
             <b>El cliente se arrepintió:</b> <b>Cancelar</b> pide el motivo y, si no había
             entrado a cocina, devuelve los ingredientes a la despensa.
@@ -151,6 +153,28 @@ export default async function AyudaPage() {
             teléfono, se reimprimen, se mandan por WhatsApp y se <b>exportan a Excel</b> para
             el contador con lo cobrado por cada método. Si Excel abre el archivo en una sola
             columna: pestaña <b>Datos → Texto en columnas</b>, separador <b>punto y coma</b>.
+          </p>
+        </article>
+
+        <article className="ayuda-card">
+          <h3>Se cayó internet</h3>
+          <p>
+            El panel necesita conexión: sin ella no hay caja ni comandas. <b>No pares la
+            venta.</b> Anota en papel lo que salga: qué pidieron, dónde está el cliente,
+            cuánto cobraste y con qué método. Cuando vuelva la señal, mete cada uno con{" "}
+            <b>+ Nueva comanda</b> y cóbralo con el método que usaste. El pedido quedará
+            con la hora de cuando lo tecleaste, no con la de la venta, así que anota
+            también la hora si te importa el cuadre por horas.
+          </p>
+        </article>
+
+        <article className="ayuda-card">
+          <h3>Un descuento pide motivo</h3>
+          <p>
+            Al cobrar, si escribes un descuento hay que elegir <b>por qué</b>. No es
+            burocracia: regalar un plato mueve la misma plata que anular un pedido, y
+            anular sí pedía motivo desde siempre. Así, a fin de mes se puede ver cuánto se
+            regaló y por qué razón.
           </p>
         </article>
 

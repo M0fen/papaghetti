@@ -213,7 +213,9 @@ export default function Comprobante({
   const lineas: { k: string; v: number }[] = [
     { k: "Consumo", v: p.subtotal },
     ...(p.descuento ? [{ k: "Descuento", v: -p.descuento }] : []),
-    ...(p.impuesto ? [{ k: `Impuesto (${a.impuestoPct}%)`, v: p.impuesto }] : []),
+    /* La tarifa del PEDIDO, no la de Ajustes: un comprobante archivado tiene que
+       decir el porcentaje con el que se calculó su monto, no el de hoy. */
+    ...(p.impuesto ? [{ k: `Impuesto (${p.impuestoPct ?? a.impuestoPct}%)`, v: p.impuesto }] : []),
     ...(p.domicilio ? [{ k: "Domicilio", v: p.domicilio }] : []),
   ];
   const total = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);

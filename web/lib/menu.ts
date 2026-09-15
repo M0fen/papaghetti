@@ -294,6 +294,19 @@ export const metodoLabel: Record<MetodoPago, string> = {
   tarjeta: "Tarjeta",
   transferencia: "Transferencia",
 };
+/**
+ * POR QUÉ SE REBAJÓ. Un descuento mueve la misma plata que una anulación y, a
+ * diferencia de ella, no dejaba una sola palabra escrita. La lista es corta a
+ * propósito: si hay que elegir entre ocho, el cajero elige siempre el primero.
+ */
+export const MOTIVOS_DESCUENTO = [
+  "Cortesía de la casa",
+  "Plato mal salido",
+  "Promoción",
+  "Error de cobro",
+  "Acuerdo con el cliente",
+] as const;
+
 export const metodoEmoji: Record<MetodoPago, string> = {
   efectivo: "💵",
   nequi: "💜",
@@ -383,8 +396,31 @@ export interface Pedido {
   /** Lo que el cliente escribió para la cocina: "sin cebolla", alergias. */
   notas?: string;
   estado: EstadoPedido;
+  /**
+   * CUÁNDO PASÓ CADA COSA. Antes lo único que cambiaba al avanzar era la palabra del
+   * estado, así que la pregunta más básica de una cocina rápida —cuánto tardamos y qué
+   * plato nos atranca— no se podía responder, ni siquiera hacia atrás. Son opcionales:
+   * los pedidos anteriores a esto simplemente no los traen.
+   */
+  cocinaEn?: string;
+  listoEn?: string;
+  entregadoEn?: string;
+  /**
+   * La hora del COBRO, que no es la de creación. Sin ella el arqueo contaba el efectivo
+   * de una deuda vieja en el día del pedido, no en el día que entró al cajón: cobrar el
+   * lunes lo que se pidió el martes producía un sobrante que nadie podía explicar.
+   */
+  pagadoEn?: string;
   /** Por qué se canceló (queda en el historial y en el ticket). */
   motivoCancelacion?: string;
+  /**
+   * QUIÉN. Vivía solo dentro del texto libre de la bitácora, que se recorta a 120
+   * entradas: la del almuerzo no llegaba a la noche. Cuando falte plata en un arqueo,
+   * esto es lo que permite preguntarle a alguien en concreto. Es autodeclarado (los
+   * tres usuarios comparten contraseña), así que sirve para preguntar, no para acusar.
+   */
+  cobradoPor?: string;
+  canceladoPor?: string;
   pago: EstadoPago;
   metodoPago?: MetodoPago;
   /**
@@ -417,6 +453,20 @@ export interface Pedido {
   idemKey?: string;
   subtotal: number;
   impuesto: number;
+  /**
+   * La TARIFA con la que se calculó ese impuesto, congelada al cobrar. El pedido
+   * guardaba el monto pero no el porcentaje, así que los comprobantes imprimían el
+   * porcentaje ACTUAL de Ajustes junto a un monto histórico: el día que alguien
+   * moviera ese número, cada reimpresión de un comprobante archivado diría un
+   * porcentaje que no corresponde a su monto.
+   */
+  impuestoPct?: number;
+  /**
+   * Por qué se rebajó. Es la única salida de dinero que no dejaba una palabra escrita:
+   * anular pide motivo, devolver pide motivo, y regalar el plato entero con un
+   * descuento del 100% no pedía nada.
+   */
+  motivoDescuento?: string;
   /** Costo del envío, solo en pedidos a domicilio (0 en mesa/llevar). */
   domicilio?: number;
   propina: number;

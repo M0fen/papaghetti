@@ -40,12 +40,27 @@ yarn-error.log*
 
 # artefactos locales de QA visual (capturas/Playwright) y respaldos de assets
 web/qa-*.mjs
-# …salvo las pruebas de dominio de la auditoría, que SÍ son parte del proyecto
-# (`npm test` desde web/): la aritmética del dinero y el ciclo del pedido.
+# ...salvo las suites que protegen el dinero y la operación. Vivían en un solo disco
+# duro y `npm test` las invocaba igual: pasaban aquí y fallarían en cualquier copia
+# limpia. Lo que cubre un error que se come plata tiene que estar versionado.
+!web/qa-ts.mjs
 !web/qa-dominio.mjs
 !web/qa-pedidos.mjs
-!web/qa-ts.mjs
+!web/qa-comanda.mjs
+!web/qa-despensa.mjs
+!web/qa-comprobantes.mjs
+!web/qa-escpos.mjs
+!web/qa-fusion.mjs
+!web/qa-archivo.mjs
 !web/qa-persistencia.mjs
+!web/qa-comprobantes-ui.mjs
+!web/qa-comprobante.mjs
+!web/qa-directa.mjs
+!web/qa-precios.mjs
+!web/qa-impresion-profunda.mjs
+!web/qa-semilla-comprobantes.mjs
+# temporales de la escritura atómica del cerebro
+web/data/*.tmp
 web/dbg.mjs
 *.webp.bak
 *.bak384

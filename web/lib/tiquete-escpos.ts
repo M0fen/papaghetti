@@ -186,7 +186,7 @@ export function armarTiquete(p: Pedido, a: Ajustes, cols: number = COLUMNAS_80MM
   const sumas: [string, number][] = [
     ["Consumo", p.subtotal],
     ...(p.descuento ? ([["Descuento", -p.descuento]] as [string, number][]) : []),
-    ...(p.impuesto ? ([[`Impuesto (${a.impuestoPct}%)`, p.impuesto]] as [string, number][]) : []),
+    ...(p.impuesto ? ([[`Impuesto (${p.impuestoPct ?? a.impuestoPct}%)`, p.impuesto]] as [string, number][]) : []),
     ...(p.domicilio ? ([["Domicilio", p.domicilio]] as [string, number][]) : []),
   ];
   for (const [k, v] of sumas) for (const t of fila(k, formatCOP(v), cols)) R.push({ texto: t });

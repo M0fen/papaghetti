@@ -42,7 +42,11 @@ export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
   // Antes se calculaba sobre , que excluye "entregado": justo la deuda más
   // peligrosa de un restaurante (el que ya comió y no pagó) era la única que el cierre
   // de caja no mostraba, y aparecía como faltante del cajero.
-  const porCobrar = hoyPed.filter((p) => p.pago === "pendiente");
+  /* SOBRE `validos`, no sobre todos. Un pedido cancelado conserva su pago "pendiente",
+     así que el papel que se firma al cerrar el turno sumaba en la deuda pedidos que
+     nadie debe — y las otras cuatro pantallas los excluyen. El cajero pasaba el turno
+     buscando una plata inexistente, tres centímetros por debajo de la cifra correcta. */
+  const porCobrar = validos.filter((p) => p.pago === "pendiente");
   /* Deudas de OTROS días: existen y hay que verlas, pero no pueden mezclarse con el
      cuadre de hoy o el cierre nunca cierra. */
   const arrastre = catalog.pedidos.filter(

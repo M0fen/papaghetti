@@ -535,7 +535,9 @@ export function textoComprobante(p: Pedido, a: Partial<Pick<Ajustes, "negocio" |
   const sumas: [string, number][] = [
     ["Consumo", p.subtotal],
     ...(p.descuento ? ([["Descuento", -p.descuento]] as [string, number][]) : []),
-    ...(p.impuesto ? ([[`Impuesto${a.impuestoPct ? ` (${a.impuestoPct}%)` : ""}`, p.impuesto]] as [string, number][]) : []),
+    ...(p.impuesto
+      ? ([[`Impuesto${p.impuestoPct ?? a.impuestoPct ? ` (${p.impuestoPct ?? a.impuestoPct}%)` : ""}`, p.impuesto]] as [string, number][])
+      : []),
     ...(p.domicilio ? ([["Domicilio", p.domicilio]] as [string, number][]) : []),
   ];
   return [

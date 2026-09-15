@@ -168,7 +168,21 @@ function migrate(cat: Catalog): Catalog {
 const blobEnabled = (): boolean =>
   Boolean(process.env.BLOB_READ_WRITE_TOKEN) &&
   Boolean(process.env.VERCEL || process.env.PG_BLOB);
-const RUTA_BLOB = "cerebro/catalog.json";
+/**
+ * CADA ENTORNO, SU CEREBRO. `blobEnabled` solo exige estar en Vercel, y eso es cierto
+ * también en los despliegues de PRUEBA de una rama: con una sola ruta constante,
+ * cualquier preview leía y escribía el documento del restaurante. Nadie puede entrar
+ * al panel de un preview (ahí no está la contraseña), pero la página pública sí crea
+ * pedidos y consume despensa de verdad. Producción conserva la ruta de siempre para no
+ * migrar nada; lo demás escribe en su propio cajón.
+ */
+const entornoBlob = (): string => {
+  const e = process.env.VERCEL_ENV; // "production" | "preview" | "development"
+  if (!e || e === "production") return "";
+  const rama = (process.env.VERCEL_GIT_COMMIT_REF || e).replace(/[^a-zA-Z0-9-_]/g, "-").slice(0, 40);
+  return `pruebas/${rama}/`;
+};
+const RUTA_BLOB = `cerebro/${entornoBlob()}catalog.json`;
 
 /**
  * ETag de la última lectura. Blob soporta escritura condicional (`ifMatch`), o sea
@@ -314,7 +328,7 @@ async function respaldoDelDia(cuerpo: string): Promise<void> {
   respaldoHecho = dia;
   try {
     const { put } = await import("@vercel/blob");
-    await put(`cerebro/respaldo-${dia}.json`, cuerpo, {
+    await put(`cerebro/${entornoBlob()}respaldo-${dia}.json`, cuerpo, {
       access: "private",
       contentType: "application/json",
       addRandomSuffix: false,
@@ -395,7 +409,7 @@ async function writeSupabase(cat: Catalog): Promise<void> {
    (compare-and-swap) sobre la última lectura de ESA clave.
    ══════════════════════════════════════════════════════════════════════════ */
 const etagsAux = new Map<string, string>();
-const rutaBlobAux = (clave: string) => `cerebro/${clave}.json`;
+const rutaBlobAux = (clave: string) => `cerebro/${entornoBlob()}${clave}.json`;
 const rutaFileAux = (clave: string) => path.join(DATA_DIR, `${clave}.json`);
 
 async function leerDoc<T>(clave: string): Promise<T | null> {
@@ -455,6 +469,43 @@ async function escribirDoc<T>(clave: string, doc: T): Promise<void> {
   const tmp = `${ruta}.${process.pid}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(doc), "utf8");
   await fs.rename(tmp, ruta);
+}
+
+/**
+ * UNA FOTO NO PUEDE VIVIR DENTRO DEL CEREBRO.
+ *
+ * El navegador comprime la imagen y la manda como texto (`data:image/...;base64,...`),
+ * y eso se guardaba tal cual dentro del mismo documento que la carta, los pedidos y la
+ * caja. Una sola foto ya ocupaba el 85% del documento de producción, y cada pantalla lo
+ * lee entero cada pocos segundos. Con la carta fotografiada, cada «Listo» de la cocina
+ * subiría megabytes.
+ *
+ * Así que la imagen se sube como ARCHIVO aparte y en el documento queda su dirección.
+ * En local no hay almacén: ahí se queda el texto, que es inofensivo porque el archivo de
+ * desarrollo no lo lee nadie más. Lo que ya esté guardado como texto sigue funcionando:
+ * solo se convierte al volver a subirlo.
+ */
+export async function guardarFoto(valor: string | undefined, id: string): Promise<string | undefined> {
+  if (!valor || !valor.startsWith("data:")) return valor; // ya es una dirección, o no hay foto
+  if (!blobEnabled()) return valor; // desarrollo: sin almacén, se queda como está
+  const m = valor.match(/^data:image\/([a-z+]+);base64,(.+)$/i);
+  if (!m) return undefined;
+  const ext = m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase();
+  const bytes = Buffer.from(m[2], "base64");
+  try {
+    const { put } = await import("@vercel/blob");
+    const r = await put(`fotos/${entornoBlob()}${slugify(id)}.${ext}`, bytes, {
+      access: "public",
+      contentType: `image/${m[1].toLowerCase()}`,
+      addRandomSuffix: true, // nombre nuevo por subida: el CDN no sirve la foto vieja
+      cacheControlMaxAge: 31_536_000,
+    });
+    return r.url;
+  } catch (e) {
+    // Si el almacén falla, mejor guardar el texto que perder la foto del operario.
+    console.warn("[papaghetti] no se pudo subir la foto:", (e as Error)?.message ?? e);
+    return valor;
+  }
 }
 
 async function borrarDoc(clave: string): Promise<void> {
@@ -571,6 +622,13 @@ const HIST_CAP = 120; // entradas visibles del historial
  * Sin ellos el cerebro pesa una décima parte y cada acción escribe una décima parte.
  */
 function stripSnap(cat: Catalog): Catalog {
+  /* Y FUERA LAS FOTOS. Las que ya están guardadas como texto (antes de que las fotos se
+     subieran como archivo aparte) se copiaban ENTERAS en cada uno de los seis
+     snapshots: una foto de 90 KB pesaba 630 KB en la pila. `conLoVivo` las devuelve al
+     restaurar, así que deshacer no las pierde — simplemente no las revierte, igual que
+     no revierte los pedidos. */
+  const sinFotos = <T extends { foto?: string }>(xs: T[] | undefined): T[] =>
+    (xs ?? []).map((x) => (x.foto ? { ...x, foto: undefined } : x));
   return {
     ...cat,
     undo: undefined,
@@ -579,11 +637,22 @@ function stripSnap(cat: Catalog): Catalog {
     pedidos: [],
     movimientos: [],
     leads: [],
+    arqueos: [],
+    bases: sinFotos(cat.bases),
+    proteinas: sinFotos(cat.proteinas),
+    toppings: sinFotos(cat.toppings),
+    enredos: sinFotos(cat.enredos),
   };
 }
 
 /** Devuelve el snapshot con lo TRANSACCIONAL de hoy re-inyectado (nunca se revierte). */
 function conLoVivo(snap: Catalog, vivo: Catalog): Catalog {
+  /* Las fotos se quitaron del snapshot para que no pesara siete veces; se devuelven
+     desde lo vivo, por id. Deshacer no revierte una foto: la conserva. */
+  const conFotos = <T extends { id: string; foto?: string }>(delSnap: T[] | undefined, delVivo: T[] | undefined): T[] => {
+    const fotos = new Map((delVivo ?? []).map((x) => [x.id, x.foto]));
+    return (delSnap ?? []).map((x) => (fotos.get(x.id) ? { ...x, foto: fotos.get(x.id) } : x));
+  };
   return {
     ...snap,
     pedidos: vivo.pedidos ?? [],
@@ -591,6 +660,11 @@ function conLoVivo(snap: Catalog, vivo: Catalog): Catalog {
     leads: vivo.leads ?? [],
     // El índice del archivo tampoco se "deshace": los meses archivados existen.
     archivoMeses: vivo.archivoMeses ?? [],
+    arqueos: vivo.arqueos ?? [],
+    bases: conFotos(snap.bases, vivo.bases),
+    proteinas: conFotos(snap.proteinas, vivo.proteinas),
+    toppings: conFotos(snap.toppings, vivo.toppings),
+    enredos: conFotos(snap.enredos, vivo.enredos),
   };
 }
 
@@ -702,6 +776,11 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
     pedidos: recientes(unir(actual.pedidos ?? [], misPedidos), (p) => p.creadoEn),
     movimientos: recientes(unir(actual.movimientos ?? [], mio.movimientos ?? []), (m) => m.fecha),
     leads: recientes(unir(actual.leads ?? [], mio.leads ?? []), (l) => l.creadoEn),
+    /* LOS ARQUEOS TAMBIÉN. Era la única colección transaccional que quedaba fuera: con
+       dos aparatos abiertos, el celular abría la caja a las 18:00 y otro cobraba medio
+       segundo después con una copia anterior — el cobro se fusionaba bien y la apertura
+       de caja desaparecía. Con el cierre es peor: un cierre firmado se podía borrar. */
+    arqueos: recientes(unir(actual.arqueos ?? [], mio.arqueos ?? []), (a) => a.abiertoEn),
     archivoMeses: [...new Set([...(actual.archivoMeses ?? []), ...misMeses])].sort(),
   };
 }
@@ -1655,8 +1734,21 @@ export async function avanzarPedido(id: string, desde?: EstadoPedido): Promise<P
   if (desde && p.estado !== desde) return cat.pedidos; // otro ya lo avanzó: no duplicamos
   if (p.estado === "entregado") return cat.pedidos;
   p.estado = nextEstado(p.estado);
+  sellarEstado(p);
   await commit(cat, `Avanzó #${id} a ${p.estado}`);
   return cat.pedidos;
+}
+
+/**
+ * La hora de cada paso, escrita al pasar por él. Solo la PRIMERA vez: si la cocina se
+ * pasa de paso y retrocede, el sello original es el bueno — lo que interesa medir es
+ * cuándo salió el plato, no cuántas veces se tocó el botón.
+ */
+function sellarEstado(p: Pedido): void {
+  const ahora = new Date().toISOString();
+  if (p.estado === "cocina" && !p.cocinaEn) p.cocinaEn = ahora;
+  if (p.estado === "listo" && !p.listoEn) p.listoEn = ahora;
+  if (p.estado === "entregado" && !p.entregadoEn) p.entregadoEn = ahora;
 }
 
 /** Retrocede un pedido un paso (el KDS necesita corregir un toque de más). */
@@ -1679,6 +1771,8 @@ export async function cobrarPedido(
   descuento = 0,
   /** Rehace un cobro ya hecho: método, propina o descuento mal tecleados. */
   corregir = false,
+  /** Por qué se rebajó, obligatorio si hay descuento. */
+  motivoDescuento?: string,
 ): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
@@ -1686,24 +1780,43 @@ export async function cobrarPedido(
   // Cobrar dos veces pisaba propina, descuento y método: la propina del mesero
   // desaparecía y el arqueo por método dejaba de cuadrar con el datáfono.
   if (p.pago === "pagado" && !corregir) {
-    throw new Error(`El pedido #${id} ya estaba cobrado. Usa "corregir cobro" si te equivocaste.`);
+    throw new Error(`El pedido #${id} ya estaba cobrado. Usa "Corregir cobro" si te equivocaste.`);
   }
   if (p.estado === "cancelado") throw new Error("No se puede cobrar un pedido cancelado.");
+  const desc = Math.max(0, Math.min(p.subtotal, Math.round(descuento)));
+  /* UN DESCUENTO SIN MOTIVO NO ENTRA. Era la única salida de dinero del sistema que no
+     dejaba una palabra escrita: anular pide motivo, devolver pide motivo, y regalar el
+     plato entero con un descuento del 100% no pedía nada. */
+  const motivo = motivoDescuento?.trim().slice(0, 60);
+  if (desc > 0 && !motivo) {
+    throw new Error("Un descuento necesita motivo: elige por qué se rebaja.");
+  }
   p.pago = "pagado";
   p.metodoPago = metodo;
+  /* LA HORA DEL COBRO, que no es la de creación. Es lo que le faltaba al arqueo para
+     cuadrar cuando se cobra en efectivo una deuda de otro día. Al corregir un cobro NO
+     se mueve: el dinero entró cuando entró, no cuando se arregló el tecleo. */
+  if (!p.pagadoEn) p.pagadoEn = new Date().toISOString();
+  p.cobradoPor = (await quien()) || p.cobradoPor;
   // Topes de cordura: un cero de más en la propina era irreversible, y un descuento
   // mayor que el plato dejaba totales imposibles.
   p.propina = Math.max(0, Math.min(500_000, Math.round(propina)));
-  p.descuento = Math.max(0, Math.min(p.subtotal, Math.round(descuento)));
+  p.descuento = desc;
+  p.motivoDescuento = desc > 0 ? motivo : undefined;
   /* El descuento BAJA LA BASE GRAVABLE. Antes se restaba después del impuesto, así que
      una cortesía total dejaba el impoconsumo entero cobrándose sobre plata que nadie
      facturó, y era imposible dejar un pedido en $0. */
   const pct = cat.ajustes.impuestoPct ?? 0;
   p.impuesto = Math.round(((p.subtotal - p.descuento) * pct) / 100);
+  /* La TARIFA se congela con el monto. Sin esto, el día que alguien mueva el porcentaje
+     en Ajustes, cada reimpresión de un comprobante archivado diría un porcentaje que no
+     corresponde a su monto. */
+  p.impuestoPct = pct;
   p.total = totalDe(p); // ← con el domicilio incluido. Ver lib/precios.ts
   await commit(
     cat,
-    `${corregir ? "Corrigió el cobro de" : "Cobró"} #${id} (${metodo} · ${formatCOP(p.total)})`,
+    `${corregir ? "Corrigió el cobro de" : "Cobró"} #${id} (${metodo} · ${formatCOP(p.total)})` +
+      (desc > 0 ? ` · descuento ${formatCOP(desc)}: ${motivo}` : ""),
   );
   return cat;
 }
@@ -1778,6 +1891,7 @@ export async function cancelarPedido(id: string, motivo?: string): Promise<Catal
   const p = cat.pedidos.find((x) => x.id === id);
   if (!p) throw new Error(`No existe el pedido #${id}.`);
   if (p.estado === "cancelado") return cat;
+  p.canceladoPor = (await quien()) || undefined;
   if (p.pago === "pagado") {
     throw new Error(
       `El pedido #${id} ya está cobrado (${formatCOP(p.total)}). Para anularlo hay que registrar la devolución del dinero.`,
@@ -2171,9 +2285,14 @@ export async function ponerACero(): Promise<Catalog> {
  */
 export function esperadoEnCaja(cat: Catalog, dia: string, base: number, salidas = 0) {
   const enEfectivo = (p: Pedido) => (p.metodoPago ?? "efectivo") === "efectivo";
+  /* POR LA FECHA DEL COBRO, no la del pedido. Se contaba por `creadoEn`, así que cobrar
+     en efectivo el lunes una deuda del martes metía esa plata en el día equivocado: el
+     cajón de hoy tenía un sobrante que el arqueo no esperaba, y el descuadre —que es
+     justo lo que el conteo a ciegas existe para sacar a la luz— se volvía ruido. Los
+     pedidos anteriores a `pagadoEn` caen atrás a `creadoEn` y siguen contando igual. */
   const ventas = cat.pedidos.filter(
     (p) =>
-      diaNegocio(p.creadoEn) === dia && p.pago === "pagado" && enEfectivo(p) && esVenta(p),
+      diaNegocio(p.pagadoEn ?? p.creadoEn) === dia && p.pago === "pagado" && enEfectivo(p) && esVenta(p),
   );
   const cobrado = ventas.reduce((s, p) => s + p.total, 0);
   const devueltoDeOtrosDias = cat.pedidos

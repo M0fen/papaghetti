@@ -21,7 +21,7 @@ import {
   type Periodo,
   type Pedido,
 } from "@/lib/menu";
-import { diaNegocio } from "@/lib/precios";
+import { diaNegocio, horaNegocio } from "@/lib/precios";
 import { crearGastoAction, eliminarMovimientoAction } from "../actions";
 import GastoRapido from "@/components/admin/GastoRapido";
 import type { CSSVars } from "@/lib/cssVars";
@@ -129,16 +129,47 @@ export default async function FinanzasPage({
     d.setDate(d.getDate() - (6 - i));
     return d;
   });
+  /* De la MISMA fuente que el resto de la página. Leía `cat.pedidos`, que es solo lo que
+     queda en el cerebro: el día que empezara a archivar, estas barras dirían una cosa y
+     el total de arriba otra, en la misma pantalla. Siete días siempre están en el
+     cerebro, pero la divergencia no debe depender de eso. */
+  const ultimos7 = await comprobantesEntre(diaNegocio(dias[0]), diaNegocio(now));
   const porDia = dias.map((d) => {
     // El día se compara en hora de PEREIRA: con toDateString() del servidor (UTC) cada
     // barra se partía a las 7 p.m. y mezclaba el cierre de un día con la apertura del otro.
     const key = diaNegocio(d);
-    const total = cat.pedidos
+    const total = ultimos7
       .filter((p) => esVenta(p) && diaNegocio(p.creadoEn) === key)
       .reduce((s, p) => s + ventaNeta(p), 0);
     return { label: d.toLocaleDateString("es-CO", { weekday: "short" }), total };
   });
   const maxDia = Math.max(1, ...porDia.map((x) => x.total));
+
+  /* VENTAS POR HORA DEL DÍA. `horaNegocio` estaba escrita, probada, y su propio
+     comentario decía «para ventas por hora» — y no la usaba ningún reporte. El dato
+     está en cada pedido desde el primer día: para un local de tres personas, saber a
+     qué hora entra la venta decide a qué hora llega el segundo par de manos y cuánta
+     papa se pre-fríe. Solo se pintan las horas en que el negocio existe. */
+  const porHora = Array.from({ length: 24 }, (_, h) => ({
+    h,
+    total: pedPer.filter((p) => horaNegocio(p.creadoEn) === h).reduce((s, p) => s + ventaNeta(p), 0),
+    n: pedPer.filter((p) => horaNegocio(p.creadoEn) === h).length,
+  }));
+  const conVenta = porHora.filter((x) => x.n > 0);
+  const desdeH = conVenta.length ? Math.max(0, Math.min(...conVenta.map((x) => x.h)) - 1) : 10;
+  const hastaH = conVenta.length ? Math.min(23, Math.max(...conVenta.map((x) => x.h)) + 1) : 22;
+  const horas = porHora.slice(desdeH, hastaH + 1);
+  const maxHora = Math.max(1, ...horas.map((x) => x.total));
+  const horaPico = conVenta.length ? conVenta.reduce((a, b) => (b.total > a.total ? b : a)) : null;
+
+  /* LO QUE SE REGALÓ. No se veía en ninguna pantalla, nunca. */
+  const descuentos = sum(pedPer, (p) => p.descuento ?? 0);
+  const porMotivoDesc = [...new Set(pedPer.filter((p) => (p.descuento ?? 0) > 0).map((p) => p.motivoDescuento || "Sin motivo"))]
+    .map((m) => ({
+      motivo: m,
+      total: sum(pedPer.filter((p) => (p.motivoDescuento || "Sin motivo") === m && (p.descuento ?? 0) > 0), (p) => p.descuento ?? 0),
+    }))
+    .sort((a, b) => b.total - a.total);
 
   // Lo que hay vs. lo que se necesita (estado actual de despensa)
   const necesita = cat.insumos
@@ -225,6 +256,22 @@ export default async function FinanzasPage({
           <div className="fin-flow__item">
             <span>Domicilios cobrados</span><b>{formatCOP(domicilios)}</b>
           </div>
+        </div>
+      )}
+
+      {/* LO QUE SE REGALÓ. Mueve la misma plata que una anulación y no se veía nunca. */}
+      {descuentos > 0 && (
+        <div className="fin-flow">
+          <div className="fin-flow__item is-pend">
+            <span>Descuentos y cortesías · {label}</span>
+            <b>−{formatCOP(descuentos)}</b>
+          </div>
+          {porMotivoDesc.slice(0, 3).map((d) => (
+            <div className="fin-flow__item" key={d.motivo}>
+              <span>{d.motivo}</span>
+              <b>{formatCOP(d.total)}</b>
+            </div>
+          ))}
         </div>
       )}
 
@@ -357,6 +404,36 @@ export default async function FinanzasPage({
             <span>Ticket promedio <b>{formatCOP(ticket)}</b></span>
             <span>Cobrado <b>{formatCOP(cobrado)}</b></span>
           </div>
+
+          {/* A QUÉ HORA ENTRA LA VENTA. Es la decisión de costo que se toma a diario:
+              a qué hora llega el segundo par de manos y cuánto se pre-fríe. */}
+          <h3 className="rank__h" style={{ marginTop: 18 }}>Por hora del día · {label}</h3>
+          {conVenta.length === 0 ? (
+            <p className="muted">Sin ventas en este período.</p>
+          ) : (
+            <>
+              <div className="chart chart--horas">
+                {horas.map((x) => (
+                  <div className="chart__col" key={x.h}>
+                    <div className="chart__barwrap">
+                      <div
+                        className={`chart__bar ${horaPico && x.h === horaPico.h ? "is-pico" : ""}`}
+                        style={{ "--h": `${(x.total / maxHora) * 100}%` } as CSSVars}
+                        title={`${x.h}:00 · ${formatCOP(x.total)} · ${x.n} ${x.n === 1 ? "pedido" : "pedidos"}`}
+                      />
+                    </div>
+                    <span className="chart__lbl">{x.h}</span>
+                  </div>
+                ))}
+              </div>
+              {horaPico && (
+                <p className="fin-sec-cap" style={{ margin: "6px 0 0" }}>
+                  La hora más fuerte es las <b>{horaPico.h}:00</b> ({formatCOP(horaPico.total)} en{" "}
+                  {horaPico.n} {horaPico.n === 1 ? "pedido" : "pedidos"}).
+                </p>
+              )}
+            </>
+          )}
         </article>
 
         <article className="card">
