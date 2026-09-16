@@ -118,5 +118,19 @@ eq("la prueba de canal pesa menos de 1 KB", pr.length < 1000, true, pr.length);
 eq("y trae la regla de 48 dígitos", leer(pr).some((l) => l.t === "012345678901234567890123456789012345678901234567"), true);
 eq("armarTiquete + codificarRenglones = tiqueteEscPos", hex(codificarRenglones(armarTiquete(pedido, ajustes))) === hex(tt), true);
 
+console.log("\n═══ EL ROLLO DE 58 MM (Star POS TP586) ═══");
+const { ROLLOS, ROLLO_POR_DEFECTO, rolloValido } = await import("./lib/rollo.ts");
+eq("el rollo de fábrica es el del local: 58", ROLLO_POR_DEFECTO, 58);
+eq("58 mm = 48 mm útiles, 384 puntos, 32 columnas", [ROLLOS[58].mm, ROLLOS[58].puntos, ROLLOS[58].cols], [48, 384, 32]);
+eq("80 mm = 72 mm útiles, 576 puntos, 48 columnas", [ROLLOS[80].mm, ROLLOS[80].puntos, ROLLOS[80].cols], [72, 576, 48]);
+eq("puntos = mm × 8 (203 dpi) en los dos", ROLLOS[58].puntos === ROLLOS[58].mm * 8 && ROLLOS[80].puntos === ROLLOS[80].mm * 8, true);
+eq("lo guardado raro vuelve al de fábrica", [rolloValido("80"), rolloValido("58"), rolloValido(null), rolloValido("72")], [80, 58, 58, 58]);
+const pr58 = leer(pruebaTextoEscPos(32));
+eq("la prueba de 58 trae la regla de 32 dígitos", pr58.some((l) => l.t === "01234567890123456789012345678901"), true);
+eq("y nada en ella pasa de 32 columnas (16 en doble)", pr58.every((l) => l.t.length <= (l.tam === 2 ? 16 : 32)), true);
+const bmp58 = { width: 384, height: 2, data: new Uint8ClampedArray(384 * 2 * 4).fill(255) };
+eq("un raster de 384 puntos va a 48 bytes por fila", hex(rasterEscPos(bmp58).subarray(4, 6)), "30 00");
+eq("58 mm: el TOTAL en doble llena sus 16 columnas", t58.find((l) => l.t.startsWith("TOTAL"))?.t, "TOTAL" + " ".repeat(16 - 5 - 7) + "$75.600");
+
 console.log(`\n═══ ${ok} ✅  ·  ${mal} ❌ ═══`);
 process.exit(mal ? 1 : 0);

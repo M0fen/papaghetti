@@ -7,7 +7,7 @@
  *
  *   · en modo TEXTO (el defecto): ESC @, el tiquete en ASCII con el cliente y el
  *     TOTAL, avance y corte; ~1 KB.
- *   · en modo IMAGEN: ESC @, raster GS v 0 de 72 bytes por fila, avance y corte.
+ *   · en modo IMAGEN: ESC @, raster GS v 0 de 48 bytes por fila, avance y corte.
  *
  *   node qa-directa.mjs     (servidor en :3112 con despensa cargada)
  */
@@ -91,7 +91,7 @@ const analizarImagen = (nombre, bytes) => {
   check(`${nombre} · arranca con ESC @`, hex(bytes.slice(0, 2)) === "1b 40");
   const i = bytes.findIndex((v, k) => v === 0x1d && bytes[k + 1] === 0x76 && bytes[k + 2] === 0x30);
   check(`${nombre} · lleva raster GS v 0`, i > 0);
-  check(`${nombre} · de 72 bytes por fila (576 puntos)`, i > 0 && bytes[i + 4] === 0x48 && bytes[i + 5] === 0x00);
+  check(`${nombre} · de 48 bytes por fila (384 puntos)`, i > 0 && bytes[i + 4] === 0x30 && bytes[i + 5] === 0x00);
   check(`${nombre} · termina con avance y corte`, hex(bytes.slice(-4)) === "1d 56 42 00");
   const negros = bytes.slice(i + 8).filter((v) => v !== 0).length;
   check(`${nombre} · el bitmap tiene tinta (no está vacío)`, negros > 2000, `${negros} bytes con puntos`);
@@ -103,7 +103,7 @@ const analizarTexto = (nombre, bytes) => {
   check(`${nombre} · es pequeño (menos de 3 KB)`, bytes.length > 300 && bytes.length < 3000, `${bytes.length} bytes`);
   check(`${nombre} · solo ASCII`, bytes.every((v) => v < 0x80));
   check(`${nombre} · lleva el nombre del cliente`, /Cliente: DIRECTA/.test(t));
-  check(`${nombre} · lleva el TOTAL y el aviso de que no es factura`, /TOTAL\s+\$[\d.]+/.test(t) && /No es factura/.test(t));
+  check(`${nombre} · lleva el TOTAL y el aviso de que no es factura`, /TOTAL\s+\$[\d.]+/.test(t) && /No\s+es\s+factura/.test(t));
   check(`${nombre} · sin raster GS v 0`, !bytes.some((v, k) => v === 0x1d && bytes[k + 1] === 0x76));
   check(`${nombre} · termina con avance y corte`, hex(bytes.slice(-4)) === "1d 56 42 00");
 };
@@ -149,7 +149,7 @@ check("está en el menú lateral", (await p.locator('.adminx__nav a[href="/admin
 await p.goto(`${B}/admin/impresora`, { waitUntil: "networkidle" });
 await p.waitForTimeout(600);
 const pasos = await p.locator(".impresora__paso h2").allInnerTexts();
-check("cuatro pasos: Windows → Chrome → COM/Bluetooth → sin diálogo", pasos.length === 4 && /Windows/.test(pasos[0]) && /Chrome/.test(pasos[1]) && /COM/.test(pasos[2]) && /no pregunte/.test(pasos[3]), pasos.join(" | "));
+check("el aparato primero y luego los cuatro pasos: TP586 → Windows → Chrome → COM/Bluetooth → sin diálogo", pasos.length === 5 && /TP586/.test(pasos[0]) && /Windows/.test(pasos[1]) && /Chrome/.test(pasos[2]) && /COM/.test(pasos[3]) && /no pregunte/.test(pasos[4]), pasos.join(" | "));
 const todo = await p.locator(".impresora").innerText();
 check("dice qué hacer si la página de prueba de Windows no sale", /no sale/.test(await p.locator(".impresora__clave").innerText()));
 check("nombra la cola en pausa / sin conexión y el servicio de impresión", /Pausar impresión/.test(todo) && /Administrador de trabajos de impresión/.test(todo));

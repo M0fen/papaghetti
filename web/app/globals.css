@@ -6082,6 +6082,9 @@ body.enreda-jugando .sticky-pedir {
   }
   /* Térmica de 80mm: 72mm útiles, pegado al margen izquierdo. */
   .cbte--termica.printable { width: 72mm !important; margin: 0 !important; }
+  /* Térmica de 58mm (la TP586 del local): 48mm útiles. */
+  .cbte--termica.cbte--r58.printable { width: 48mm !important; padding: 2mm 0 10mm; }
+  .cbte--r58 .cbte__logo { width: 34mm; }
   /* Hoja normal: el mismo tiquete, centrado y con un poco más de cuerpo. */
   .cbte--hoja.printable {
     width: 80mm !important;
@@ -6773,6 +6776,9 @@ body.enreda-jugando .sticky-pedir {
 .impresora__btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .impresora__lee { font-size: 0.88rem; opacity: 0.85; }
 .impresora__nota { font-size: 0.8rem; opacity: 0.65; }
+.impresora__lista { margin: 0 0 10px; padding-left: 1.2em; font-size: 0.92rem; line-height: 1.5; }
+.impresora__lista li { margin-bottom: 4px; }
+.impresora__paso .cbte-papel { margin: 0 0 10px; }
 .impresora__vista { display: grid; gap: 6px; justify-items: start; }
 .impresora__k { margin: 0; font-size: 0.7rem; letter-spacing: 0.12em; font-weight: 800; opacity: 0.55; }
 .impresora__vista img { width: 288px; height: auto; border: 1px solid rgba(30, 22, 17, 0.12); border-radius: 8px; background: #fff; }

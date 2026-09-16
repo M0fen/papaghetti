@@ -8,8 +8,8 @@
  * avisar. La prueba definitiva la dio el dueño desde el local: lo ÚNICO que llegaba
  * al papel era el logo. Una imagen.
  *
- * Así que el papel entero se vuelve una imagen. Un PNG de 576 píxeles de ancho —el
- * cabezal de una térmica de 80mm tiene exactamente 576 puntos en sus 72mm útiles—
+ * Así que el papel entero se vuelve una imagen, del ancho EXACTO del cabezal —576
+ * píxeles en una de 80 mm (72 mm útiles), 384 en una de 58 mm (48 mm útiles)—,
  * negro puro sobre blanco, sin antialias que el cabezal convierta en manchas. Un
  * driver imprime un bitmap igual que imprime su autotest: no tiene nada que
  * interpretar. Y la misma imagen sirve para descargar, para WhatsApp y para verla
@@ -20,11 +20,38 @@
  */
 
 import { formatCOP, lineasDe, metodoLabel, tipoLabel, type Ajustes, type Pedido } from "./menu";
+import { ROLLO_POR_DEFECTO, ROLLOS, type Rollo } from "./rollo";
 
-/** 72mm útiles × 8 puntos/mm. La resolución nativa del cabezal, ni más ni menos. */
-export const ANCHO_TIQUETE = 576;
-const MARGEN = 22;
-const ANCHO_TEXTO = ANCHO_TIQUETE - MARGEN * 2;
+/**
+ * LA GEOMETRÍA DEL PAPEL. El tiquete se diseñó en unidades de 576 (80 mm) y así se
+ * sigue escribiendo; en 58 mm el lienzo mide los 384 puntos reales y se dibuja con
+ * una escala de 0,8 sobre un ancho lógico de 480. No es encoger una foto: el texto
+ * se rasteriza ya al tamaño final, nítido, y reparte los renglones en el ancho que
+ * hay. Solo 0,8 (no 384/576 = 0,67) porque a dos tercios la letra de los renglones
+ * bajaba de los 2 mm de alto y en el mostrador no se leía. Los márgenes se recortan:
+ * en 48 mm cada milímetro cuenta.
+ */
+interface Geo {
+  /** Puntos reales del cabezal = ancho del lienzo. */
+  puntos: number;
+  /** Escala lógico → puntos. */
+  k: number;
+  /** Ancho lógico en el que se dibuja. */
+  W: number;
+  M: number;
+  /** Ancho útil de texto (lógico). */
+  T: number;
+}
+function geometria(rollo: Rollo): Geo {
+  const { puntos } = ROLLOS[rollo];
+  const k = rollo === 58 ? 0.8 : 1;
+  const W = puntos / k;
+  const M = rollo === 58 ? 12 : 22;
+  return { puntos, k, W, M, T: W - M * 2 };
+}
+
+/** Puntos del cabezal del rollo (576 en 80 mm, 384 en 58 mm). */
+export const puntosDe = (rollo: Rollo) => ROLLOS[rollo].puntos;
 
 const PARTES = new Intl.DateTimeFormat("es-CO", {
   timeZone: "America/Bogota",
@@ -66,9 +93,9 @@ function partir(ctx: Ctx, texto: string, ancho: number): string[] {
 }
 
 /** La hebra de la casa: el mismo fideo ondulado que separa el sitio, en un trazo. */
-function hebra(ctx: Ctx, y: number, corta = false): number {
-  const ancho = corta ? ANCHO_TEXTO * 0.62 : ANCHO_TEXTO;
-  const x0 = (ANCHO_TIQUETE - ancho) / 2;
+function hebra(ctx: Ctx, g: Geo, y: number, corta = false): number {
+  const ancho = corta ? g.T * 0.62 : g.T;
+  const x0 = (g.W - ancho) / 2;
   ctx.save();
   ctx.strokeStyle = "#000";
   ctx.lineWidth = 2.2;
@@ -91,6 +118,8 @@ export interface EntradaTiquete {
   ajustes: Ajustes;
   /** El logo ya cargado (o null si no pudo cargarse: se escribe el nombre). */
   logo: HTMLImageElement | null;
+  /** El rollo de la térmica. Por defecto, el del local. */
+  rollo?: Rollo;
 }
 
 /**
@@ -98,13 +127,16 @@ export interface EntradaTiquete {
  * primero en un canvas muy alto y al final se recorta a lo que se usó, más un
  * colchón abajo para la cuchilla, que se come los últimos milímetros.
  */
-export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete): HTMLCanvasElement {
+export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_DEFECTO }: EntradaTiquete): HTMLCanvasElement {
+  const g = geometria(rollo);
+  const { W: ANCHO_TIQUETE, M: MARGEN, T: ANCHO_TEXTO } = g;
   const lienzo = document.createElement("canvas");
-  lienzo.width = ANCHO_TIQUETE;
+  lienzo.width = g.puntos;
   lienzo.height = 4000; // de sobra; se recorta al final
   const ctx = lienzo.getContext("2d")!;
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, lienzo.width, lienzo.height);
+  ctx.scale(g.k, g.k);
   ctx.fillStyle = "#000";
   ctx.textBaseline = "alphabetic";
 
@@ -189,16 +221,23 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete):
   for (const d of datos) centro(d, `500 20px ${CUERPO}`, 25);
   y += 14;
 
-  y = hebra(ctx, y);
+  y = hebra(ctx, g, y);
 
   // ── Título + número ──
+  // Lado a lado si caben; si no (58 mm con un número largo), el número baja.
   y += 8;
+  const numero = `N° ${p.consecutivo ?? p.id}`;
+  ctx.font = `700 22px ${CUERPO}`;
+  const wTit = ctx.measureText("COMPROBANTE DE CONSUMO").width;
+  ctx.font = `700 34px ${TITULO}`;
+  const wNum = ctx.measureText(numero).width;
   ctx.font = `700 22px ${CUERPO}`;
   ctx.textAlign = "left";
   ctx.fillText("COMPROBANTE DE CONSUMO", MARGEN, y + 22);
+  if (wTit + 16 + wNum > ANCHO_TEXTO) y += 34;
   ctx.font = `700 34px ${TITULO}`;
   ctx.textAlign = "right";
-  ctx.fillText(`N° ${p.consecutivo ?? p.id}`, ANCHO_TIQUETE - MARGEN, y + 26);
+  ctx.fillText(numero, ANCHO_TIQUETE - MARGEN, y + 26);
   ctx.textAlign = "left";
   y += 44;
 
@@ -212,7 +251,7 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete):
   for (const [k, v] of meta) fila(k, v, `700 18px ${CUERPO}`, `600 21px ${CUERPO}`, 28);
   y += 14;
 
-  y = hebra(ctx, y, true);
+  y = hebra(ctx, g, y, true);
 
   // ── Renglones ──
   y += 6;
@@ -237,7 +276,7 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete):
   }
   y += 12;
 
-  y = hebra(ctx, y, true);
+  y = hebra(ctx, g, y, true);
 
   // ── Sumas ──
   const consumo = p.subtotal - (p.descuento ?? 0);
@@ -256,7 +295,8 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete):
   fila("TOTAL", formatCOP(total), `800 26px ${CUERPO}`, `800 40px ${TITULO}`, 44);
   if (anulado) {
     // Tachado: el total sigue ahí para que se lea, pero no vale.
-    ctx.fillRect(ANCHO_TIQUETE - MARGEN - 220, y - 14, 220, 4);
+    const tachado = Math.min(220, ANCHO_TEXTO * 0.5);
+    ctx.fillRect(ANCHO_TIQUETE - MARGEN - tachado, y - 14, tachado, 4);
   }
   y += 4;
   ctx.fillRect(MARGEN, y, ANCHO_TEXTO, 3);
@@ -273,7 +313,7 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete):
   fila("PAGO", pago, `700 18px ${CUERPO}`, `800 22px ${CUERPO}`, 30);
   y += 16;
 
-  y = hebra(ctx, y);
+  y = hebra(ctx, g, y);
 
   // ── Pie ──
   y += 4;
@@ -290,8 +330,8 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo }: EntradaTiquete):
 
   // ── Recorte a lo usado ──
   const final = document.createElement("canvas");
-  final.width = ANCHO_TIQUETE;
-  final.height = Math.min(y, lienzo.height);
+  final.width = g.puntos;
+  final.height = Math.min(Math.ceil(y * g.k), lienzo.height);
   const fctx = final.getContext("2d")!;
   fctx.fillStyle = "#fff";
   fctx.fillRect(0, 0, final.width, final.height);
@@ -330,70 +370,75 @@ export function binarizar(origen: HTMLCanvasElement, umbral = 150): HTMLCanvasEl
 
 /**
  * EL PATRÓN DE CALIBRACIÓN: lo que se imprime para saber, en un solo papel, cómo
- * está llegando el bitmap al cabezal.
+ * está llegando el bitmap al cabezal. Se dibuja a los puntos REALES del rollo (sin
+ * escala), porque lo que mide es justamente si el driver los respeta 1:1.
  *
  *  · Una REGLA en milímetros con marca cada mm y número cada 10: si al medir con
- *    una regla de verdad los "10" caen a 10 mm, los 576 px van uno a uno sobre los
- *    576 puntos; si caen a 11, el driver está reescalando (papel de 80 mm elegido
- *    en vez de 72, o "ajustar a la página" activo).
- *  · Marcas en x=0 y x=575: si falta alguna, el driver recorta ese borde.
+ *    una regla de verdad los "10" caen a 10 mm, cada píxel va sobre un punto; si
+ *    caen a 11 o a 9, el driver está reescalando (papel equivocado en el driver o
+ *    "ajustar a la página" activo).
+ *  · Marcas en los dos bordes: si falta alguna, el driver recorta ese lado.
  *  · Un TABLERO de 1 px: nítido = 1:1; gris o con bandas = remuestreo o dithering.
- *  · Texto de 16, 20 y 24 px, para ver qué tamaño se lee bien en ESTE cabezal.
+ *  · Texto de 16, 20, 24 y 30 px, para ver qué tamaño se lee bien en ESTE cabezal.
  */
-export function dibujarCalibracion(): HTMLCanvasElement {
+export function dibujarCalibracion(rollo: Rollo = ROLLO_POR_DEFECTO): HTMLCanvasElement {
+  const { puntos, mm: mmUtiles } = ROLLOS[rollo];
   const c = document.createElement("canvas");
-  c.width = ANCHO_TIQUETE;
-  c.height = 560;
+  c.width = puntos;
+  c.height = 540;
   const ctx = c.getContext("2d")!;
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.fillStyle = "#000";
   ctx.textAlign = "center";
-  ctx.font = `800 26px ${CUERPO}`;
-  ctx.fillText("PATRÓN DE PRUEBA · 576 puntos = 72 mm", ANCHO_TIQUETE / 2, 40);
+  ctx.font = `800 ${rollo === 58 ? 22 : 26}px ${CUERPO}`;
+  ctx.fillText("PATRÓN DE PRUEBA", puntos / 2, 32);
+  ctx.font = `600 18px ${CUERPO}`;
+  ctx.fillText(`Rollo ${rollo} mm · ${puntos} puntos = ${mmUtiles} mm`, puntos / 2, 56);
 
   // Bordes: si uno no sale, ese lado se recorta.
   ctx.fillRect(0, 0, 3, c.height);
-  ctx.fillRect(ANCHO_TIQUETE - 3, 0, 3, c.height);
+  ctx.fillRect(puntos - 3, 0, 3, c.height);
 
   // Regla: 8 px = 1 mm.
-  const y0 = 70;
-  ctx.fillRect(0, y0, ANCHO_TIQUETE, 2);
+  const y0 = 76;
+  ctx.fillRect(0, y0, puntos, 2);
   ctx.font = `700 18px ${CUERPO}`;
-  for (let mm = 0; mm <= 72; mm++) {
+  for (let mm = 0; mm <= mmUtiles; mm++) {
     const x = mm * 8;
     const alto = mm % 10 === 0 ? 26 : mm % 5 === 0 ? 16 : 8;
-    ctx.fillRect(Math.min(x, ANCHO_TIQUETE - 2), y0, 2, alto);
-    if (mm % 10 === 0 && mm < 72) ctx.fillText(String(mm), x + (mm === 0 ? 10 : 0), y0 + 46);
+    ctx.fillRect(Math.min(x, puntos - 2), y0, 2, alto);
+    if (mm % 10 === 0 && mm < mmUtiles - 3) ctx.fillText(String(mm), x + (mm === 0 ? 10 : 0), y0 + 46);
   }
-  ctx.fillText("72", ANCHO_TIQUETE - 14, y0 + 46);
+  ctx.fillText(String(mmUtiles), puntos - 14, y0 + 46);
 
   // Tablero de 1 px: la prueba de remuestreo.
-  const yt = 140;
+  const yt = 150;
   ctx.font = `600 18px ${CUERPO}`;
   ctx.textAlign = "left";
-  ctx.fillText("Tablero 1 px (debe verse nítido, no gris):", 22, yt - 8);
+  ctx.fillText("Tablero 1 px (nítido, no gris):", 14, yt - 8);
   for (let y = 0; y < 40; y++) {
-    for (let x = 0; x < ANCHO_TIQUETE - 44; x++) {
-      if ((x + y) % 2 === 0) ctx.fillRect(22 + x, yt + y, 1, 1);
+    for (let x = 0; x < puntos - 28; x++) {
+      if ((x + y) % 2 === 0) ctx.fillRect(14 + x, yt + y, 1, 1);
     }
   }
   // Líneas verticales de 1 px separadas 2 px: si salen bandas, hay escalado.
-  const yl = yt + 56;
-  ctx.fillText("Líneas de 1 px:", 22, yl - 8);
-  for (let x = 22; x < ANCHO_TIQUETE - 22; x += 3) ctx.fillRect(x, yl, 1, 40);
+  const yl = yt + 64;
+  ctx.fillText("Líneas de 1 px:", 14, yl - 8);
+  for (let x = 14; x < puntos - 14; x += 3) ctx.fillRect(x, yl, 1, 40);
 
   // Tamaños de texto.
   let y = yl + 80;
   for (const px of [16, 20, 24, 30]) {
     ctx.font = `600 ${px}px ${CUERPO}`;
-    ctx.fillText(`Texto de ${px} px · Papaghetti 0123456789`, 22, y);
+    ctx.fillText(`${px} px · Papaghetti 0123`, 14, y);
     y += px + 14;
   }
   ctx.font = `500 17px ${CUERPO}`;
-  ctx.fillText("Si la regla no llega a 72: el driver recorta.", 22, y + 10);
-  ctx.fillText("Si el 10 no mide 10 mm: hay reescalado.", 22, y + 34);
-  ctx.fillText("Si el tablero sale gris: hay tramado.", 22, y + 58);
+  for (const l of [`Regla corta de ${mmUtiles}: recorta.`, "El 10 no mide 10 mm: reescala.", "Tablero gris: hay tramado."]) {
+    y += 24;
+    ctx.fillText(l, 14, y);
+  }
 
   return binarizar(c);
 }

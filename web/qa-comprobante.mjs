@@ -125,10 +125,9 @@ console.log("\n=== LO QUE LLEGA A LA IMPRESORA ===");
 check("se manda un documento", Boolean(docImp));
 if (docImp) {
   check("contiene UNA imagen y nada más de HTML", /<img[^>]+src="data:image\/png/.test(docImp) && !/<div|<p |<span/.test(docImp));
-  /* 72mm CENTRADOS, no 100%: el rollo mide 80 pero el cabezal imprime 72 (576
-     puntos). A 72mm los 576px del canvas caen uno a uno sobre los puntos del
-     cabezal, sin reescalar; al 100% el driver recortaba 4mm por lado. */
-  check("la imagen va a 72mm centrados (los puntos del cabezal, 1:1)", /img\{display:block;width:72mm;max-width:100%;margin:0 auto/.test(docImp));
+  /* El ancho ÚTIL del cabezal, centrado, no 100%: la TP586 del local es de 58 mm e
+     imprime 48 (384 puntos). A 48mm los 384px caen uno a uno sobre sus puntos. */
+  check("la imagen va a 48mm centrados (los puntos del cabezal, 1:1)", /img\{display:block;width:48mm;max-width:100%;margin:0 auto/.test(docImp));
   check("NO lleva el panel", !/adminx__side/.test(docImp));
   /* SIN `size`: Epson y Bixolon declaran 80×297 y 80×3276 y no arrancan en el mismo;
      si el @page no coincide con el papel del driver, Chrome encoge o centra la página.
@@ -164,8 +163,23 @@ const px = await p.evaluate(async () => {
   return { w: c.width, h: c.height, negro, bytes: src.length };
 });
 console.log(`  imagen ${px.w}×${px.h}px · ${Math.round(px.bytes / 1024)}KB · negro por banda: ${px.negro.join(" / ")}`);
-check("la imagen mide 576px (el cabezal de 80mm)", px.w === 576, `${px.w}px`);
+check("la imagen mide 384px (el cabezal de 58mm, la TP586)", px.w === 384, `${px.w}px`);
 check("y tiene altura de tiquete", px.h > 700, `${px.h}px`);
+
+/* Y con rollo de 80: el mismo botón redibuja a 576 y el documento va a 72mm. */
+await p.getByRole("button", { name: /Térmica 80mm/ }).click();
+await p.waitForFunction(() => {
+  const im = document.querySelector(".cbte-imagen");
+  return im && im.naturalWidth === 576;
+}, null, { timeout: 8000 }).catch(() => {});
+const w80 = await p.evaluate(() => document.querySelector(".cbte-imagen")?.naturalWidth ?? 0);
+check("con 'Térmica 80mm' la imagen pasa a 576px", w80 === 576, `${w80}px`);
+await p.getByRole("button", { name: /^Imprimir$/ }).click();
+await p.waitForTimeout(2000);
+const doc80 = await p.evaluate(() => window.__doc);
+check("y el documento va a 72mm", /width:72mm/.test(doc80 || ""));
+await p.getByRole("button", { name: /Térmica 58mm/ }).click();
+await p.waitForTimeout(1500);
 check("hay tinta ARRIBA (logo y datos)", px.negro[0] > 500);
 check("hay tinta EN MEDIO (renglones y sumas) — no solo el logo", px.negro[2] > 500 && px.negro[3] > 500, `${px.negro[2]} / ${px.negro[3]}`);
 check("hay tinta ABAJO (total, pago y pie)", px.negro[4] + px.negro[5] > 500);

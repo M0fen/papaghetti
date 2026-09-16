@@ -110,7 +110,7 @@ await p.getByRole("button", { name: /^Imprimir$/ }).click();
 await p.waitForTimeout(2500);
 let doc = await p.evaluate(() => window.__doc);
 check("se abre una pestaña y se imprime", Boolean(doc) && !doc.startsWith("IFRAME:"));
-check("la imagen va a 72mm centrados, con tope al ancho útil", /img\{display:block;width:72mm;max-width:100%;margin:0 auto/.test(doc || ""));
+check("la imagen va a 48mm centrados, con tope al ancho útil", /img\{display:block;width:48mm;max-width:100%;margin:0 auto/.test(doc || ""));
 /* SIN `size`: los drivers declaran 80×297 y 80×3276 y no todos arrancan en el mismo;
    si el @page no coincide con el papel elegido, Chrome encoge o centra la página
    ("el tiquete en un fragmento del lienzo"). Sin size, manda el papel del driver. */
@@ -126,7 +126,7 @@ console.log(`  PDF: ${pdf1.ancho.toFixed(1)}×${pdf1.alto.toFixed(1)}mm · ${pdf
    carta, 215,9 mm. En la térmica será el rollo que tenga elegido el driver. Lo que
    se comprueba es que la página NO viene de un tamaño inventado por nosotros. */
 check("sin size, Chrome usa el papel del destino (carta en PDF)", Math.abs(pdf1.ancho - 215.9) < 1.5, `${pdf1.ancho.toFixed(1)}mm`);
-check("el PDF lleva la imagen embebida a 576px", pdf1.imgW === 576);
+check("el PDF lleva la imagen embebida a 384px", pdf1.imgW === 384);
 check("cabe en una página", pdf1.paginas === 1);
 
 // La versión de pantalla es la suave (con antialias): más bonita, no va al papel.
@@ -144,7 +144,7 @@ await p.getByRole("button", { name: /^Imprimir$/ }).click();
 await p.waitForTimeout(2500);
 doc = await p.evaluate(() => window.__doc);
 check("cae al iframe y también imprime", Boolean(doc) && doc.startsWith("IFRAME:"));
-check("con el mismo documento de imagen", /<img[^>]+src="data:image\/png/.test(doc || "") && /width:72mm/.test(doc || ""));
+check("con el mismo documento de imagen", /<img[^>]+src="data:image\/png/.test(doc || "") && /width:48mm/.test(doc || ""));
 
 // ═══ 3. CAMINO AUTOMÁTICO (?imprimir=1) ═══
 console.log("\n═══ 3 · CAMINO AUTOMÁTICO ═══");
@@ -180,7 +180,7 @@ const al = await analizar((doc || "").match(/src="(data:image\/png[^"]+)"/)?.[1]
 const pdf5 = await pdfDe(doc, "prof-larga");
 console.log(`  imagen ${al.w}×${al.h}px · PDF ${pdf5.paginas} pág de ${pdf5.alto.toFixed(0)}mm`);
 check("un tiquete de 10 renglones es más alto", al.h > at.h + 400, `${al.h}px vs ${at.h}px`);
-check("y se imprime entero, en las páginas que haga falta", pdf5.paginas >= 1 && pdf5.imgW === 576);
+check("y se imprime entero, en las páginas que haga falta", pdf5.paginas >= 1 && pdf5.imgW === 384);
 check("con tinta hasta el final (nada se corta)", al.negro[5] > 300, `banda final=${al.negro[5]}`);
 
 // ═══ 6. ANULADO ═══
@@ -218,10 +218,10 @@ await capturar(false);
 await p.getByRole("button", { name: /imprime el patrón de prueba/i }).click();
 await p.waitForTimeout(2500);
 doc = await p.evaluate(() => window.__doc);
-check("el patrón se imprime por el mismo camino (imagen, 72mm, sin size)", /width:72mm;max-width:100%/.test(doc || "") && /@page \{ margin: 0; \}/.test(doc || ""));
+check("el patrón se imprime por el mismo camino (imagen, 48mm, sin size)", /width:48mm;max-width:100%/.test(doc || "") && /@page \{ margin: 0; \}/.test(doc || ""));
 const ac = await analizar((doc || "").match(/src="(data:image\/png[^"]+)"/)?.[1] || "");
-check("es de 576 px y blanco/negro puro", ac.w === 576 && ac.grises === 0, `${ac.w}×${ac.h} · grises=${ac.grises}`);
-check("con las marcas de los bordes (x=0 y x=575 tienen tinta)", await p.evaluate(async (src) => {
+check("es de 384 px y blanco/negro puro", ac.w === 384 && ac.grises === 0, `${ac.w}×${ac.h} · grises=${ac.grises}`);
+check("con las marcas de los bordes (x=0 y el último píxel tienen tinta)", await p.evaluate(async (src) => {
   const im = new Image(); await new Promise((r) => { im.onload = r; im.onerror = r; im.src = src; });
   const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight;
   const cx = c.getContext("2d"); cx.drawImage(im, 0, 0);

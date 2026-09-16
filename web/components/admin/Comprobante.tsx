@@ -25,9 +25,10 @@
  * el comprobante: sin cromo que ocultar, no hay excepción que pueda fallar. Ningún
  * navegador puede sacar en blanco un documento en el que solo está el tiquete.
  *
- * DOS PAPELES, porque hay dos realidades: la térmica de 80mm de un POS y la hoja
- * normal de una impresora de oficina, que es con lo que se abre el primer día. El
- * selector cambia la regla `@page` de verdad — no es un maquillaje de CSS.
+ * TRES PAPELES, porque hay tres realidades: la térmica de 58mm del local (Star POS
+ * TP586), una de 80mm si algún día se cambia, y la hoja normal de una impresora de
+ * oficina. El rollo se recuerda POR EQUIPO (es cosa del aparato conectado), y el
+ * selector cambia el dibujo, el texto ESC/POS y la regla `@page` de verdad.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -46,6 +47,8 @@ import { imprimirImagen } from "@/lib/imprimir-imagen";
 import ImpresionDirecta, { type TrabajosDirectos } from "@/components/admin/ImpresionDirecta";
 import { trabajoEscPos, type Bitmap } from "@/lib/escpos";
 import { tiqueteEscPos } from "@/lib/tiquete-escpos";
+import { ROLLOS } from "@/lib/rollo";
+import { useRollo } from "@/components/admin/useRollo";
 
 /**
  * La fecha, ARMADA A MANO a partir de las piezas.
@@ -116,6 +119,8 @@ export default function Comprobante({
   volver?: "pedidos" | "comprobantes";
 }) {
   const [papel, setPapel] = useState<Papel>("termica");
+  const [rollo, setRollo] = useRollo();
+  const R = ROLLOS[rollo];
   const [tel, setTel] = useState(p.telefono ?? "");
   const [pidiendoTel, setPidiendoTel] = useState(Boolean(wa) && !p.telefono);
   const hoja = useRef<HTMLElement>(null);
@@ -141,7 +146,7 @@ export default function Comprobante({
       }
       const logo = await cargarImagen("/logo-papaghetti-bn.png");
       if (!vivo) return;
-      const c = dibujarTiquete({ pedido: p, ajustes: a, logo });
+      const c = dibujarTiquete({ pedido: p, ajustes: a, logo, rollo });
       const bin = binarizar(c);
       setPng(c.toDataURL("image/png"));
       setPngTermica(bin.toDataURL("image/png"));
@@ -150,7 +155,7 @@ export default function Comprobante({
     return () => {
       vivo = false;
     };
-  }, [p, a]);
+  }, [p, a, rollo]);
 
   /**
    * IMPRIMIR LA IMAGEN, Y NADA MÁS.
@@ -180,7 +185,7 @@ export default function Comprobante({
   /* Los dos trabajos del camino directo: el tiquete en TEXTO ESC/POS (2 KB, el
      rápido y el que menos puede fallar) y el mismo bitmap de arriba como raster. */
   const trabajos: TrabajosDirectos = {
-    texto: () => tiqueteEscPos(p, a),
+    texto: () => tiqueteEscPos(p, a, { cols: R.cols }),
     imagen: () => {
       const bmp = getBitmap();
       return bmp ? trabajoEscPos(bmp) : null;
@@ -190,7 +195,7 @@ export default function Comprobante({
   const imprimir = () => {
     if (!png || !pngTermica) return;
     const termica = papel === "termica";
-    imprimirImagen(termica ? pngTermica : png, termica, `Comprobante N° ${p.consecutivo ?? p.id}`);
+    imprimirImagen(termica ? pngTermica : png, termica, `Comprobante N° ${p.consecutivo ?? p.id}`, R.mm);
   };
 
   /* El patrón de calibración: una regla en milímetros y un tablero de 1 px. En un
@@ -198,7 +203,7 @@ export default function Comprobante({
      está reescalando (el tablero sale gris o con bandas en vez de nítido). Es la
      prueba que puede hacer quien esté delante de la impresora, sin nadie más. */
   const calibrar = () => {
-    imprimirImagen(dibujarCalibracion().toDataURL("image/png"), true, "Patrón de calibración");
+    imprimirImagen(dibujarCalibracion(rollo).toDataURL("image/png"), true, "Patrón de calibración", R.mm);
   };
 
   useEffect(() => {
@@ -241,19 +246,25 @@ export default function Comprobante({
           exacta la fija `imprimir()` justo antes de abrir el diálogo. */}
       <style id="pg-page">{
         papel === "termica"
-          ? "@page { size: 80mm 297mm; margin: 0; }"
+          ? `@page { size: ${rollo}mm 297mm; margin: 0; }`
           : "@page { size: auto; margin: 12mm; }"
       }</style>
 
       <div className="cbte-acciones no-print">
         <div className="cbte-papel" role="group" aria-label="Tamaño de papel">
-          <button
-            type="button"
-            className={papel === "termica" ? "is-on" : ""}
-            onClick={() => setPapel("termica")}
-          >
-            Térmica 80mm
-          </button>
+          {([58, 80] as const).map((mm) => (
+            <button
+              key={mm}
+              type="button"
+              className={papel === "termica" && rollo === mm ? "is-on" : ""}
+              onClick={() => {
+                setPapel("termica");
+                setRollo(mm);
+              }}
+            >
+              Térmica {mm}mm
+            </button>
+          ))}
           <button
             type="button"
             className={papel === "hoja" ? "is-on" : ""}
@@ -283,14 +294,14 @@ export default function Comprobante({
             está el que sufre el problema, no en un manual que nadie abre. */}
         {papel === "termica" && (
           <small className="cbte-ayuda">
-            Se imprime como una sola imagen de 72&nbsp;mm. En el diálogo de Chrome:
+            Se imprime como una sola imagen de {R.mm}&nbsp;mm. En el diálogo de Chrome:
             márgenes <b>Ninguno</b>, escala 100, sin encabezados. En Windows, en las
-            preferencias de la térmica, papel <b>80 × 3276&nbsp;mm</b> (rollo continuo) si
-            existe, o 80 × 297. Con la impresora delante,{" "}
+            preferencias de la térmica, papel <b>{R.papelDriver}</b>. Con la impresora
+            delante,{" "}
             <button type="button" className="cbte-link" onClick={calibrar}>
               imprime el patrón de prueba
             </button>
-            : la regla debe llegar a 72 y el tablero salir nítido. Si nada sale desde el
+            : la regla debe llegar a {R.mm} y el tablero salir nítido. Si nada sale desde el
             navegador: <b>Descargar imagen</b> y abrirla en Fotos de Windows, o prueba el
             camino directo de aquí abajo.
           </small>
@@ -364,7 +375,7 @@ export default function Comprobante({
       )}
       <article
         ref={hoja}
-        className={`cbte printable cbte--${papel} ${anulado ? "cbte--anulado" : ""} ${png ? "cbte--respaldo" : ""}`}
+        className={`cbte printable cbte--${papel} cbte--r${rollo} ${anulado ? "cbte--anulado" : ""} ${png ? "cbte--respaldo" : ""}`}
       >
         {anulado && (
           <div className="cbte__anulado" role="alert">

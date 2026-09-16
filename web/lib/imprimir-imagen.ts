@@ -11,15 +11,15 @@
  * Vive aparte del componente del comprobante para que el patrón de calibración y la
  * página de diagnóstico impriman EXACTAMENTE por el mismo camino.
  */
-export function imprimirImagen(src: string, termica: boolean, titulo: string): void {
+export function imprimirImagen(src: string, termica: boolean, titulo: string, anchoMm = 72): void {
   /* SIN `size` EN LA TÉRMICA. Epson y Bixolon declaran "80 × 297" y "80 × 3276", no
      arrancan en el mismo, y Chrome encoge o centra la página cuando el @page no
      coincide con el papel del driver. Sin size manda el papel del driver. */
   const page = termica ? "@page { margin: 0; }" : "@page { size: auto; margin: 10mm; }";
-  /* 72mm: los 576px del canvas caen uno a uno sobre los 576 puntos del cabezal.
-     max-width:100% para que, si cambian los márgenes del diálogo, se encoja en vez
-     de perder el borde derecho. */
-  const ancho = termica ? "width:72mm;max-width:100%;margin:0 auto" : "width:100%";
+  /* El ancho útil del cabezal (72mm en 80, 48mm en 58): los píxeles del canvas caen
+     uno a uno sobre sus puntos. max-width:100% para que, si cambian los márgenes del
+     diálogo, se encoja en vez de perder el borde derecho. */
+  const ancho = termica ? `width:${anchoMm}mm;max-width:100%;margin:0 auto` : "width:100%";
   const html =
     `<!doctype html><html lang="es"><head><meta charset="utf-8">` +
     `<title>${titulo}</title>` +

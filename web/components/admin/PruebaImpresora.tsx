@@ -27,24 +27,27 @@ import { imprimirImagen } from "@/lib/imprimir-imagen";
 import { trabajoEscPos } from "@/lib/escpos";
 import { pruebaTextoEscPos } from "@/lib/tiquete-escpos";
 import ImpresionDirecta, { type TrabajosDirectos } from "./ImpresionDirecta";
+import { ROLLOS, type Rollo } from "@/lib/rollo";
+import { useRollo } from "./useRollo";
 
-/* El patrón se dibuja UNA vez por pestaña y se sirve como "almacén externo": en el
-   servidor no hay canvas (null), en el cliente se crea al primer render y se
+/* El patrón se dibuja UNA vez por pestaña y rollo, y se sirve como "almacén externo":
+   en el servidor no hay canvas (null), en el cliente se crea al primer render y se
    reutiliza. Así no hace falta un setState dentro de un efecto, y React reconcilia la
    hidratación sin avisos. */
-let patronCache: HTMLCanvasElement | null = null;
-const leerPatron = () => {
+const patronCache: Partial<Record<Rollo, HTMLCanvasElement>> = {};
+const leerPatron = (rollo: Rollo) => {
   if (typeof document === "undefined") return null;
-  if (!patronCache) patronCache = dibujarCalibracion();
-  return patronCache;
+  return (patronCache[rollo] ??= dibujarCalibracion(rollo));
 };
 const nadaQueSuscribir = () => () => {};
 
 export default function PruebaImpresora() {
-  const patron = useSyncExternalStore(nadaQueSuscribir, leerPatron, () => null);
+  const [rollo, setRollo] = useRollo();
+  const R = ROLLOS[rollo];
+  const patron = useSyncExternalStore(nadaQueSuscribir, () => leerPatron(rollo), () => null);
 
   const trabajos: TrabajosDirectos = {
-    texto: () => pruebaTextoEscPos(),
+    texto: () => pruebaTextoEscPos(R.cols),
     imagen: () => {
       if (!patron) return null;
       const ctx = patron.getContext("2d");
@@ -56,14 +59,63 @@ export default function PruebaImpresora() {
 
   return (
     <div className="impresora">
+      {/* EL APARATO DEL LOCAL. Todo lo de abajo depende de dos datos: el ancho del
+          rollo y por dónde se conecta. Se resuelven aquí, antes del paso 1. */}
+      <section className="card impresora__paso">
+        <h2>0 · Tu impresora: Star POS TP586</h2>
+        <div className="cbte-papel" role="group" aria-label="Ancho del rollo">
+          {([58, 80] as const).map((mm) => (
+            <button key={mm} type="button" className={rollo === mm ? "is-on" : ""} onClick={() => setRollo(mm)}>
+              Rollo {mm} mm
+            </button>
+          ))}
+        </div>
+        <p>
+          Térmica directa de <b>58&nbsp;mm</b>, 203&nbsp;dpi, comandos <b>ESC/POS</b>. El cabezal
+          quema <b>48&nbsp;mm útiles = 384 puntos</b>, o sea <b>32 letras por renglón</b>. Todo en
+          este equipo imprime ya a esa medida (queda recordado en este computador; cámbialo
+          arriba solo si conectas otra impresora).
+        </p>
+        <p>
+          <b>¿Qué versión es?</b> Mira atrás: la TP586 se vende <b>solo USB</b>,{" "}
+          <b>USB + Bluetooth</b> o <b>USB + red (LAN)</b>.
+        </p>
+        <ul className="impresora__lista">
+          <li>
+            <b>Solo USB</b> → pasos 1, 2 y 4. Windows la ve como impresora, no como puerto COM,
+            así que el paso 3 no aplica.
+          </li>
+          <li>
+            <b>USB + Bluetooth</b> → además, el paso 3 sin driver: empareja en Windows con PIN{" "}
+            <b>0000</b> o <b>1234</b>.
+          </li>
+          <li>
+            <b>USB + LAN</b> → el navegador no puede hablarle por red directo: por cable USB con
+            los pasos 1 y 2, o instálala en Windows como impresora de red (TCP/IP, puerto 9100).
+          </li>
+        </ul>
+        <p>
+          <b>Autotest:</b> impresora apagada, mantén el botón <b>FEED</b> y enciéndela. En este
+          tipo de térmicas el papel dice la interfaz, los baudios y —si trae Bluetooth— su
+          nombre y PIN. Tenlo a mano para el paso 3.
+        </p>
+        <p>
+          <b>Driver:</b> el genérico <b>POS-58</b> (el que trae el CD o da el vendedor; el{" "}
+          &quot;POS58 Printer Driver&quot; de Xprinter también sirve). Al instalar elige el modelo
+          POS-58 y el puerto <b>USB001</b> (o el que aparezca). El corte es <b>manual</b>: se rasga
+          contra la sierra; el tiquete deja unos milímetros de más para eso.
+        </p>
+      </section>
+
       <section className="card impresora__paso">
         <h2>1 · ¿Windows ve la impresora?</h2>
         <p>
           Chrome no tiene lista propia de impresoras: enseña las que Windows tiene
           instaladas. Abre <b>Configuración → Bluetooth y dispositivos → Impresoras y
           escáneres</b>. La térmica tiene que estar en la lista. Si no está, instala el
-          driver del fabricante (viene en el CD o en su web; para una &quot;POS-80&quot; o
-          &quot;XP-80&quot; genérica sirve el de Xprinter) y vuelve a mirar.
+          driver del paso 0 (<b>POS-58</b>) y vuelve a mirar. Con Windows 10/11 a veces
+          aparece sola como &quot;POS58&quot; o &quot;USB Printing Support&quot; sin driver de
+          impresora: sin driver no sirve, instálalo igual.
         </p>
         <p>
           Entra en ella → <b>Abrir cola de impresión</b>. En el menú <b>Impresora</b>,
@@ -113,7 +165,7 @@ export default function PruebaImpresora() {
             type="button"
             className="btn btn--primary"
             disabled={!patron}
-            onClick={() => patron && imprimirImagen(patron.toDataURL("image/png"), true, "Patrón de prueba")}
+            onClick={() => patron && imprimirImagen(patron.toDataURL("image/png"), true, "Patrón de prueba", R.mm)}
           >
             <span>Imprimir el patrón de prueba</span>
           </button>
@@ -124,9 +176,10 @@ export default function PruebaImpresora() {
           )}
         </div>
         <p className="impresora__lee">
-          En el papel: la <b>regla debe llegar a 72</b> (si no, el driver recorta), el{" "}
-          <b>10 debe medir 10&nbsp;mm</b> con una regla real (si mide más, hay reescalado:
-          pon el papel del driver en 80 × 3276 o 80 × 297) y el <b>tablero debe salir
+          En el papel: la <b>regla debe llegar a {R.mm}</b> (si no, el driver recorta), el{" "}
+          <b>10 debe medir 10&nbsp;mm</b> con una regla real (si mide más o menos, hay
+          reescalado: en Windows → preferencias de impresión de la térmica, papel{" "}
+          <b>{R.papelDriver}</b>; en Chrome, escala 100) y el <b>tablero debe salir
           nítido</b>, no gris.
         </p>
       </section>
@@ -139,7 +192,7 @@ export default function PruebaImpresora() {
           &quot;Virtual COM&quot; del fabricante), se le mandan los datos desde aquí, sin driver
           de impresora ni diálogo. Si es una impresora <b>Bluetooth</b>, emparéjala en
           Windows: queda como un COM &quot;Estándar serie sobre Bluetooth&quot; (elige el{" "}
-          <b>saliente</b>) y se usa el mismo botón. Si solo aparece bajo
+          <b>saliente</b>; el PIN suele ser 0000 o 1234) y se usa el mismo botón. Si solo aparece bajo
           &quot;Impresoras&quot; y no en Puertos, este camino no existe en ese PC: vuelve al
           paso 1.
         </p>
