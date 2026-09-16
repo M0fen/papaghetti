@@ -37,7 +37,8 @@ export default function PlatosCarta({
   abierto: boolean;
   referenciaInicial: string;
   onCerrar: () => void;
-  onPedido: (id: string, total: number) => void;
+  /** El número de comanda y el nombre del plato viajan para la pantalla de espera. */
+  onPedido: (id: string, total: number, extra?: { consecutivo?: number | null; nombre?: string }) => void;
 }) {
   const [sel, setSel] = useState<EnredoInsignia | null>(null);
   const [referencia, setReferencia] = useState(referenciaInicial);
@@ -82,7 +83,7 @@ export default function PlatosCarta({
       setEnviando(false);
       return;
     }
-    onPedido(r.id, r.total);
+    onPedido(r.id, r.total, { consecutivo: r.consecutivo, nombre: sel.nombre });
   };
 
   return (

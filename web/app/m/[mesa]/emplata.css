@@ -809,8 +809,93 @@
   align-self: center;
   white-space: nowrap;
 }
+/* LA COMANDA SOBRE EL PISO de la espera: pegada encima de la barra, ocupa la madera vacía */
+.emp-ticket {
+  position: absolute;
+  bottom: calc(100% + 26px);
+  left: 50%;
+  width: min(250px, calc(100% - 64px));
+  margin: 0;
+  padding: 16px 16px 14px;
+  border-radius: 6px;
+  transform: translateX(-50%) rotate(-1.6deg);
+  box-shadow: 0 10px 24px rgba(40, 22, 8, 0.32), 0 2px 0 rgba(140, 104, 60, 0.2);
+  text-align: center;
+  color: #4a2e14;
+  animation: empTicketLlega 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both 0.35s;
+}
+.emp-ticket__k {
+  margin: 0;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+  color: rgba(74, 46, 20, 0.6);
+}
+.emp-ticket__n {
+  margin: 2px 0 0;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.emp-ticket__ref {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(74, 46, 20, 0.78);
+  overflow-wrap: anywhere;
+}
+.emp-ticket__lineas {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 9px 0 0;
+  border-top: 1.5px dashed rgba(160, 120, 70, 0.38);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(74, 46, 20, 0.82);
+}
+.emp-ticket__lineas li:first-child {
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 800;
+  font-size: 13.5px;
+  color: #4a2e14;
+}
+.emp-ticket__lineas em {
+  font-style: normal;
+  color: rgba(74, 46, 20, 0.5);
+}
+/* el número vive en la comanda; abajo solo si la comanda no cabe */
+.emp-espera__num {
+  display: none;
+}
+@media (max-height: 740px) {
+  .emp-ticket__lineas {
+    display: none;
+  }
+}
+@media (max-height: 620px) {
+  .emp-ticket {
+    display: none;
+  }
+  .emp-espera__num {
+    display: inline;
+  }
+}
+@keyframes empTicketLlega {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(18px) rotate(3deg);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .emp-timeline li.now .emp-timeline__dot {
+    animation: none;
+  }
+  .emp-ticket {
     animation: none;
   }
 }
@@ -857,8 +942,8 @@
   z-index: 40;
   display: grid;
   place-items: end center;
-  background: rgba(24, 16, 8, 0.45);
-  backdrop-filter: blur(3px);
+  /* velo SIN desenfoque: la caja recién armada sigue a la vista mientras se sella */
+  background: linear-gradient(180deg, rgba(24, 16, 8, 0.12) 0%, rgba(24, 16, 8, 0.42) 100%);
   padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
 }
 .emp-datos__panel {
@@ -871,6 +956,164 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* EL PAPEL DEL JUEGO — el mismo de la nota de degustación del lienzo: papel cálido,
+   costura punteada por dentro y una cinta kraft que lo pega. Lo usan la hoja del último
+   paso y la comanda de la espera. */
+.emp-papel {
+  position: relative;
+  background: #f8efdb;
+  border: 1px solid rgba(140, 104, 60, 0.4);
+}
+.emp-papel::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1.5px dashed rgba(160, 120, 70, 0.38);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.emp-papel::after {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 84px;
+  height: 18px;
+  transform: translateX(-50%) rotate(-2deg);
+  background: rgba(205, 164, 106, 0.72);
+  box-shadow: 0 1px 2px rgba(80, 50, 20, 0.15);
+  pointer-events: none;
+}
+
+/* LA HOJA COMO COMANDA: cabecera y pie fijos, lo de en medio se desplaza — así «Sellar
+   mi caja» nunca queda por fuera de la pantalla (teléfono bajo o teclado abierto). */
+.emp-comanda {
+  max-height: calc(100dvh - 32px - env(safe-area-inset-bottom));
+  padding: 18px 18px 12px;
+  gap: 0;
+  box-shadow: 0 -10px 40px rgba(30, 22, 17, 0.3), 0 2px 0 rgba(140, 104, 60, 0.18);
+}
+.emp-comanda__h,
+.emp-comanda__pie {
+  flex-shrink: 0;
+}
+.emp-comanda__h {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px 10px;
+  text-align: center;
+}
+.emp-comanda .emp-datos__k {
+  color: rgba(74, 46, 20, 0.62);
+  letter-spacing: 0.22em;
+}
+.emp-comanda .emp-datos__h {
+  color: #4a2e14;
+  font-size: 21px;
+  line-height: 1.15;
+}
+.emp-comanda__cuerpo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 4px 10px;
+}
+/* lo que lleva la caja, renglón a renglón, con puntos guía como una comanda de verdad */
+.emp-comanda__lineas {
+  list-style: none;
+  margin: 0 0 2px;
+  padding: 0 0 10px;
+  border-bottom: 1.5px dashed rgba(160, 120, 70, 0.38);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.emp-comanda__lineas li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #4a2e14;
+}
+.emp-comanda__lineas li span:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.emp-comanda__lineas li::after {
+  content: "";
+  order: 1;
+  flex: 1 1 12px;
+  border-bottom: 1.5px dotted rgba(140, 104, 60, 0.35);
+  transform: translateY(-3px);
+}
+.emp-comanda__lineas li span:last-child {
+  order: 2;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(74, 46, 20, 0.66);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.emp-comanda__lineas li:first-child span:first-child {
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 15.5px;
+}
+.emp-comanda .emp-datos__campo {
+  color: rgba(74, 46, 20, 0.7);
+}
+.emp-comanda .emp-datos__campo input {
+  background: #fffdf7;
+  border-color: rgba(140, 104, 60, 0.32);
+}
+.emp-comanda .emp-datos__campo input:focus {
+  outline: none;
+  border-color: var(--ambar);
+  box-shadow: 0 0 0 3px rgba(242, 165, 22, 0.22);
+}
+.emp-comanda .emp-datos__tipo {
+  background: #fffdf7;
+  border-color: rgba(140, 104, 60, 0.32);
+}
+.emp-comanda .emp-datos__tipo.is-on {
+  background: var(--ambar);
+  border-color: var(--ambar);
+}
+.emp-comanda__pie {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 4px 0;
+  border-top: 1.5px dashed rgba(160, 120, 70, 0.38);
+}
+.emp-comanda .emp-datos__total {
+  border-top: none;
+  padding-top: 0;
+  color: rgba(74, 46, 20, 0.72);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.emp-comanda .emp-datos__total b {
+  font-size: 24px;
+}
+.emp-comanda .emp-datos__ok {
+  margin-top: 4px;
+}
+.emp-comanda .emp-datos__volver {
+  min-height: 40px;
+  color: rgba(74, 46, 20, 0.62);
+}
+.emp-comanda .emp-cta__sello {
+  color: var(--tomate, #c8321e);
+}
+.emp-comanda .emp-datos__ok:disabled .emp-cta__sello {
+  color: currentColor;
 }
 .emp-datos__k {
   margin: 0;

@@ -110,6 +110,7 @@ export async function enviarPedido(input: NuevoPedido) {
   const fallo = (error: string) => ({
     ok: false,
     id: "",
+    consecutivo: null as number | null,
     total: 0,
     estado: "recibido" as const,
     error,
@@ -129,6 +130,11 @@ export async function enviarPedido(input: NuevoPedido) {
     return {
       ok: true,
       id: pedido.id,
+      /* EL NÚMERO QUE SE DICE EN VOZ ALTA. El cliente veía «COMANDA #C1A06AAA», un código
+         que nadie puede cantar en la barra. El consecutivo es el mismo que imprime el
+         comprobante y el que usa la caja: "el doce". Ya es definitivo aquí, porque
+         `commit` lo fija sobre este mismo objeto dentro del candado. */
+      consecutivo: pedido.consecutivo ?? null,
       total: pedido.total,
       estado: pedido.estado,
       error: null as string | null,

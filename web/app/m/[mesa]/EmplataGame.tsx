@@ -17,7 +17,7 @@
  * El cerebro manda: menú/precios/gratis/impuesto del catálogo. Física y arte son VIEW puro.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   formatCOP,
   estadoLabel,
@@ -121,6 +121,8 @@ const FXENV = 0.42; // soporte de la envolvente: la cúpula no colapsa a la altu
 /* Unidades de DISEÑO de la escena (px a escala 1 = teléfono de 390). Todo lo demás las
    multiplica por `U` (ver geo()), así el mismo dibujo sirve en un móvil y en un portátil.
    MOBILE FIRST: a 390px U vale exactamente 1 → la escena del teléfono no se mueve un píxel. */
+/** La dirección pública que se imprime en la foto compartida. Cambiar aquí al tener dominio propio. */
+const SITIO = "papaghetti.vercel.app";
 const CAJA_BASE = 300; // ancho de la caja a escala 1
 const CARTA_W = 96; // +4 respecto al original: gana texto sin quitar cartas a la vista
 const CARTA_H = 118;
@@ -1108,12 +1110,66 @@ const IcoVolver = () => (
   </svg>
 );
 /** Sello de lacre con swirl de fideo — EMPLATAR = SELLAR la caja (encadena con el cierre origami). */
-const IcoSello = () => (
-  <svg className="emp-cta__sello" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M15 10a3.2 3.2 0 1 0 .4 3.2" />
-  </svg>
-);
+/**
+ * EL SELLO ES LA ROSETA DE LA CAJA. El ícono anterior era un círculo con una «C» dentro y
+ * se leía como el símbolo de copyright (©) justo en los dos botones que cierran el pedido.
+ * Ahora es la misma roseta ondulada con «PG» que el juego estampa sobre la caja al
+ * plegarla: el botón promete exactamente lo que va a pasar. Las letras van RECORTADAS
+ * (máscara), así que toman el color del botón en cualquier estado.
+ */
+const ROSETA_PG = (() => {
+  const pts: string[] = [];
+  for (let k = 0; k < 44; k++) {
+    const a = (k / 44) * Math.PI * 2;
+    const r = 10.4 * (1 + 0.08 * Math.sin(a * 11));
+    pts.push(`${(12 + Math.cos(a) * r).toFixed(2)} ${(12 + Math.sin(a) * r).toFixed(2)}`);
+  }
+  return `M${pts.join("L")}Z`;
+})();
+const IcoSello = () => {
+  const id = `sello${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  return (
+    <svg className="emp-cta__sello" width="22" height="22" viewBox="0 0 24 24" aria-hidden>
+      <defs>
+        <mask id={id}>
+          <rect width="24" height="24" fill="#fff" />
+          <text x="12" y="15.3" textAnchor="middle" fontSize="8.4" fontWeight="800" fontFamily="Georgia, serif" fill="#000">
+            PG
+          </text>
+        </mask>
+      </defs>
+      <path d={ROSETA_PG} fill="currentColor" mask={`url(#${id})`} />
+    </svg>
+  );
+};
+
+/** Lo que la pantalla de espera necesita recordar del pedido ya sellado. */
+type PedidoHecho = {
+  id: string;
+  total: number;
+  /** El número que se dice en voz alta. */
+  consecutivo?: number | null;
+  tipo: TipoServicio;
+  /** A quién o dónde: la seña de la mesa, el nombre de quien recoge o la dirección. */
+  aQuien?: string;
+  lineas: { nombre: string; incluida?: boolean }[];
+};
+
+/**
+ * EL TEXTO DEL ESTADO, SEGÚN CÓMO SE PIDIÓ. Decía «¡Lista! Recógela en la barra» a todo
+ * el mundo: al cliente del QR, a quien la hoja le acababa de preguntar «¿dónde te
+ * encontramos?» para llevársela, y al de domicilio, que está en su casa.
+ */
+function textoEstado(e: EstadoPedido, tipo: TipoServicio): string {
+  if (e === "recibido") return "La cocina ya recibió tu caja";
+  if (e === "cocina") return "La están preparando…";
+  if (e === "listo") {
+    if (tipo === "domicilio") return "¡Lista! Sale para tu dirección";
+    if (tipo === "llevar") return "¡Lista! Recógela en la barra";
+    return "¡Lista! Ya te la llevamos";
+  }
+  return "¡Buen provecho!";
+}
 
 export default function EmplataGame(props: {
   mesa: number;
@@ -1162,7 +1218,7 @@ export default function EmplataGame(props: {
   const [toppingIds, setToppingIds] = useState<string[]>([]);
   const [tab, setTab] = useState<0 | 1 | 2>(0);
   const [enviando, setEnviando] = useState(false);
-  const [pedido, setPedido] = useState<{ id: string; total: number } | null>(null);
+  const [pedido, setPedido] = useState<PedidoHecho | null>(null);
   const [estado, setEstado] = useState<EstadoPedido>("recibido");
   // ------- modo WEB: servicio + contacto (se piden al EMPLATAR, no antes: primero se juega) -------
   const [pidiendoDatos, setPidiendoDatos] = useState(false);
@@ -1197,6 +1253,11 @@ export default function EmplataGame(props: {
 
   // W4: la escena NO se desmonta al pedir. faseRef gobierna el loop; estadoRef lo lee sin re-render.
   const faseRef = useRef<"arma" | "espera">("arma");
+  /* LA FOTO QUE SE COMPARTE sale del lienzo de verdad: la caja ABIERTA con la comida tal
+     como quedó, recortada justo antes de plegarla. Antes se redibujaba aparte con
+     rectángulos y la base —el nido de spaghetti, el protagonista— ni siquiera se veía. */
+  const fotoCajaRef = useRef<(() => HTMLCanvasElement | null) | null>(null);
+  const fotoRef = useRef<HTMLCanvasElement | null>(null);
   const estadoRef = useRef<EstadoPedido>("recibido");
   const estadoAnimRef = useRef<{ last: EstadoPedido; campana: boolean }>({ last: "recibido", campana: false });
   useEffect(() => {
@@ -1226,6 +1287,20 @@ export default function EmplataGame(props: {
   const tops = toppingIds.map(find).filter(Boolean) as Ingrediente[];
   /** Los acompañantes que suman a la cuenta: las salsas valen $0 y quedan fuera. */
   const cobrables = soloCobrables(tops);
+  /** La comanda renglón a renglón, en el orden en que la lee la cocina. */
+  const lineasCaja: { nombre: string; precio: number; incluida?: boolean }[] = [];
+  {
+    const b = find(baseId);
+    if (b) lineasCaja.push({ nombre: b.nombre, precio: b.precio });
+    for (const pid of proteinaIds) {
+      const it = find(pid);
+      if (it) lineasCaja.push({ nombre: it.nombre, precio: it.precio });
+    }
+    for (const t of tops) {
+      const salsa = t.categoria === "salsa";
+      lineasCaja.push({ nombre: t.nombre, precio: salsa ? 0 : t.precio, incluida: salsa });
+    }
+  }
   /* El espejo de la selección que lee el canvas. Va DESPUÉS de `tops` porque
      necesita los ingredientes ya resueltos. */
   useEffect(() => {
@@ -1247,6 +1322,9 @@ export default function EmplataGame(props: {
   // La barra de abajo muestra LA COMIDA. El envío aparece en la hoja final, cuando el
   // cliente ya eligió domicilio: cobrarlo antes de que lo pida se lee como sorpresa.
   const totalComida = subtotal + impuesto;
+  /* Los precios por renglón solo se pintan si suman lo que se cobra: un plato de carta
+     sin tocar va a precio cerrado, y ahí la suma de piezas mentiría. */
+  const preciosCuadran = lineasCaja.reduce((a, l) => a + l.precio, 0) === subtotal;
   // Precio de entrada de la carta. Guarda obligatoria: Math.min() sin argumentos es
   // Infinity y formatCOP imprimiría "$∞" (estado alcanzable si todo está agotado).
   const basesDispo = bases.filter((b) => !b.agotado);
@@ -1540,6 +1618,15 @@ export default function EmplataGame(props: {
     setPidiendoDatos(false);
     setEnviando(true);
     if (!idemRef.current) idemRef.current = nuevaClave();
+    // La foto para compartir: la caja ABIERTA, un instante antes de plegarla. El globo del
+    // chef se calla dos cuadros para que no tape la comida en la foto.
+    try {
+      world.current.bocadoTxt = "";
+      await new Promise<void>((res) => requestAnimationFrame(() => requestAnimationFrame(() => res())));
+      fotoRef.current = fotoCajaRef.current?.() ?? null;
+    } catch {
+      fotoRef.current = null;
+    }
     world.current.folding = true;
     s.confirmar();
     if (navigator.vibrate) navigator.vibrate([18, 40, 24]);
@@ -1577,7 +1664,22 @@ export default function EmplataGame(props: {
         setEnviando(false);
         return;
       }
-      setPedido({ id: r.id, total: r.total });
+      const tipoHecho: TipoServicio = esWeb ? tipoSel : "mesa";
+      setPedido({
+        id: r.id,
+        total: r.total,
+        consecutivo: r.consecutivo,
+        tipo: tipoHecho,
+        aQuien:
+          tipoHecho === "mesa"
+            ? referencia.trim() || undefined
+            : tipoHecho === "domicilio"
+              ? direccion.trim() || undefined
+              : cliente.trim()
+                ? `A nombre de ${cliente.trim()}`
+                : undefined,
+        lineas: lineasCaja.map(({ nombre, incluida }) => ({ nombre, incluida })),
+      });
       setEstado(r.estado as EstadoPedido);
       estadoRef.current = r.estado as EstadoPedido;
       estadoAnimRef.current = { last: r.estado as EstadoPedido, campana: false };
@@ -1590,7 +1692,7 @@ export default function EmplataGame(props: {
       setPidiendoDatos(true);
     }
     setEnviando(false);
-  }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, referencia, cliente, telefono, direccion, notas, enredoIntacto, mesa, s]);
+  }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, referencia, cliente, telefono, direccion, notas, enredoIntacto, mesa, s, lineasCaja]);
 
   /**
    * PRIMER SERVICIO. Dos casos, un mismo gesto: el fideo trae la comida a la caja.
@@ -1694,6 +1796,26 @@ export default function EmplataGame(props: {
       const tarimaX = boxX + boxW * (ancho ? 0.58 : 0.5) + (ancho ? 0 : 8);
       const tarimaY = baseY + boxH * (ancho ? 0.18 : 0.3);
       return { U, boxW, boxH, boxX, boxY, baseY, woodY, trayY, cardY, cardW, cardH, tarimaX, tarimaY };
+    };
+
+    fotoCajaRef.current = () => {
+      const cv = canvasRef.current;
+      if (!cv || !W || !H) return null;
+      const { boxW, boxH, boxX, boxY } = geo();
+      const k = cv.width / W; // el lienzo va a la densidad del aparato
+      // ceñido a la caja: solapas arriba, banda PAPAGHETTI abajo; sin pared ni nota
+      const baseY = boxY + boxH * 0.39;
+      const x0 = Math.max(0, boxX - boxW * 0.66);
+      const x1 = Math.min(W, boxX + boxW * 0.66);
+      const y0 = Math.max(0, boxY - boxH * 0.72);
+      const y1 = Math.min(H, baseY + boxH * 0.015);
+      const out = document.createElement("canvas");
+      out.width = Math.max(1, Math.round((x1 - x0) * k));
+      out.height = Math.max(1, Math.round((y1 - y0) * k));
+      const g = out.getContext("2d");
+      if (!g) return null;
+      g.drawImage(cv, x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k, 0, 0, out.width, out.height);
+      return out;
     };
 
     /**
@@ -6136,6 +6258,7 @@ export default function EmplataGame(props: {
        reintento y devolvía el pedido viejo. El cliente veía una confirmación falsa y
        la cocina no recibía nada. */
     idemRef.current = "";
+    fotoRef.current = null;
     const wd = world.current;
     wd.pila = [];
     wd.fideos = [];
@@ -6164,8 +6287,19 @@ export default function EmplataGame(props: {
   }, []);
 
   const ordenIdx = (["recibido", "cocina", "listo", "entregado"] as EstadoPedido[]).indexOf(estado);
+  /* «N° 12», no «#C1A06AAA»: el código del pedido no se puede cantar en la barra. */
+  const numero = pedido ? (pedido.consecutivo ? `N° ${pedido.consecutivo}` : `#${pedido.id.slice(0, 4)}`) : "";
 
-  // W5: compone una FOTO vertical 1080×1920 del emplatado y la comparte (WhatsApp/Stories).
+  /**
+   * LA FOTO PARA COMPARTIR (1080×1920, formato historia).
+   *
+   * Antes redibujaba la caja con rectángulos planos y ponía «MESA 0», el total y un
+   * código de pedido ilegible: una versión peor de lo que el cliente acababa de ver, con
+   * datos que a quien la recibe no le dicen nada. Ahora el héroe es el recorte REAL del
+   * lienzo —la caja abierta con su comida, el fideo y la luz de la escena— sobre papel
+   * cálido, con lo que lleva y una invitación a armar la suya. Sin precio ni número: es
+   * una foto para antojar, no un comprobante.
+   */
   const [compartiendo, setCompartiendo] = useState(false);
   const compartirCaja = useCallback(async () => {
     if (!pedido) return;
@@ -6175,15 +6309,13 @@ export default function EmplataGame(props: {
       cv.width = 1080;
       cv.height = 1920;
       const g = cv.getContext("2d")!;
-      // fondo cálido + pool de luz ↖
       g.fillStyle = "#F6E7CB";
       g.fillRect(0, 0, 1080, 1920);
-      const luz = g.createRadialGradient(360, 240, 40, 480, 640, 1500);
-      luz.addColorStop(0, "rgba(255,247,224,0.9)");
-      luz.addColorStop(1, "rgba(120,80,40,0.14)");
+      const luz = g.createRadialGradient(330, 260, 40, 480, 700, 1600);
+      luz.addColorStop(0, "rgba(255,248,228,0.95)");
+      luz.addColorStop(1, "rgba(120,80,40,0.16)");
       g.fillStyle = luz;
       g.fillRect(0, 0, 1080, 1920);
-      // grano
       const gc = document.createElement("canvas");
       gc.width = 80;
       gc.height = 80;
@@ -6200,136 +6332,143 @@ export default function EmplataGame(props: {
         g.fillStyle = pat;
         g.fillRect(0, 0, 1080, 1920);
       }
-      // título
-      g.textAlign = "center";
-      g.fillStyle = "#1E1611";
-      g.font = `800 60px ${FONT_DISPLAY}`;
-      g.fillText("MI CAJA PAPAGHETTI", 540, 200);
-      g.font = `700 34px ${FONT_BODY}`;
-      g.fillStyle = "rgba(30,22,17,0.55)";
-      g.fillText(`MESA ${mesa}`, 540, 250);
 
-      // caja kraft con la comida (vista 3/4, grande)
-      const cx = 540;
-      const cyb = 760;
-      const bw = 720;
-      const bh = 520;
-      g.save();
-      g.translate(cx, cyb);
-      // sombra
-      g.fillStyle = "rgba(70,40,16,0.25)";
-      g.beginPath();
-      g.ellipse(10, bh * 0.5, bw * 0.5, bh * 0.11, 0, 0, TAU);
-      g.fill();
-      // pared trasera interior
-      const back = g.createLinearGradient(0, -bh * 0.42, 0, bh * 0.1);
-      back.addColorStop(0, "#8A6230");
-      back.addColorStop(1, "#6B4A20");
-      g.fillStyle = back;
-      g.beginPath();
-      g.roundRect(-bw * 0.42, -bh * 0.42, bw * 0.84, bh * 0.5, 16);
-      g.fill();
-      // suelo
-      const fl = g.createLinearGradient(-bw * 0.3, -bh * 0.1, bw * 0.3, bh * 0.05);
-      fl.addColorStop(0, "#A6793C");
-      fl.addColorStop(1, "#6A4620");
-      g.fillStyle = fl;
-      g.beginPath();
-      g.ellipse(0, 0, bw * 0.4, bh * 0.15, 0, 0, TAU);
-      g.fill();
-      // comida: base ancha + resto
-      const drawSpr = (id: string, x: number, y: number, sc: number) => {
-        const sp = world.current.sprites.get(id);
-        if (sp) g.drawImage(sp, x - sc / 2, y - sc / 2, sc, sc);
+      /* La roseta PG: la misma que se estampa sobre la caja. */
+      const roseta = (x: number, y: number, r: number) => {
+        g.save();
+        g.translate(x, y);
+        g.fillStyle = "#C8321E";
+        g.beginPath();
+        for (let k = 0; k <= 44; k++) {
+          const a = (k / 44) * TAU;
+          const rr = r * (1 + 0.08 * Math.sin(a * 11));
+          if (k === 0) g.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+          else g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+        }
+        g.closePath();
+        g.fill();
+        g.fillStyle = "#FBE7DD";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.font = `800 ${Math.round(r * 0.74)}px ${FONT_DISPLAY}`;
+        g.fillText("PG", 0, r * 0.06);
+        g.restore();
       };
-      if (baseId) drawSpr(baseId, 0, -bh * 0.02, 360);
-      proteinaIds.forEach((id, i) => drawSpr(id, bw * 0.02 + (i - (proteinaIds.length - 1) / 2) * bw * 0.2, bh * 0.02, 300));
-      const tl = toppingIds.map(find).filter(Boolean) as Ingrediente[];
-      const FAN = [-0.5, 0.5, 0, -0.85, 0.85, -0.25, 0.25];
-      tl.forEach((t, k) => drawSpr(t.id, FAN[k % 7] * bw * 0.28, -bh * 0.14 - (k % 3) * bh * 0.06, 210));
-      // banda frontal kraft
-      const kg = g.createLinearGradient(-bw / 2, 0, bw / 2, bh * 0.3);
-      kg.addColorStop(0, "#D2A868");
-      kg.addColorStop(1, "#A87B42");
-      g.fillStyle = kg;
-      g.beginPath();
-      g.roundRect(-bw / 2, bh * 0.06, bw, bh * 0.34, 16);
-      g.fill();
-      g.fillStyle = "rgba(90,58,24,0.9)";
-      g.font = `800 30px ${FONT_DISPLAY}`;
-      g.fillText("P A P A G H E T T I", 0, bh * 0.25);
-      // sello PG
-      g.translate(bw * 0.3, -bh * 0.28);
-      g.fillStyle = "#C8321E";
-      g.beginPath();
-      for (let k = 0; k <= 44; k++) {
-        const a = (k / 44) * TAU;
-        const rr = 46 * (1 + 0.08 * Math.sin(a * 11));
-        const px = Math.cos(a) * rr;
-        const py = Math.sin(a) * rr;
-        if (k === 0) g.moveTo(px, py);
-        else g.lineTo(px, py);
-      }
-      g.closePath();
-      g.fill();
-      g.fillStyle = "#FBE7DD";
-      g.font = `800 34px ${FONT_DISPLAY}`;
-      g.fillText("PG", 0, 12);
-      g.restore();
 
-      // lista de ingredientes
+      // cabecera: el sello y el wordmark espaciado de la banda de la caja
+      roseta(540, 170, 50);
       g.textAlign = "center";
+      g.textBaseline = "alphabetic";
+      g.fillStyle = "rgba(74,46,20,0.78)";
+      g.font = `800 30px ${FONT_DISPLAY}`;
+      g.fillText("P A P A G H E T T I", 540, 276);
+
+      const unPlato = pedido.lineas.length === 1 && !fotoRef.current;
+      const titulo = unPlato ? pedido.lineas[0].nombre : "Así armé mi enredo";
       g.fillStyle = "#1E1611";
-      g.font = `800 40px ${FONT_DISPLAY}`;
-      const nombreBase = find(baseId)?.nombre ?? "";
-      g.fillText(nombreBase.toUpperCase(), 540, 1160);
-      g.font = `600 32px ${FONT_BODY}`;
-      g.fillStyle = "rgba(30,22,17,0.7)";
-      const extras = [...proteinaIds.map((id) => find(id)?.nombre), ...tl.map((t) => t.nombre)].filter(Boolean) as string[];
-      let ly = 1220;
-      for (const ex of extras.slice(0, 6)) {
-        g.fillText(`+ ${ex}`, 540, ly);
-        ly += 46;
+      let tam = 78;
+      g.font = `800 ${tam}px ${FONT_DISPLAY}`;
+      while (g.measureText(titulo).width > 940 && tam > 44) {
+        tam -= 4;
+        g.font = `800 ${tam}px ${FONT_DISPLAY}`;
       }
-      // total + id
-      g.fillStyle = "#1E1611";
-      g.font = `800 56px ${FONT_DISPLAY}`;
-      g.fillText(formatCOP(pedido.total), 540, 1560);
-      g.fillStyle = "rgba(30,22,17,0.45)";
-      g.font = `600 28px ${FONT_BODY}`;
-      g.fillText(`Pedido #${pedido.id}`, 540, 1610);
-      // footer marca
-      g.fillStyle = "var(--ambar)";
+      g.fillText(titulo, 540, 390);
+
+      // el héroe: la caja de verdad, montada como una foto sobre papel. El bloque foto +
+      // lista se centra entre el título y la invitación, sin un hueco muerto encima de ella.
+      const [primera, ...resto] = pedido.lineas;
+      const foto = fotoRef.current;
+      const w = 960;
+      const h = foto ? Math.min(980, Math.round((w * foto.height) / foto.width)) : 0;
+      const alto =
+        (foto ? h + 110 : 720) + (primera && !unPlato ? 62 + 48 * Math.min(resto.length + (resto.length > 5 ? 1 : 0), 6) : 0);
+      let y = Math.max(470, Math.round(440 + (1700 - 440 - alto) / 2));
+      if (foto) {
+        const x = (1080 - w) / 2;
+        g.save();
+        g.shadowColor = "rgba(60,34,12,0.34)";
+        g.shadowBlur = 50;
+        g.shadowOffsetY = 22;
+        g.fillStyle = "#F8EFDB";
+        g.beginPath();
+        g.roundRect(x - 18, y - 18, w + 36, h + 36, 34);
+        g.fill();
+        g.restore();
+        g.save();
+        g.beginPath();
+        g.roundRect(x, y, w, h, 22);
+        g.clip();
+        g.drawImage(foto, x, y, w, h);
+        g.restore();
+        // costura punteada del papel, como la nota de degustación del juego
+        g.save();
+        g.setLineDash([12, 10]);
+        g.strokeStyle = "rgba(160,120,70,0.45)";
+        g.lineWidth = 2;
+        g.beginPath();
+        g.roundRect(x - 9, y - 9, w + 18, h + 18, 28);
+        g.stroke();
+        g.restore();
+        // cinta kraft que la pega
+        g.save();
+        g.translate(540, y - 20);
+        g.rotate(0.04);
+        g.fillStyle = "rgba(205,164,106,0.8)";
+        g.fillRect(-90, -20, 180, 40);
+        g.restore();
+        y += h + 110;
+      } else {
+        roseta(540, y + 300, 190);
+        y += 720;
+      }
+
+      // lo que lleva
+      if (primera && !unPlato) {
+        g.fillStyle = "#1E1611";
+        g.font = `800 46px ${FONT_DISPLAY}`;
+        g.fillText(primera.nombre.toUpperCase(), 540, y);
+        y += 62;
+        g.font = `600 34px ${FONT_BODY}`;
+        g.fillStyle = "rgba(74,46,20,0.78)";
+        for (const l of resto.slice(0, 5)) {
+          g.fillText(`+ ${l.nombre}`, 540, y);
+          y += 48;
+        }
+        if (resto.length > 5) {
+          g.fillText(`y ${resto.length - 5} más`, 540, y);
+        }
+      }
+
+      // la invitación
       g.fillStyle = "#F2A516";
       g.beginPath();
-      g.roundRect(540 - 260, 1720, 520, 76, 38);
+      g.roundRect(540 - 330, 1742, 660, 92, 46);
       g.fill();
       g.fillStyle = "#1E1611";
       g.font = `800 34px ${FONT_DISPLAY}`;
-      g.fillText("papaghetti.vercel.app", 540, 1770);
+      g.fillText(`Arma el tuyo · ${SITIO}`, 540, 1800);
 
       const blob: Blob | null = await new Promise((res) => cv.toBlob(res, "image/png"));
       if (!blob) return;
-      const file = new File([blob], "mi-caja-papaghetti.png", { type: "image/png" });
+      const file = new File([blob], "mi-enredo-papaghetti.png", { type: "image/png" });
       const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean };
       if (nav.canShare?.({ files: [file] }) && navigator.share) {
-        await navigator.share({ files: [file], title: "Mi caja Papaghetti", text: "Armé mi caja en Papaghetti" });
+        await navigator.share({ files: [file], title: "Mi enredo Papaghetti", text: "Así armé mi enredo en Papaghetti" });
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "mi-caja-papaghetti.png";
+        a.download = "mi-enredo-papaghetti.png";
         a.click();
         URL.revokeObjectURL(url);
-        window.open("https://wa.me/?text=" + encodeURIComponent("Armé mi caja en Papaghetti — papaghetti.vercel.app"), "_blank");
+        window.open("https://wa.me/?text=" + encodeURIComponent(`Así armé mi enredo en Papaghetti — ${SITIO}`), "_blank");
       }
     } catch {
       /* usuario canceló el share o no soportado */
     } finally {
       setCompartiendo(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pedido, mesa, baseId, proteinaIds, toppingIds]);
+  }, [pedido]);
 
   /* Un solo árbol DOM: el canvas NUNCA se desmonta (arma → teatro de espera). La barra
      inferior cambia; un aria-live anuncia el estado para lectores de pantalla. */
@@ -6440,18 +6579,32 @@ export default function EmplataGame(props: {
         </footer>
       ) : (
         <footer className="emp-bar emp-bar--game emp-bar--espera">
+          {/* LA COMANDA SOBRE EL PISO. Tras sellar, la bandeja se iba y dejaba casi media
+              pantalla de madera vacía — justo la pantalla que el cliente mira diez minutos.
+              Ahí va ahora el papel de su comanda: el número que se dice en la barra, dónde
+              o a nombre de quién, y lo que pidió, con la costura y la cinta de la nota de
+              degustación del juego. Vive pegado encima de la barra, así que no depende de
+              la altura del teléfono; en pantallas bajas se esconde y el número pasa abajo. */}
+          <aside className="emp-ticket emp-papel" aria-label={`Comanda ${numero}`}>
+            <p className="emp-ticket__k">TU COMANDA</p>
+            <p className="emp-ticket__n">{numero}</p>
+            {pedido.aQuien && <p className="emp-ticket__ref">{pedido.aQuien}</p>}
+            {pedido.lineas.length > 0 && (
+              <ul className="emp-ticket__lineas">
+                {pedido.lineas.slice(0, 5).map((l, i) => (
+                  <li key={`${l.nombre}-${i}`}>
+                    {l.nombre}
+                    {l.incluida ? <em> · incluida</em> : null}
+                  </li>
+                ))}
+                {pedido.lineas.length > 5 && <li>y {pedido.lineas.length - 5} más</li>}
+              </ul>
+            )}
+          </aside>
           <div className="emp-wstate">
             <div className="emp-wstate__hero">
               <b className="emp-wstate__now">{estadoLabel[estado]}</b>
-              <span className="emp-wstate__sub">
-                {estado === "recibido"
-                  ? "La cocina ya recibió tu caja"
-                  : estado === "cocina"
-                    ? "La están preparando…"
-                    : estado === "listo"
-                      ? "¡Lista! Recógela en la barra"
-                      : "¡Buen provecho!"}
-              </span>
+              <span className="emp-wstate__sub">{textoEstado(estado, pedido.tipo)}</span>
             </div>
             <ol className="emp-timeline" aria-label={`Estado del pedido: ${estadoLabel[estado]}`}>
               {(["recibido", "cocina", "listo"] as EstadoPedido[]).map((e, k) => (
@@ -6464,14 +6617,17 @@ export default function EmplataGame(props: {
           </div>
           <div className="emp-espera__foot">
             <span className="emp-espera__id">
-              <span className="emp-espera__k">COMANDA</span> <b>#{pedido.id}</b> · {formatCOP(pedido.total)}
+              <span className="emp-espera__num">
+                <b>{numero}</b> ·{" "}
+              </span>
+              <span className="emp-espera__k">TOTAL</span> <b>{formatCOP(pedido.total)}</b>
             </span>
             <div className="emp-espera__acciones">
               <button type="button" className="emp-cta emp-cta--otra" onClick={compartirCaja} disabled={compartiendo}>
                 {compartiendo ? "…" : (<><IcoCompartir /> Compartir</>)}
               </button>
               <button type="button" className="emp-cta emp-cta--sec emp-cta--otra" onClick={otraCaja}>
-                Otra
+                Pedir otra
               </button>
             </div>
           </div>
@@ -6498,9 +6654,16 @@ export default function EmplataGame(props: {
           abierto={abierto}
           referenciaInicial={referencia}
           onCerrar={() => setVerCarta(false)}
-          onPedido={(id, total) => {
+          onPedido={(id, total, extra) => {
             setVerCarta(false);
-            setPedido({ id, total });
+            fotoRef.current = null; // la caja del lienzo no es este plato
+            setPedido({
+              id,
+              total,
+              consecutivo: extra?.consecutivo,
+              tipo: "mesa",
+              lineas: extra?.nombre ? [{ nombre: extra.nombre }] : [],
+            });
             setEstado("recibido");
             estadoRef.current = "recibido";
             faseRef.current = "espera";
@@ -6508,121 +6671,150 @@ export default function EmplataGame(props: {
         />
       )}
 
-      {/* MODO WEB — último paso: servicio + contacto. Se pide DESPUÉS de jugar (primero la diversión),
-          y se manda por el mismo flujo existente (enviarPedido, canal "web"). */}
+      {/* EL ÚLTIMO PASO ES LA COMANDA. Antes era un formulario de app cualquiera —campos
+          blancos sobre un panel liso, con la caja borrosa detrás— justo en el momento de
+          cerrar lo que el cliente acaba de armar. Ahora es el papel del juego (costura
+          punteada y cinta kraft, como la nota de degustación), trae lo que lleva la caja
+          renglón a renglón, y el velo ya no desenfoca: la caja sigue a la vista.
+          Se pide DESPUÉS de jugar (primero la diversión) y sale por el flujo de siempre. */}
       {pidiendoDatos && (
-        <div className="emp-datos" role="dialog" aria-modal="true" aria-label="Servicio y contacto">
-          <div className="emp-datos__panel">
-            <p className="emp-datos__k">ÚLTIMO PASO</p>
-            <h3 className="emp-datos__h">
-              {esWeb ? "¿Cómo quieres tu enredo?" : "¿Dónde te encontramos?"}
-            </h3>
-            {/* El selector de servicio solo tiene sentido en la web. Quien escanea el
-                QR está SENTADO: ofrecerle "domicilio" es ruido y abre la puerta a un
-                pedido sin dirección. */}
-            {esWeb && (
-              <div className="emp-datos__tipos" role="group" aria-label="Tipo de servicio">
-                {TIPOS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    className={`emp-datos__tipo ${tipoSel === t ? "is-on" : ""}`}
-                    aria-pressed={tipoSel === t}
-                    onClick={() => setTipoSel(t)}
-                  >
-                    {tipoLabel[t]}
-                  </button>
-                ))}
-              </div>
-            )}
-            {tipoSel === "mesa" ? (
-              /* Aquí no se asignan mesas: lo que hace falta es saber a quién llevarle
-                 el plato. Un número era una ficción que nadie repartía. */
+        <div className="emp-datos" role="dialog" aria-modal="true" aria-labelledby="emp-datos-titulo">
+          <div className="emp-datos__panel emp-comanda emp-papel">
+            <header className="emp-comanda__h">
+              <p className="emp-datos__k">TU COMANDA</p>
+              <h3 className="emp-datos__h" id="emp-datos-titulo">
+                {esWeb ? "¿Cómo quieres tu enredo?" : "¿Dónde te encontramos?"}
+              </h3>
+            </header>
+
+            {/* Lo de en medio se desplaza; el total y el botón no. En un teléfono bajo, o
+                con el teclado abierto, la hoja de domicilio medía más que la pantalla y
+                «Sellar mi caja» quedaba fuera sin forma de llegar a él. */}
+            <div className="emp-comanda__cuerpo">
+              {lineasCaja.length > 0 && (
+                <ul className="emp-comanda__lineas" aria-label="Lo que lleva tu caja">
+                  {lineasCaja.map((l, i) => (
+                    <li key={`${l.nombre}-${i}`}>
+                      <span>{l.nombre}</span>
+                      <span>{l.incluida ? "incluida" : preciosCuadran ? formatCOP(l.precio) : ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* El selector de servicio solo tiene sentido en la web. Quien escanea el QR
+                  está SENTADO: ofrecerle "domicilio" es ruido y abre la puerta a un pedido
+                  sin dirección. */}
+              {esWeb && (
+                <div className="emp-datos__tipos" role="group" aria-label="Tipo de servicio">
+                  {TIPOS.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`emp-datos__tipo ${tipoSel === t ? "is-on" : ""}`}
+                      aria-pressed={tipoSel === t}
+                      onClick={() => setTipoSel(t)}
+                    >
+                      {tipoLabel[t]}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {tipoSel === "mesa" ? (
+                /* Aquí no se asignan mesas: lo que hace falta es saber a quién llevarle el
+                   plato. La etiqueta ya no repite el título de la hoja palabra por palabra. */
+                <label className="emp-datos__campo">
+                  <span>{esWeb ? "¿Dónde te encontramos?" : "Mesa o una seña para encontrarte"}</span>
+                  <input
+                    type="text"
+                    value={referencia}
+                    maxLength={60}
+                    onChange={(e) => setReferencia(e.target.value)}
+                    placeholder="Mesa del ventanal, barra, camisa azul…"
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="emp-datos__campo">
+                    <span>Tu nombre</span>
+                    <input type="text" value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="¿A nombre de quién?" />
+                  </label>
+                  {tipoSel === "domicilio" && (
+                    <>
+                      <label className="emp-datos__campo">
+                        <span>WhatsApp / teléfono</span>
+                        <input
+                          type="tel"
+                          inputMode="numeric"
+                          value={telefono}
+                          onChange={(e) => setTelefono(e.target.value)}
+                          placeholder="Para confirmar el domicilio"
+                        />
+                      </label>
+                      {/* Sin dirección el domiciliario sale a ciegas con el plato en la mano. */}
+                      <label className="emp-datos__campo">
+                        <span>Dirección</span>
+                        <input
+                          type="text"
+                          value={direccion}
+                          onChange={(e) => setDireccion(e.target.value)}
+                          placeholder="Calle, barrio y punto de referencia"
+                        />
+                      </label>
+                    </>
+                  )}
+                </>
+              )}
+              {/* La cocina necesita saber "sin cebolla" — y sobre todo las alergias. */}
               <label className="emp-datos__campo">
-                <span>¿Dónde te encontramos?</span>
+                <span>Algo que debamos saber</span>
                 <input
                   type="text"
-                  value={referencia}
-                  maxLength={60}
-                  onChange={(e) => setReferencia(e.target.value)}
-                  placeholder="Mesa del ventanal, barra, camisa azul…"
+                  value={notas}
+                  maxLength={140}
+                  onChange={(e) => setNotas(e.target.value)}
+                  placeholder="Sin cebolla, alergias… (opcional)"
                 />
               </label>
-            ) : (
-              <>
-                <label className="emp-datos__campo">
-                  <span>Tu nombre</span>
-                  <input type="text" value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="¿A nombre de quién?" />
-                </label>
-                {tipoSel === "domicilio" && (
-                  <>
-                    <label className="emp-datos__campo">
-                      <span>WhatsApp / teléfono</span>
-                      <input
-                        type="tel"
-                        inputMode="numeric"
-                        value={telefono}
-                        onChange={(e) => setTelefono(e.target.value)}
-                        placeholder="Para confirmar el domicilio"
-                      />
-                    </label>
-                    {/* Sin dirección el domiciliario sale a ciegas con el plato en la mano. */}
-                    <label className="emp-datos__campo">
-                      <span>Dirección</span>
-                      <input
-                        type="text"
-                        value={direccion}
-                        onChange={(e) => setDireccion(e.target.value)}
-                        placeholder="Calle, barrio y punto de referencia"
-                      />
-                    </label>
-                  </>
-                )}
-              </>
-            )}
-            {/* La cocina necesita saber "sin cebolla" — y sobre todo las alergias. */}
-            <label className="emp-datos__campo">
-              <span>Algo que debamos saber</span>
-              <input
-                type="text"
-                value={notas}
-                maxLength={140}
-                onChange={(e) => setNotas(e.target.value)}
-                placeholder="Sin cebolla, alergias… (opcional)"
-              />
-            </label>
-            <div className="emp-datos__linea">
-              <span>Tu caja</span>
-              <span>{formatCOP(totalComida)}</span>
+              {faltaMin > 0 && (
+                <p className="emp-datos__alerta">
+                  Mínimo a domicilio {formatCOP(props.pedidoMinimo ?? 0)} · te faltan{" "}
+                  <b>{formatCOP(faltaMin)}</b>
+                </p>
+              )}
+              {errorEnvio && <p className="emp-datos__alerta">{errorEnvio}</p>}
             </div>
-            {domicilio > 0 && (
-              <div className="emp-datos__linea">
-                <span>Domicilio</span>
-                <span>{formatCOP(domicilio)}</span>
+
+            <footer className="emp-comanda__pie">
+              {impuesto > 0 && (
+                <div className="emp-datos__linea">
+                  <span>Impuesto ({impuestoPct}%)</span>
+                  <span>{formatCOP(impuesto)}</span>
+                </div>
+              )}
+              {domicilio > 0 && (
+                <div className="emp-datos__linea">
+                  <span>Domicilio</span>
+                  <span>{formatCOP(domicilio)}</span>
+                </div>
+              )}
+              <div className="emp-datos__total">
+                <span>Total</span>
+                <b>{formatCOP(total)}</b>
               </div>
-            )}
-            <div className="emp-datos__total">
-              <span>Total</span>
-              <b>{formatCOP(total)}</b>
-            </div>
-            {faltaMin > 0 && (
-              <p className="emp-datos__alerta">
-                Mínimo a domicilio {formatCOP(props.pedidoMinimo ?? 0)} · te faltan{" "}
-                <b>{formatCOP(faltaMin)}</b>
-              </p>
-            )}
-            {errorEnvio && <p className="emp-datos__alerta">{errorEnvio}</p>}
-            <button
-              type="button"
-              className="emp-cta emp-datos__ok"
-              onClick={() => void enviarAhora()}
-              disabled={enviando || faltaMin > 0}
-            >
-              {enviando ? "SELLANDO…" : (<><IcoSello /> SELLAR MI CAJA</>)}
-            </button>
-            <button type="button" className="emp-datos__volver" onClick={() => setPidiendoDatos(false)}>
-              Volver a enredar
-            </button>
+              <button
+                type="button"
+                className="emp-cta emp-datos__ok"
+                onClick={() => void enviarAhora()}
+                disabled={enviando || faltaMin > 0}
+              >
+                {enviando ? "SELLANDO…" : (<><IcoSello /> SELLAR MI CAJA</>)}
+              </button>
+              <button type="button" className="emp-datos__volver" onClick={() => setPidiendoDatos(false)}>
+                Volver a enredar
+              </button>
+            </footer>
           </div>
         </div>
       )}
