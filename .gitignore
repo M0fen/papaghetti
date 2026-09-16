@@ -50,6 +50,7 @@ web/qa-*.mjs
 !web/qa-despensa.mjs
 !web/qa-comprobantes.mjs
 !web/qa-escpos.mjs
+!web/qa-kit.mjs
 !web/qa-fusion.mjs
 !web/qa-archivo.mjs
 !web/qa-persistencia.mjs

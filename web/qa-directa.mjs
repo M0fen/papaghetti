@@ -149,7 +149,7 @@ check("está en el menú lateral", (await p.locator('.adminx__nav a[href="/admin
 await p.goto(`${B}/admin/impresora`, { waitUntil: "networkidle" });
 await p.waitForTimeout(600);
 const pasos = await p.locator(".impresora__paso h2").allInnerTexts();
-check("el aparato primero y luego los cuatro pasos: TP586 → Windows → Chrome → COM/Bluetooth → sin diálogo", pasos.length === 5 && /TP586/.test(pasos[0]) && /Windows/.test(pasos[1]) && /Chrome/.test(pasos[2]) && /COM/.test(pasos[3]) && /no pregunte/.test(pasos[4]), pasos.join(" | "));
+check("el aparato primero y luego los cuatro pasos: TP586 → Windows → Chrome → COM/Bluetooth → sin diálogo", pasos.filter((x) => /^\d · /.test(x)).length === 5 && /TP586/.test(pasos[0]) && pasos.some((x) => /^1 · .*Windows/.test(x)) && pasos.some((x) => /^2 · .*Chrome/.test(x)) && pasos.some((x) => /^3 · .*COM/.test(x)) && pasos.some((x) => /^4 · .*no pregunte/.test(x)) && pasos.some((x) => /kit/.test(x)), pasos.join(" | "));
 const todo = await p.locator(".impresora").innerText();
 check("dice qué hacer si la página de prueba de Windows no sale", /no sale/.test(await p.locator(".impresora__clave").innerText()));
 check("nombra la cola en pausa / sin conexión y el servicio de impresión", /Pausar impresión/.test(todo) && /Administrador de trabajos de impresión/.test(todo));

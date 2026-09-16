@@ -77,34 +77,95 @@ export default function PruebaImpresora() {
           arriba solo si conectas otra impresora).
         </p>
         <p>
-          <b>¿Qué versión es?</b> Mira atrás: la TP586 se vende <b>solo USB</b>,{" "}
-          <b>USB + Bluetooth</b> o <b>USB + red (LAN)</b>.
-        </p>
-        <ul className="impresora__lista">
-          <li>
-            <b>Solo USB</b> → pasos 1, 2 y 4. Windows la ve como impresora, no como puerto COM,
-            así que el paso 3 no aplica.
-          </li>
-          <li>
-            <b>USB + Bluetooth</b> → además, el paso 3 sin driver: empareja en Windows con PIN{" "}
-            <b>0000</b> o <b>1234</b>.
-          </li>
-          <li>
-            <b>USB + LAN</b> → el navegador no puede hablarle por red directo: por cable USB con
-            los pasos 1 y 2, o instálala en Windows como impresora de red (TCP/IP, puerto 9100).
-          </li>
-        </ul>
-        <p>
-          <b>Autotest:</b> impresora apagada, mantén el botón <b>FEED</b> y enciéndela. En este
-          tipo de térmicas el papel dice la interfaz, los baudios y —si trae Bluetooth— su
-          nombre y PIN. Tenlo a mano para el paso 3.
+          <b>La del local es solo USB.</b> Por USB Windows la maneja como impresora (no como
+          puerto COM), así que el camino es uno: <b>driver instalado → Chrome imprime en
+          ella</b>. El paso 3 de abajo (puerto COM / Bluetooth) no aplica a esta versión.
         </p>
         <p>
-          <b>Driver:</b> el genérico <b>POS-58</b> (el que trae el CD o da el vendedor; el{" "}
-          &quot;POS58 Printer Driver&quot; de Xprinter también sirve). Al instalar elige el modelo
-          POS-58 y el puerto <b>USB001</b> (o el que aparezca). El corte es <b>manual</b>: se rasga
-          contra la sierra; el tiquete deja unos milímetros de más para eso.
+          <b>Driver:</b> el genérico <b>POS-58</b>: primero el CD o el archivo del vendedor; si
+          no hay, el de 58&nbsp;mm de{" "}
+          <a href="https://pos-star.com/drivers-impresoras-termicas-2/" target="_blank" rel="noopener noreferrer">
+            POS-STAR
+          </a>{" "}
+          o el &quot;Bill product driver&quot; de{" "}
+          <a href="https://www.xprintertech.com/drivers-2.html" target="_blank" rel="noopener noreferrer">
+            Xprinter
+          </a>
+          . Al instalar: modelo <b>POS-58</b> (o XP-58), conexión USB, puerto <b>USB001</b>, con la
+          impresora encendida y conectada. El corte es <b>manual</b>: se rasga contra la sierra.
         </p>
+        <p>
+          <b>Autotest:</b> impresora apagada, mantén <b>FEED</b> y enciéndela. Si ese papel no sale,
+          el problema es la impresora o el rollo (la cara brillante va hacia el cabezal), no el
+          computador.
+        </p>
+      </section>
+
+      {/* EL KIT. Quien prueba está solo delante del PC de la caja y todas las pruebas
+          anteriores fallaron en la instalación de Windows, nunca en la web. En vez de
+          otra lista de instrucciones, un archivo que revisa y arregla en orden. */}
+      <section className="card impresora__paso impresora__kit">
+        <h2>La forma rápida: el kit para el PC de la caja</h2>
+        <p>
+          Un archivo que se abre con doble clic en el computador donde está conectada la
+          térmica. Revisa todo en orden y <b>pregunta antes de cambiar nada</b>: el servicio de
+          impresión, si Windows ve la impresora por USB (y si el cable da error), si el driver
+          está instalado, el puerto, la pausa y los trabajos atascados, la predeterminada y el
+          papel; imprime la página de prueba de Windows y una <b>prueba directa</b> que no pasa
+          por el dibujo del driver; y crea el acceso directo <b>Papaghetti Caja</b> que imprime
+          sin diálogo.
+        </p>
+        <div className="impresora__btns">
+          <a className="btn btn--primary" href="/admin/impresora/kit" download>
+            <span>Descargar el kit (.bat)</span>
+          </a>
+        </div>
+        <ol className="impresora__lista">
+          <li>
+            Chrome puede avisar que el archivo &quot;puede ser peligroso&quot;: pulsa{" "}
+            <b>Conservar</b>. Es un script de texto de Papaghetti.
+          </li>
+          <li>
+            Doble clic. Si sale &quot;Windows protegió su PC&quot;: <b>Más información → Ejecutar de
+            todas formas</b>. Acepta el permiso de administrador.
+          </li>
+          <li>
+            Responde <b>S</b> o <b>N</b> a cada pregunta. Si falta el driver, te abre las páginas;
+            instálalo y vuelve a abrir el kit.
+          </li>
+          <li>
+            Al final deja un informe en el Escritorio y <b>copiado</b>: pégalo por WhatsApp para
+            revisarlo.
+          </li>
+        </ol>
+      </section>
+
+      {/* LA PRUEBA, EN ORDEN. Lo mínimo que hay que hacer y anotar para que, salga o no
+          salga, se sepa exactamente en qué paso se quedó. */}
+      <section className="card impresora__paso">
+        <h2>Lista para el día de la prueba</h2>
+        <ol className="impresora__lista">
+          <li>
+            Térmica <b>encendida</b>, con rollo, cable USB directo al PC (puerto de atrás, sin hub).
+            Autotest con FEED: <b>¿sale?</b>
+          </li>
+          <li>
+            Driver POS-58 instalado y el <b>kit</b> ejecutado. <b>¿Salió la página de prueba de
+            Windows? ¿Y la prueba directa?</b>
+          </li>
+          <li>
+            Cierra Chrome del todo y ábrelo desde <b>Papaghetti Caja</b>. Entra aquí y pulsa{" "}
+            <b>Imprimir el patrón de prueba</b> (paso 2). La primera vez, si aparece el diálogo:
+            destino la térmica, márgenes <b>Ninguno</b>, escala <b>100</b>.
+          </li>
+          <li>
+            Mide el patrón: <b>¿la regla llega a 48? ¿el 10 mide 10 mm? ¿el tablero sale nítido?</b>
+          </li>
+          <li>
+            En la caja, cobra un pedido de prueba y pulsa <b>Imprimir</b>. Anota qué salió (o
+            foto del papel) y manda el informe del kit.
+          </li>
+        </ol>
       </section>
 
       <section className="card impresora__paso">
@@ -186,6 +247,7 @@ export default function PruebaImpresora() {
 
       <section className="card impresora__paso">
         <h2>3 · Sin pasar por Windows: puerto COM o Bluetooth</h2>
+        <p className="impresora__nota">No aplica a la TP586 solo USB del local: es para térmicas Bluetooth o con cable USB-serie.</p>
         <p>
           Abre el <b>Administrador de dispositivos</b> y mira <b>Puertos (COM y LPT)</b>. Si
           la térmica aparece ahí (como &quot;USB-SERIAL CH340&quot;, &quot;Silicon Labs CP210x&quot; o un

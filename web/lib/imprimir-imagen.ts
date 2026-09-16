@@ -47,6 +47,10 @@ export function imprimirImagen(src: string, termica: boolean, titulo: string, an
     ventana.document.write(html);
     ventana.document.close();
     cuando(ventana, ventana.document.querySelector("img")).then(() => {
+      /* Con el acceso directo "Papaghetti Caja" (--kiosk-printing) no hay diálogo: sin
+         esto, cada comprobante dejaba una pestaña abierta y a media tarde eran decenas.
+         Sin kiosko, afterprint llega al cerrar el diálogo (imprima o cancele). */
+      ventana.addEventListener("afterprint", () => setTimeout(() => ventana.close(), 1500));
       try {
         ventana.focus();
         ventana.print();
