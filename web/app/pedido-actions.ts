@@ -12,11 +12,13 @@ import {
   cobrarPedido,
   cancelarPedido,
   asignarReferencia,
+  agregarAdicional,
+  quitarAdicional,
   type NuevoPedido,
 } from "@/lib/catalog";
 import { haySesion } from "@/lib/sesion";
 import { avisar } from "@/app/admin/actions";
-import type { EstadoPedido, MetodoPago } from "@/lib/menu";
+import type { AdicionalNuevo, EstadoPedido, MetodoPago } from "@/lib/menu";
 
 async function authed() {
   return haySesion();
@@ -282,8 +284,11 @@ export async function cobrarMesaAction(formData: FormData) {
   let total = 0;
   for (const p of pendientes) {
     try {
-      await cobrarPedido(p.id, metodo, 0, 0);
-      total += p.subtotal + p.impuesto + (p.domicilio ?? 0);
+      /* El total que quedó DESPUÉS de cobrar, no el de la copia de antes: sumar
+         subtotal + impuesto de la copia vieja podía decir una cifra distinta de la
+         que entró a la caja. */
+      const tras = await cobrarPedido(p.id, metodo, 0, 0);
+      total += tras.pedidos.find((x) => x.id === p.id)?.total ?? p.total;
     } catch (e) {
       await avisar(e instanceof Error ? e.message : "No se pudo cobrar un pedido.");
     }
@@ -309,21 +314,25 @@ export async function crearComandaPanelAction(formData: FormData) {
   if (!(await authed())) return;
   const tipo = String(formData.get("tipo") ?? "llevar") as NuevoPedido["tipo"];
   let lineas: LineaComanda[] = [];
+  let adicionales: AdicionalNuevo[] = [];
   try {
     const crudo = JSON.parse(String(formData.get("lineas") ?? "[]"));
     if (Array.isArray(crudo)) lineas = crudo;
+    const ads = JSON.parse(String(formData.get("adicionales") ?? "[]"));
+    if (Array.isArray(ads)) adicionales = ads;
   } catch {
     await avisar("No se entendió la comanda. Vuelve a armarla.");
     return;
   }
-  if (!lineas.length) {
-    await avisar("La comanda está vacía: agrega al menos un plato.");
+  if (!lineas.length && !adicionales.length) {
+    await avisar("La comanda está vacía: agrega al menos un plato o un adicional.");
     return;
   }
   await operar(
     () =>
       crearComanda({
         lineas,
+        adicionales,
         canal: "salon",
         tipo,
         referencia: String(formData.get("referencia") ?? "").trim() || undefined,
@@ -335,4 +344,38 @@ export async function crearComandaPanelAction(formData: FormData) {
       }),
     "Comanda enviada a cocina",
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* ADICIONALES en una cuenta abierta                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Admin: suma un adicional a una cuenta que no se ha cobrado. Llega de dos formas: un
+ * toque en uno de los guardados en Precios, o escrito a mano ("Almuerzos · 50000").
+ */
+export async function agregarAdicionalAction(formData: FormData) {
+  if (!(await authed())) return;
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  const nombre = String(formData.get("nombre") ?? "");
+  /* El valor se escribe como lo dice la gente: "50.000", "$50000", "50 000". Solo los
+     dígitos cuentan; sin esto, "50.000" llegaba como 50 pesos. */
+  const precio = Number(String(formData.get("precio") ?? "").replace(/\D/g, ""));
+  const cantidad = Number(formData.get("cantidad") ?? 1) || 1;
+  const cocina = formData.get("cocina") === "1" || formData.get("cocina") === "on";
+  await operar(
+    () => agregarAdicional(id, { nombre, precio, cantidad, cocina }),
+    `Agregado a #${id}: ${nombre.trim()}`,
+  );
+}
+
+/** Admin: quita un adicional de una cuenta que no se ha cobrado. */
+export async function quitarAdicionalAction(formData: FormData) {
+  if (!(await authed())) return;
+  const id = String(formData.get("id") ?? "");
+  const indice = Number(formData.get("indice") ?? -1);
+  const nombre = String(formData.get("nombre") ?? "");
+  if (!id || !nombre) return;
+  await operar(() => quitarAdicional(id, indice, nombre), `Quitado de #${id}: ${nombre}`);
 }

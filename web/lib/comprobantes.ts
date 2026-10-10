@@ -27,7 +27,7 @@ import {
   type Pedido,
   type TipoServicio,
 } from "./menu";
-import { diaNegocio, ZONA_NEGOCIO } from "./precios";
+import { cuentaImpresa, diaNegocio, ZONA_NEGOCIO } from "./precios";
 
 /* ───────────────────────── Situación: qué pasó con el comprobante ───────────────────────── */
 
@@ -528,18 +528,9 @@ export const nombreCsv = (r: Rango) =>
  * función, la completa, y las dos pantallas la llaman.
  */
 export function textoComprobante(p: Pedido, a: Partial<Pick<Ajustes, "negocio" | "impuestoPct">> = {}): string {
-  const consumo = p.subtotal - (p.descuento ?? 0);
-  const total = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);
+  const cuenta = cuentaImpresa(p, a.impuestoPct);
   const anulado = p.estado === "cancelado";
   const devuelto = p.pago === "devuelto";
-  const sumas: [string, number][] = [
-    ["Consumo", p.subtotal],
-    ...(p.descuento ? ([["Descuento", -p.descuento]] as [string, number][]) : []),
-    ...(p.impuesto
-      ? ([[`Impuesto${p.impuestoPct ?? a.impuestoPct ? ` (${p.impuestoPct ?? a.impuestoPct}%)` : ""}`, p.impuesto]] as [string, number][])
-      : []),
-    ...(p.domicilio ? ([["Domicilio", p.domicilio]] as [string, number][]) : []),
-  ];
   return [
     `*${a.negocio || "Papaghetti"}*`,
     `Comprobante N° ${p.consecutivo ?? p.id} · ${fechaCorta(p.creadoEn)} · ${horaLegible(p.creadoEn)}`,
@@ -549,13 +540,14 @@ export function textoComprobante(p: Pedido, a: Partial<Pick<Ajustes, "negocio" |
         ? "*** PEDIDO ANULADO — NO ES UN CONSUMO ***"
         : "",
     "",
-    ...lineasDe(p).flatMap((l) => [
-      `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}   ${formatCOP(l.precio * l.cantidad)}`,
+    ...cuenta.lineas.flatMap((l) => [
+      `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}   ${formatCOP(l.importe)}`,
       l.detalle ? `   _${l.detalle}_` : "",
     ]),
     "",
-    ...sumas.map(([k, v]) => `${k}: ${formatCOP(v)}`),
-    `*TOTAL: ${formatCOP(total)}*`,
+    ...cuenta.sumas.map(([k, v]) => `${k}: ${formatCOP(v)}`),
+    `*TOTAL: ${formatCOP(cuenta.total)}*`,
+    cuenta.nota ?? "",
     "",
     `Pago: ${devuelto ? "devuelto" : p.pago === "pagado" ? (p.metodoPago ? metodoLabel[p.metodoPago] : "pagado") : "PENDIENTE"}`,
     "",

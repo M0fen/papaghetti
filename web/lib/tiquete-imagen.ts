@@ -19,7 +19,8 @@
  * ajustes y el logo ya cargado, y devuelve el canvas. Nada de React aquí dentro.
  */
 
-import { formatCOP, lineasDe, metodoLabel, tipoLabel, type Ajustes, type Pedido } from "./menu";
+import { formatCOP, metodoLabel, tipoLabel, type Ajustes, type Pedido } from "./menu";
+import { cuentaImpresa } from "./precios";
 import { ROLLO_POR_DEFECTO, ROLLOS, type Rollo } from "./rollo";
 
 /**
@@ -255,9 +256,10 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
 
   // ── Renglones ──
   y += 6;
-  for (const l of lineasDe(p)) {
+  const cuenta = cuentaImpresa(p, a.impuestoPct);
+  for (const l of cuenta.lineas) {
     const cant = l.cantidad > 1 ? `${l.cantidad}× ` : "";
-    fila(`${cant}${l.nombre}`, formatCOP(l.precio * l.cantidad), `800 24px ${CUERPO}`, `800 24px ${CUERPO}`, 32);
+    fila(`${cant}${l.nombre}`, formatCOP(l.importe), `800 24px ${CUERPO}`, `800 24px ${CUERPO}`, 32);
     if (l.detalle) {
       ctx.font = `500 19px ${CUERPO}`;
       for (const s of partir(ctx, l.detalle, ANCHO_TEXTO - 24)) {
@@ -278,15 +280,9 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
 
   y = hebra(ctx, g, y, true);
 
-  // ── Sumas ──
-  const consumo = p.subtotal - (p.descuento ?? 0);
-  const sumas: [string, number][] = [["Consumo", p.subtotal]];
-  if (p.descuento) sumas.push(["Descuento", -p.descuento]);
-  // La tarifa congelada en el pedido; la de Ajustes solo para los pedidos viejos.
-  if (p.impuesto) sumas.push([`Impuesto (${p.impuestoPct ?? a.impuestoPct}%)`, p.impuesto]);
-  if (p.domicilio) sumas.push(["Domicilio", p.domicilio]);
-  for (const [k, v] of sumas) fila(k, formatCOP(v), `500 21px ${CUERPO}`, `700 21px ${CUERPO}`, 28);
-  const total = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);
+  // ── Sumas ── (de cuentaImpresa: la tarifa congelada en el pedido)
+  for (const [k, v] of cuenta.sumas) fila(k, formatCOP(v), `500 21px ${CUERPO}`, `700 21px ${CUERPO}`, 28);
+  const total = cuenta.total;
 
   // ── TOTAL ──
   y += 16;
@@ -301,6 +297,12 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
   y += 4;
   ctx.fillRect(MARGEN, y, ANCHO_TEXTO, 3);
   y += 10;
+  /* El impuesto va DENTRO del total, y así se dice: una línea debajo, no una suma más
+     que hiciera creer que se agregó encima. */
+  if (cuenta.nota) {
+    centro(cuenta.nota, `600 18px ${CUERPO}`, 22);
+    y += 8;
+  }
 
   // ── Pago ──
   const pago = devuelto

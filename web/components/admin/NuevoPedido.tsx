@@ -26,12 +26,13 @@ import {
   formatCOP,
   grupoPlatoLabel,
   GRUPOS_PLATO,
+  type AdicionalConfig,
   type EnredoInsignia,
   type GrupoPlato,
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
-import { desglosarPrecioFinal } from "@/lib/precios";
+import { sinImpuesto } from "@/lib/precios";
 import { crearComandaPanelAction } from "@/app/pedido-actions";
 import IngImg from "@/components/IngImg";
 import PlatoImg from "@/components/PlatoImg";
@@ -47,17 +48,32 @@ type Renglon = {
   cantidad: number;
   nombre: string;
   detalle: string;
-  /** Precio unitario SIN impuesto — el mismo que calculará el servidor. */
+  /** Precio unitario tal como lo paga el cliente (impuesto incluido), igual que la carta. */
   precio: number;
+  /** Un concepto que no es plato ("Limonada de coco", "Almuerzos"). */
+  adicional?: boolean;
+  /** Si el adicional se prepara en cocina. */
+  cocina?: boolean;
+};
+
+const soloDigitos = (s: string) => s.replace(/\D/g, "");
+/** "50000" → "50.000" mientras se escribe: un cero de más se ve antes de mandar. */
+const conPuntos = (s: string) => {
+  const d = soloDigitos(s).slice(0, 9);
+  return d ? Number(d).toLocaleString("es-CO") : "";
 };
 
 /** El botón se bloquea mientras se envía: sin esto, el segundo toque son dos comandas. */
-function Mandar({ listo, platos }: { listo: boolean; platos: number }) {
+function Mandar({ listo, platos, aCocina }: { listo: boolean; platos: number; aCocina: boolean }) {
   const { pending } = useFormStatus();
   return (
     <button className="btn btn--primary" type="submit" disabled={!listo || pending}>
       <span>
-        {pending ? "Mandando…" : `Mandar a cocina${platos > 1 ? ` · ${platos} platos` : ""} →`}
+        {pending
+          ? "Mandando…"
+          : aCocina
+            ? `Mandar a cocina${platos > 1 ? ` · ${platos} platos` : ""} →`
+            : "Registrar la cuenta →"}
       </span>
     </button>
   );
@@ -70,6 +86,7 @@ export default function NuevoPedido({
   platos,
   impuestoPct,
   costoDomicilio = 0,
+  adicionales = [],
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
@@ -77,6 +94,8 @@ export default function NuevoPedido({
   platos: EnredoInsignia[];
   impuestoPct: number;
   costoDomicilio?: number;
+  /** Los adicionales de un toque, configurados en Precios. */
+  adicionales?: AdicionalConfig[];
 }) {
   const [abierto, setAbierto] = useState(false);
   /* Clave de idempotencia: era el ÚNICO canal sin ella. Un doble toque en el
@@ -91,6 +110,11 @@ export default function NuevoPedido({
   const [protIds, setProtIds] = useState<string[]>([]);
   const [topIds, setTopIds] = useState<string[]>([]);
   const [verPlatos, setVerPlatos] = useState(false);
+  const [verExtras, setVerExtras] = useState(false);
+  // El adicional escrito a mano: "Almuerzos · 50.000".
+  const [concepto, setConcepto] = useState("");
+  const [valor, setValor] = useState("");
+  const [aCocinaExtra, setACocinaExtra] = useState(false);
 
   /** Solo lo que de verdad se puede preparar: el operario no debe poder vender humo. */
   const dispo = (l: Ingrediente[]) => l.filter((i) => i.activo !== false && !i.agotado);
@@ -113,7 +137,8 @@ export default function NuevoPedido({
     }, 0);
 
   const agregarArmado = () => {
-    if (!baseId || protIds.length === 0) return;
+    // Solo la base es obligatoria: un plato sin proteína también se vende.
+    if (!baseId) return;
     const b = find(baseId);
     const ps = protIds.map(find).filter(Boolean) as Ingrediente[];
     const ts = topIds.map(find).filter(Boolean) as Ingrediente[];
@@ -141,10 +166,8 @@ export default function NuevoPedido({
   };
 
   const agregarPlato = (e: EnredoInsignia) => {
-    /* El plato tiene precio de carta CERRADO (impuesto incluido). Se desglosa hacia
-       atrás con la misma función del servidor para que el total que ve el operario
-       mientras arma sea exactamente el que se va a cobrar. */
-    const { subtotal } = desglosarPrecioFinal(e.precio, impuestoPct);
+    /* El plato tiene precio de carta CERRADO y la carta ya trae el impuesto: lo que
+       dice el botón es lo que suma la comanda. */
     setRenglones((r) => [
       ...r,
       {
@@ -155,10 +178,47 @@ export default function NuevoPedido({
         cantidad: 1,
         nombre: e.nombre,
         detalle: e.gancho ?? "",
-        precio: subtotal,
+        precio: e.precio,
       },
     ]);
     setVerPlatos(false);
+  };
+
+  /** Un adicional: el mismo concepto al mismo precio suma cantidad, no otro renglón. */
+  const agregarAdicional = (nombre: string, precio: number, cocina: boolean) => {
+    const limpio = nombre.replace(/\s+/g, " ").trim().slice(0, 60);
+    if (!limpio || !(precio > 0)) return;
+    setRenglones((r) => {
+      const igual = r.find(
+        (x) =>
+          x.adicional &&
+          x.nombre.toLowerCase() === limpio.toLowerCase() &&
+          x.precio === precio &&
+          Boolean(x.cocina) === cocina,
+      );
+      if (igual) return r.map((x) => (x === igual ? { ...x, cantidad: x.cantidad + 1 } : x));
+      return [
+        ...r,
+        {
+          key: `${Date.now()}-${r.length}`,
+          proteinaIds: [],
+          toppingIds: [],
+          cantidad: 1,
+          nombre: limpio,
+          detalle: "",
+          precio,
+          adicional: true,
+          cocina: cocina || undefined,
+        },
+      ];
+    });
+  };
+
+  const agregarEscrito = () => {
+    agregarAdicional(concepto, Number(soloDigitos(valor)), aCocinaExtra);
+    setConcepto("");
+    setValor("");
+    setACocinaExtra(false);
   };
 
   const cambiarCantidad = (key: string, d: number) =>
@@ -168,17 +228,21 @@ export default function NuevoPedido({
         .filter((x) => x.cantidad > 0),
     );
 
-  const subtotal = renglones.reduce((s, r) => s + r.precio * r.cantidad, 0);
-  const impuesto = Math.round((subtotal * impuestoPct) / 100);
+  /* Precio visto = precio pagado: la comanda suma lo que dice la carta y el impuesto se
+     informa como "incluido" (la misma cuenta que hará el servidor, lib/precios). */
+  const bruto = renglones.reduce((s, r) => s + r.precio * r.cantidad, 0);
+  const impuesto = bruto - sinImpuesto(bruto, impuestoPct);
   const domicilio = tipo === "domicilio" ? costoDomicilio : 0;
-  const total = subtotal + impuesto + domicilio;
-  const platosTotal = renglones.reduce((s, r) => s + r.cantidad, 0);
+  const total = bruto + domicilio;
+  const platosTotal = renglones.filter((r) => !r.adicional).reduce((s, r) => s + r.cantidad, 0);
+  const aCocina = renglones.some((r) => !r.adicional || r.cocina);
+  const extrasGuardados = adicionales.filter((a) => a.activo !== false);
 
   const alternar = (lista: string[], set: (v: string[]) => void, id: string) =>
     set(lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id]);
 
-  /** Ni una base ni una proteína: con esto no se puede armar absolutamente nada. */
-  const sinNada = basesD.length === 0 || protsD.length === 0;
+  /** Sin bases no se puede armar nada (sin proteínas sí: el plato puede ir sin). */
+  const sinNada = basesD.length === 0;
 
   const porGrupo = GRUPOS_PLATO.map((g) => ({
     g,
@@ -204,6 +268,9 @@ export default function NuevoPedido({
           setBaseId("");
           setProtIds([]);
           setTopIds([]);
+          setConcepto("");
+          setValor("");
+          setVerExtras(false);
           setIdem(nuevaClave());
         }, 400);
       }}
@@ -216,13 +283,24 @@ export default function NuevoPedido({
         type="hidden"
         name="lineas"
         value={JSON.stringify(
-          renglones.map((r) => ({
-            enredoId: r.enredoId,
-            baseId: r.baseId,
-            proteinaIds: r.proteinaIds,
-            toppingIds: r.toppingIds,
-            cantidad: r.cantidad,
-          })),
+          renglones
+            .filter((r) => !r.adicional)
+            .map((r) => ({
+              enredoId: r.enredoId,
+              baseId: r.baseId,
+              proteinaIds: r.proteinaIds,
+              toppingIds: r.toppingIds,
+              cantidad: r.cantidad,
+            })),
+        )}
+      />
+      <input
+        type="hidden"
+        name="adicionales"
+        value={JSON.stringify(
+          renglones
+            .filter((r) => r.adicional)
+            .map((r) => ({ nombre: r.nombre, precio: r.precio, cantidad: r.cantidad, cocina: r.cocina })),
         )}
       />
       <div className="card__h">
@@ -268,10 +346,89 @@ export default function NuevoPedido({
       <div className="comanda">
         <div className="comanda__h">
           <b>La comanda</b>
-          <button type="button" className="comanda__add" onClick={() => setVerPlatos((v) => !v)}>
-            {verPlatos ? "Cerrar la carta" : "+ Plato de la carta"}
-          </button>
+          <span className="comanda__botones">
+            <button type="button" className="comanda__add" onClick={() => setVerPlatos((v) => !v)}>
+              {verPlatos ? "Cerrar la carta" : "+ Plato de la carta"}
+            </button>
+            <button type="button" className="comanda__add" onClick={() => setVerExtras((v) => !v)}>
+              {verExtras ? "Cerrar adicionales" : "+ Adicional"}
+            </button>
+          </span>
         </div>
+
+        {/* ADICIONALES: lo que se cobra y no es plato. Los guardados en Precios son un
+            toque; lo demás se escribe con su valor ("Almuerzos · 50.000"). */}
+        {verExtras && (
+          <div className="comanda__extras">
+            {extrasGuardados.length > 0 && (
+              <div className="npedido__chips">
+                {extrasGuardados.map((a) => (
+                  <button
+                    type="button"
+                    key={a.id}
+                    className="chipbtn"
+                    onClick={() => agregarAdicional(a.nombre, a.precio, Boolean(a.cocina))}
+                  >
+                    {a.nombre} · {formatCOP(a.precio)}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="adic__escrito">
+              <input
+                type="text"
+                value={concepto}
+                onChange={(e) => setConcepto(e.target.value)}
+                maxLength={60}
+                placeholder="Concepto · ej. Almuerzos"
+                aria-label="Concepto del adicional"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    agregarEscrito();
+                  }
+                }}
+              />
+              <label className="prq__precio">
+                <span aria-hidden>$</span>
+                <input
+                  inputMode="numeric"
+                  value={valor}
+                  onChange={(e) => setValor(conPuntos(e.target.value))}
+                  placeholder="50.000"
+                  aria-label="Valor del adicional"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      agregarEscrito();
+                    }
+                  }}
+                />
+              </label>
+              <label className="adic__check">
+                <input
+                  type="checkbox"
+                  checked={aCocinaExtra}
+                  onChange={(e) => setACocinaExtra(e.target.checked)}
+                />
+                A cocina
+              </label>
+              <button
+                type="button"
+                className="btn btn--gold btnmini"
+                onClick={agregarEscrito}
+                disabled={!concepto.trim() || !(Number(soloDigitos(valor)) > 0)}
+              >
+                <span>+ Sumar</span>
+              </button>
+            </div>
+            {extrasGuardados.length === 0 && (
+              <p className="adic__vacio">
+                Para tener botones de un toque, guárdalos en <a href="/admin/precios#adicionales">Precios</a>.
+              </p>
+            )}
+          </div>
+        )}
 
         {verPlatos && (
           <div className="comanda__carta">
@@ -301,7 +458,7 @@ export default function NuevoPedido({
 
         {renglones.length === 0 ? (
           <p className="comanda__vacia">
-            Todavía no hay nada. Agrega un plato de la carta o arma una caja abajo.
+            Todavía no hay nada. Agrega un plato de la carta, un adicional o arma una caja abajo.
           </p>
         ) : (
           <ul className="comanda__lista">
@@ -317,7 +474,10 @@ export default function NuevoPedido({
                   </button>
                 </span>
                 <span className="comanda__txt">
-                  <b>{r.nombre}</b>
+                  <b>
+                    {r.nombre}
+                    {r.adicional && <i className="adic__tag">adicional</i>}
+                  </b>
                   {r.detalle && <em>{r.detalle}</em>}
                 </span>
                 <span className="comanda__precio">{formatCOP(r.precio * r.cantidad)}</span>
@@ -368,7 +528,7 @@ export default function NuevoPedido({
       </fieldset>
 
       <fieldset className="npedido__grupo">
-        <legend>Proteína (una o varias)</legend>
+        <legend>Proteínas · las que quieras, o ninguna</legend>
         <div className="npedido__chips">
           {protsD.length === 0 && <em className="npedido__nada">Ninguna disponible hoy</em>}
           {protsD.map((pr) => (
@@ -412,11 +572,11 @@ export default function NuevoPedido({
         type="button"
         className="btn btn--gold comanda__sumar"
         onClick={agregarArmado}
-        disabled={!baseId || protIds.length === 0}
+        disabled={!baseId}
       >
         <span>
           + Agregar esta caja a la comanda
-          {baseId && protIds.length ? ` · ${formatCOP(precioArmado(baseId, protIds, topIds))}` : ""}
+          {baseId ? ` · ${formatCOP(precioArmado(baseId, protIds, topIds))}` : ""}
         </span>
       </button>
 
@@ -443,11 +603,11 @@ export default function NuevoPedido({
 
       <div className="npedido__pie">
         <span>
-          Subtotal {formatCOP(subtotal)} · imp. {formatCOP(impuesto)}
-          {domicilio > 0 ? ` · envío ${formatCOP(domicilio)}` : ""}
-          <b> = {formatCOP(total)}</b>
+          {domicilio > 0 ? `Comida ${formatCOP(bruto)} · envío ${formatCOP(domicilio)} · ` : ""}
+          <b>Total {formatCOP(total)}</b>
+          {impuesto > 0 && <small className="npedido__incl">incluye imp. {formatCOP(impuesto)}</small>}
         </span>
-        <Mandar listo={renglones.length > 0} platos={platosTotal} />
+        <Mandar listo={renglones.length > 0} platos={platosTotal} aCocina={aCocina} />
       </div>
     </form>
   );

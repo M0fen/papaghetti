@@ -34,7 +34,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   formatCOP,
-  lineasDe,
   metodoLabel,
   tipoLabel,
   whatsappValido,
@@ -43,12 +42,13 @@ import {
 } from "@/lib/menu";
 import { dibujarTiquete, cargarImagen, binarizar, dibujarCalibracion } from "@/lib/tiquete-imagen";
 import { textoComprobante, waHref as enlaceWa } from "@/lib/comprobantes";
+import { cuentaImpresa } from "@/lib/precios";
 import { imprimirImagen } from "@/lib/imprimir-imagen";
 import ImpresionDirecta, { type TrabajosDirectos } from "@/components/admin/ImpresionDirecta";
 import { trabajoEscPos, type Bitmap } from "@/lib/escpos";
 import { tiqueteEscPos } from "@/lib/tiquete-escpos";
 import { ROLLOS } from "@/lib/rollo";
-import { useRollo } from "@/components/admin/useRollo";
+import { useAlineacion, useRollo } from "@/components/admin/useRollo";
 
 /**
  * La fecha, ARMADA A MANO a partir de las piezas.
@@ -120,6 +120,7 @@ export default function Comprobante({
 }) {
   const [papel, setPapel] = useState<Papel>("termica");
   const [rollo, setRollo] = useRollo();
+  const [alinear] = useAlineacion();
   const R = ROLLOS[rollo];
   const [tel, setTel] = useState(p.telefono ?? "");
   const [pidiendoTel, setPidiendoTel] = useState(Boolean(wa) && !p.telefono);
@@ -195,7 +196,7 @@ export default function Comprobante({
   const imprimir = () => {
     if (!png || !pngTermica) return;
     const termica = papel === "termica";
-    imprimirImagen(termica ? pngTermica : png, termica, `Comprobante N° ${p.consecutivo ?? p.id}`, R.mm);
+    imprimirImagen(termica ? pngTermica : png, termica, `Comprobante N° ${p.consecutivo ?? p.id}`, R.mm, alinear);
   };
 
   /* El patrón de calibración: una regla en milímetros y un tablero de 1 px. En un
@@ -203,7 +204,7 @@ export default function Comprobante({
      está reescalando (el tablero sale gris o con bandas en vez de nítido). Es la
      prueba que puede hacer quien esté delante de la impresora, sin nadie más. */
   const calibrar = () => {
-    imprimirImagen(dibujarCalibracion(rollo).toDataURL("image/png"), true, "Patrón de calibración", R.mm);
+    imprimirImagen(dibujarCalibracion(rollo).toDataURL("image/png"), true, "Patrón de calibración", R.mm, alinear);
   };
 
   useEffect(() => {
@@ -214,16 +215,12 @@ export default function Comprobante({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, png]);
 
-  const consumo = p.subtotal - (p.descuento ?? 0);
-  const lineas: { k: string; v: number }[] = [
-    { k: "Consumo", v: p.subtotal },
-    ...(p.descuento ? [{ k: "Descuento", v: -p.descuento }] : []),
-    /* La tarifa del PEDIDO, no la de Ajustes: un comprobante archivado tiene que
-       decir el porcentaje con el que se calculó su monto, no el de hoy. */
-    ...(p.impuesto ? [{ k: `Impuesto (${p.impuestoPct ?? a.impuestoPct}%)`, v: p.impuesto }] : []),
-    ...(p.domicilio ? [{ k: "Domicilio", v: p.domicilio }] : []),
-  ];
-  const total = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);
+  /* El papel sale de UNA función (lib/precios): la misma que usan la imagen de la
+     térmica, el texto ESC/POS y el WhatsApp. La tarifa es la del PEDIDO, no la de
+     Ajustes: un comprobante archivado dice el porcentaje con el que se cobró. */
+  const cuenta = cuentaImpresa(p, a.impuestoPct);
+  const lineas = cuenta.sumas.map(([k, v]) => ({ k, v }));
+  const total = cuenta.total;
 
   /* UN PEDIDO CANCELADO NO PUEDE IMPRIMIR UN PAPEL QUE PAREZCA UN CONSUMO VÁLIDO.
      Se cancelaba un pedido, se abría su comprobante y salía idéntico a los demás:
@@ -445,14 +442,14 @@ export default function Comprobante({
             ENTERO al lado y los extras debajo sin precio: el cliente leía "$34.400"
             como si fuera el precio de la papa criolla. */}
         <ul className="cbte__items">
-          {lineasDe(p).map((l, i) => (
+          {cuenta.lineas.map((l, i) => (
             <li key={i}>
               <span className="cbte__cant">{l.cantidad > 1 ? `${l.cantidad}×` : ""}</span>
               <span className="cbte__nom">
                 {l.nombre}
                 {l.detalle && <em>{l.detalle}</em>}
               </span>
-              <span className="cbte__val">{formatCOP(l.precio * l.cantidad)}</span>
+              <span className="cbte__val">{formatCOP(l.importe)}</span>
             </li>
           ))}
         </ul>
@@ -473,6 +470,7 @@ export default function Comprobante({
           <span>TOTAL</span>
           <b>{formatCOP(total)}</b>
         </div>
+        {cuenta.nota && <p className="cbte__incluye">{cuenta.nota}</p>}
 
         <div className="cbte__pago">
           <span>Pago</span>

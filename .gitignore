@@ -47,6 +47,7 @@ web/qa-*.mjs
 !web/qa-dominio.mjs
 !web/qa-pedidos.mjs
 !web/qa-comanda.mjs
+!web/qa-adicionales.mjs
 !web/qa-despensa.mjs
 !web/qa-comprobantes.mjs
 !web/qa-escpos.mjs

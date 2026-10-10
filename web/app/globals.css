@@ -6924,3 +6924,196 @@ body.enreda-jugando .sticky-pedir {
 .chart--horas .chart__col { min-width: 0; }
 .chart--horas .chart__lbl { font-size: 0.62rem; }
 .chart--horas .chart__bar.is-pico { background: var(--pg-pomodoro); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PRECIOS: reglas de cobro + ADICIONALES (lo que se cobra y no es plato)
+   ══════════════════════════════════════════════════════════════════════════ */
+.precios__arriba {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 18px;
+  max-width: 860px;
+}
+@media (min-width: 1100px) {
+  .precios__arriba { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); max-width: none; align-items: start; }
+}
+.cobro-reglas ul { margin: 0; padding: 0 0 0 18px; display: grid; gap: 8px; font-size: 0.9rem; line-height: 1.5; }
+.cobro-reglas li::marker { color: var(--pg-oro-ink); }
+
+.adic__sub { margin: -4px 0 12px; font-size: 0.86rem; line-height: 1.5; opacity: 0.75; max-width: 60ch; }
+.adic__nuevo,
+.adic__escrito {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.adic__nuevo {
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--pg-crema-2, #f6e7c9);
+  margin-bottom: 10px;
+}
+.adic__nuevo .adic__concepto,
+.adic__escrito > input[type="text"],
+.adic__escrito > input[name="nombre"] {
+  flex: 1 1 200px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(30, 22, 17, 0.18);
+  background: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+  color: inherit;
+}
+.adic__nuevo .prq__precio,
+.adic__escrito .prq__precio { background: #fff; }
+.adic__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.adic__check input { width: 18px; height: 18px; accent-color: var(--pg-pomodoro, #c8321e); }
+
+/* La tarjeta mide distinto según la pantalla (media columna en escritorio, todo el
+   ancho en tableta y celular): las filas se acomodan a LA TARJETA, no a la ventana. */
+.adic { container-type: inline-size; }
+
+/* El formulario de "nuevo": qué y cuánto arriba; cocina y el botón abajo. */
+.adic__nuevo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "concepto precio"
+    "cocina   crear";
+  gap: 8px 10px;
+}
+.adic__nuevo .adic__concepto { grid-area: concepto; width: 100%; min-width: 0; }
+.adic__nuevo .prq__precio { grid-area: precio; }
+.adic__nuevo .adic__check { grid-area: cocina; }
+.adic__nuevo .btn { grid-area: crear; justify-self: end; }
+
+/* Cada guardado: nombre y precio arriba; interruptores, Guardar y × abajo. Los dos
+   <form> de la fila (guardar y borrar) se vuelven transparentes con display: contents
+   —siguen enviando, pero sus campos se acomodan como una sola fila— y un ::after hace
+   de salto de renglón. Con espacio de sobra (ver @container) todo va en una línea. */
+.adic__lista { display: grid; }
+.adic__fila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.adic__fila::after { content: ""; order: 2; flex-basis: 100%; height: 0; }
+.adic__fila > form { display: contents; }
+.adic__fila .prq__nombre { order: 0; flex: 1 1 120px; }
+.adic__fila .prq__precio { order: 1; flex: none; padding: 0 6px; }
+.adic__fila .prq__precio input { width: 78px; }
+.adic__fila .adic__check--cocina { order: 3; padding-left: 4px; }
+.adic__fila .adic__check--caja { order: 4; }
+.adic__fila .prq__ok { order: 5; margin-left: auto; padding: 0 8px; }
+.adic__fila .adic__borrar { order: 6; flex: none; }
+.adic__fila.is-sucia { background: rgba(242, 165, 22, 0.09); border-radius: 10px; }
+.adic__fila.is-off .prq__nombre,
+.adic__fila.is-off .prq__precio { opacity: 0.45; }
+
+@container (min-width: 640px) {
+  .adic__nuevo {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-areas: "concepto precio cocina crear";
+    align-items: center;
+  }
+  .adic__fila { flex-wrap: nowrap; gap: 8px 10px; }
+  .adic__fila::after { display: none; }
+  .adic__fila .prq__precio { padding: 0 8px; }
+  .adic__fila .prq__precio input { width: 92px; }
+  .adic__fila .prq__ok { padding: 0 12px; }
+}
+.adic__borrar {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--pg-pomodoro, #c8321e);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.adic__borrar:hover { background: rgba(200, 50, 30, 0.1); }
+.adic__vacio { margin: 6px 0; font-size: 0.84rem; opacity: 0.65; }
+.adic__vacio a { color: inherit; font-weight: 700; }
+.adic__nota { margin: 10px 0 0; font-size: 0.78rem; line-height: 1.5; opacity: 0.65; }
+/* La marca de "adicional" dentro de un renglón de la comanda: se distingue de un plato
+   sin gritar. */
+.adic__tag {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(242, 165, 22, 0.2);
+  color: var(--pg-oro-ink, #9a6300);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+
+/* Nueva comanda: los dos botones de la cabecera y el panel de adicionales */
+.comanda__botones { display: inline-flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.comanda__extras {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--pg-crema-2, #f6e7c9);
+}
+.npedido__incl { display: block; font-size: 0.74rem; opacity: 0.65; font-weight: 600; }
+
+/* Pedidos: sumar / quitar adicionales en una cuenta abierta */
+.ocard__lineas li.is-adicional { color: var(--pg-oro-ink, #9a6300); align-items: center; }
+.ocard__quitar { margin-left: auto; }
+.ocard__quitar button {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--pg-pomodoro, #c8321e);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.ocard__quitar button:hover { background: rgba(200, 50, 30, 0.1); }
+.ocard__adic { flex: 1 1 100%; }
+.ocard__adic > summary { list-style: none; display: inline-flex; cursor: pointer; }
+.ocard__adic > summary::-webkit-details-marker { display: none; }
+.ocard__adicbox {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--pg-crema-2, #f6e7c9);
+}
+.ocard__adicchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ocard__adicchips .chipbtn { min-height: 38px; }
+
+/* El impuesto va DENTRO del total: se informa debajo, nunca como una suma más. */
+.cbte__incluye { margin: 6px 0 0; font-size: 10.5px; text-align: center; }
+.ticket__incluye { margin: 6px 0 0; font-size: 0.78rem; opacity: 0.7; text-align: right; }
+
+/* Impresora: dónde cae el tiquete en el papel del driver */
+.impresora__alinear { display: grid; gap: 6px; margin: 4px 0 12px; }
+.impresora__alinear > span { font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.7; }
+.impresora__alinear .cbte-papel { justify-self: start; margin: 0; }
+.impresora__alinear small { font-size: 0.82rem; line-height: 1.5; opacity: 0.75; max-width: 62ch; }

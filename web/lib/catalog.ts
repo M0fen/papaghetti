@@ -7,11 +7,13 @@ import {
   CATALOG_ID,
 } from "./supabase";
 import {
-  desglosarPrecioFinal,
   faltaParaMinimo,
   totalDe,
   diaNegocio,
   cobroToppings,
+  cuentaIncluida,
+  brutoDe,
+  sinImpuesto,
 } from "./precios";
 import {
   SEED_CATALOG,
@@ -34,9 +36,12 @@ import {
   type TipoServicio,
   type MetodoPago,
   type Ajustes,
+  type AdicionalConfig,
+  type AdicionalNuevo,
   type Categoria,
   costoReceta,
   formatCOP,
+  lineasDe,
   type Insumo,
   type InsumoCategoria,
   type RecetaItem,
@@ -127,6 +132,7 @@ function migrate(cat: Catalog): Catalog {
   // ajustes: mezcla defaults para que campos nuevos (promos/banner/…) existan
   cat.ajustes = { ...structuredClone(SEED_AJUSTES), ...(cat.ajustes ?? {}) };
   if (!Array.isArray(cat.ajustes.promos)) cat.ajustes.promos = structuredClone(SEED_AJUSTES.promos);
+  if (!Array.isArray(cat.ajustes.adicionales)) cat.ajustes.adicionales = [];
   // ingredientes previos: parStock por defecto y receta sembrada si falta
   for (const g of ["bases", "proteinas", "toppings"] as const) {
     cat[g].forEach((i) => {
@@ -1104,6 +1110,11 @@ export interface LineaComanda {
 /** Lo que pide una mesa: N renglones, un solo pedido, un solo cobro. */
 export interface NuevaComanda {
   lineas: LineaComanda[];
+  /**
+   * Conceptos que no son platos de la carta: "Limonada de coco", "Almuerzos". SOLO los
+   * manda la caja (con sesión): `crearPedido`, el camino público, nunca los pasa.
+   */
+  adicionales?: AdicionalNuevo[];
   canal?: Pedido["canal"];
   tipo?: TipoServicio;
   cliente?: string;
@@ -1116,9 +1127,10 @@ export interface NuevaComanda {
 
 export interface NuevoPedido {
   baseId: string;
-  proteinaId: string;
+  /** Opcional: un plato sin proteína también se vende. */
+  proteinaId?: string;
   proteinaId2?: string; // 2ª proteína (retro-compat con el flujo de 2)
-  /** N proteínas (EMPLATA ya no limita a 2). Si viene, manda sobre proteinaId/proteinaId2. */
+  /** N proteínas, sin tope (0 vale). Si viene, manda sobre proteinaId/proteinaId2. */
   proteinaIds?: string[];
   toppingIds: string[];
   canal?: Pedido["canal"];
@@ -1219,14 +1231,79 @@ function alcanzaPara(ing: Ingrediente, byId: Map<string, Insumo>, veces: number)
   });
 }
 
-/** Máximos que la propia interfaz permite; el servidor no acepta más. */
+/** Máximos que la propia interfaz permite; el servidor no acepta más. Las PROTEÍNAS
+ *  no tienen tope propio: se pueden llevar todas las de la carta (ver crearComanda). */
 const MAX_TOPPINGS = 12;
-const MAX_PROTEINAS = 4;
 /* Topes de cordura de una comanda. Una mesa larga cabe de sobra en 20 renglones y
    nadie pide 30 veces el mismo plato: por encima de eso es un error de tecleo o
    alguien probando el formulario, y el coste lo paga la despensa real. */
 const MAX_LINEAS = 20;
 const MAX_POR_LINEA = 30;
+/** Un adicional de más de esto es, casi seguro, un cero de más. */
+const MAX_PRECIO_ADICIONAL = 5_000_000;
+
+/**
+ * UN ADICIONAL, VALIDADO. Lo escribe alguien con prisa en el mostrador: el nombre se
+ * limpia de espacios, el valor tiene que ser un número positivo y con tope, y la
+ * cantidad tiene los mismos límites que un plato. El valor es el que paga el cliente
+ * (con el impuesto dentro), igual que el resto de la carta.
+ */
+function itemAdicional(a: AdicionalNuevo, impuestoPct: number): ItemPedido {
+  const nombre = String(a?.nombre ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+  if (!nombre) throw new Error("Al adicional le falta el concepto: ¿qué se está cobrando?");
+  const precio = Math.round(Number(a?.precio));
+  if (!Number.isFinite(precio) || precio <= 0) {
+    throw new Error(`"${nombre}" necesita un valor mayor que cero.`);
+  }
+  if (precio > MAX_PRECIO_ADICIONAL) {
+    throw new Error(`${formatCOP(precio)} para "${nombre}" parece un cero de más. Revísalo.`);
+  }
+  const cantidad = Math.max(1, Math.min(MAX_POR_LINEA, Math.round(Number(a?.cantidad ?? 1)) || 1));
+  return {
+    nombre,
+    cantidad,
+    precio: sinImpuesto(precio, impuestoPct),
+    precioFinal: precio,
+    adicional: true,
+    cocina: a?.cocina ? true : undefined,
+    componentes: [],
+    costo: 0,
+  };
+}
+
+/**
+ * Un pedido de ANTES de "precio visto = precio pagado" que todavía no se cobra y al
+ * que la caja le toca los renglones: se pasa al esquema nuevo para que su papel
+ * imprima todo igual (cada renglón a precio de carta). La diferencia, si la hay, es
+ * de un peso de redondeo; lo que ya se cobró no se toca nunca.
+ */
+function aPreciosFinales(p: Pedido, impuestoPct: number): void {
+  if (!p.items?.length) p.items = lineasDe(p).map((l) => ({ ...l }));
+  if (p.impuestoIncluido) return;
+  const f = 1 + impuestoPct / 100;
+  for (const l of p.items) {
+    if (l.precioFinal === undefined) l.precioFinal = Math.round(l.precio * f);
+  }
+  p.descuentoFinal = Math.round((p.descuento ?? 0) * f);
+  p.impuestoIncluido = true;
+}
+
+/** Rehace la cuenta de un pedido pendiente después de tocar sus renglones. */
+function recalcularPendiente(p: Pedido, impuestoPct: number): void {
+  const c = cuentaIncluida({
+    bruto: brutoDe(p),
+    impuestoPct,
+    descuentoFinal: p.descuentoFinal ?? 0,
+    domicilio: p.domicilio ?? 0,
+  });
+  p.bruto = c.bruto;
+  p.subtotal = c.subtotal;
+  p.descuento = c.descuento;
+  p.descuentoFinal = c.descuentoFinal;
+  p.impuesto = c.impuesto;
+  p.impuestoPct = impuestoPct;
+  p.total = totalDe(p);
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    EL ARCHIVO DE COMPROBANTES
@@ -1433,7 +1510,8 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   }
 
   const lineas = (input.lineas ?? []).slice(0, MAX_LINEAS);
-  if (!lineas.length) throw new Error("La comanda está vacía.");
+  const adicionales = (input.adicionales ?? []).slice(0, MAX_LINEAS);
+  if (!lineas.length && !adicionales.length) throw new Error("La comanda está vacía.");
 
   const buscar = (id: string): Ingrediente | undefined => {
     for (const grupo of ["bases", "proteinas", "toppings"] as const) {
@@ -1467,13 +1545,13 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
        componentes. No se arma por partes, así que no hay nada que resolver ni que
        descontar — se cobra tal cual. Sin este camino, media carta sería invendible. */
     if (insignia && !insignia.baseId && !insignia.proteinaId) {
-      const { subtotal } = desglosarPrecioFinal(insignia.precio, impuestoPct);
       resueltos.push({
         item: {
           nombre: insignia.nombre,
           detalle: insignia.gancho || undefined,
           cantidad,
-          precio: subtotal,
+          precio: sinImpuesto(insignia.precio, impuestoPct),
+          precioFinal: insignia.precio,
           componentes: [],
           enredoId: insignia.id,
           costo: 0,
@@ -1483,13 +1561,18 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
       continue;
     }
 
-    // Topes y deduplicación. La UI nunca permite más; el servidor tampoco.
+    /* PROTEÍNAS: CERO, UNA O TODAS. El dueño lo pidió así: varias sin límite, y un
+       plato sin proteína también se vende. Antes el servidor cortaba en 4 sin avisar
+       (EMPLATA dejaba elegir 5 y cobraba 4) y rechazaba la caja sin proteína. Cada
+       una va UNA vez —en todas las pantallas el botón prende y apaga, no suma—, así
+       que el techo natural es la carta misma, y un envío hostil con mil ids no pasa
+       de ahí. */
     const protIdsCrudos = insignia
       ? [insignia.proteinaId]
-      : l.proteinaIds && l.proteinaIds.length
+      : Array.isArray(l.proteinaIds)
         ? l.proteinaIds
         : [];
-    const protIds = protIdsCrudos.filter(Boolean).slice(0, MAX_PROTEINAS);
+    const protIds = [...new Set(protIdsCrudos.filter(Boolean))].slice(0, cat.proteinas.length);
     /* Los toppings NO se deduplican (pedir doble aguacate es legítimo y se cobra
        doble), pero sí se topan: sin límite, un pedido con 5.000 toppings vaciaba la
        despensa real. */
@@ -1501,7 +1584,6 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
        formulario a medio llenar, y "la base ya no existe" es que el catálogo cambió
        debajo mientras armaba. El mensaje tiene que decir cuál de los dos es. */
     if (!baseId) throw new Error("Falta la base del enredo.");
-    if (protIds.length === 0) throw new Error("Falta la proteína del enredo.");
     const base = buscar(baseId);
     if (!base) {
       throw new Error("Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.");
@@ -1519,9 +1601,9 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
       tops.push(ing);
     }
 
-    /* El precio: un insignia CON componentes tiene precio de carta cerrado (todo
-       incluido) y se desglosa hacia atrás para que su subtotal sea comparable con el
-       de un armado a mano. Las SALSAS valen $0: fuera del conteo de lo que se cobra. */
+    /* El precio: un insignia CON componentes tiene precio de carta cerrado; un armado
+       a mano vale lo que suman sus piezas. Las dos cifras son precio de carta, con el
+       impuesto dentro. Las SALSAS valen $0: fuera del conteo de lo que se cobra. */
     const cobrables = tops.filter((t) => t.categoria !== "salsa");
     const armado =
       base.precio +
@@ -1530,9 +1612,7 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
          0, o sea que suma todos; sigue pasando por aquí para que, si alguna vez hay
          promo, el total de la pantalla no pueda separarse del que se cobra. */
       cobroToppings(cobrables, TOPPINGS_INCLUIDOS);
-    const precio = insignia
-      ? desglosarPrecioFinal(insignia.precio, impuestoPct).subtotal
-      : armado;
+    const precioFinal = insignia ? insignia.precio : armado;
 
     const consume = [baseId, ...protIds, ...topIds];
     resueltos.push({
@@ -1547,7 +1627,8 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
               .filter(Boolean)
               .join(" · ") || undefined,
         cantidad,
-        precio,
+        precio: sinImpuesto(precioFinal, impuestoPct),
+        precioFinal,
         componentes: consume,
         enredoId: insignia?.id,
         costo: Math.round(
@@ -1558,6 +1639,12 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
       },
       consume,
     });
+  }
+
+  /* — 2b. LOS ADICIONALES: conceptos que no son platos. No consumen despensa ni se
+         validan contra la carta; solo se revisa que tengan nombre y valor de verdad. */
+  for (const a of adicionales) {
+    resueltos.push({ item: itemAdicional(a, impuestoPct), consume: [] });
   }
 
   /* — 3. DISPONIBILIDAD, sumando TODA la comanda. Aquí está la diferencia con el
@@ -1599,10 +1686,11 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   }
 
   // — 5. Precio de la comanda, y el mínimo a domicilio ANTES de tocar la despensa.
-  const subtotal = resueltos.reduce((s, r) => s + r.item.precio * r.item.cantidad, 0);
-  const impuesto = Math.round((subtotal * impuestoPct) / 100);
+  //       Precio visto = precio pagado: se suma la carta y DESPUÉS se separa el impuesto.
+  const bruto = resueltos.reduce((s, r) => s + (r.item.precioFinal ?? 0) * r.item.cantidad, 0);
   const domicilio = tipo === "domicilio" ? cat.ajustes.costoDomicilio ?? 0 : 0;
-  const falta = faltaParaMinimo(subtotal, tipo, cat.ajustes.pedidoMinimo);
+  const cuenta = cuentaIncluida({ bruto, impuestoPct, domicilio });
+  const falta = faltaParaMinimo(bruto, tipo, cat.ajustes.pedidoMinimo);
   if (falta > 0) {
     throw new Error(
       `El pedido mínimo a domicilio es ${formatCOP(cat.ajustes.pedidoMinimo)}. Te faltan ${formatCOP(falta)}.`,
@@ -1639,12 +1727,17 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
      de WhatsApp que leen estos campos. Con un solo renglón dicen exactamente lo de
      antes; con varios, dicen cuántos platos van. */
   const uno = items.length === 1 && items[0].cantidad === 1 ? items[0] : null;
-  const platos = items.reduce((s, i) => s + i.cantidad, 0);
+  const platos = items.filter((i) => !i.adicional).reduce((s, i) => s + i.cantidad, 0);
+  /* Una cuenta hecha SOLO de adicionales que no se cocinan ("Almuerzos $50.000") no
+     tiene nada que hacer en la pantalla de cocina: entra ya entregada y espera el cobro.
+     Si no, el cocinero veía una tarjeta vacía que tenía que "avanzar" tres veces. */
+  const nadaQueCocinar = items.every((i) => i.adicional && !i.cocina);
+  const ahora = new Date().toISOString();
 
   const pedido: Pedido = {
     id: crypto.randomUUID().slice(0, 8).toUpperCase(),
     consecutivo: siguienteConsecutivo(cat),
-    creadoEn: new Date().toISOString(),
+    creadoEn: ahora,
     canal: input.canal ?? "web",
     tipo,
     mesa: undefined,
@@ -1657,19 +1750,24 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
     telefono: input.telefono?.trim().slice(0, 20) || undefined,
     direccion,
     notas: input.notas?.trim().slice(0, 200) || undefined,
-    estado: "recibido",
+    estado: nadaQueCocinar ? "entregado" : "recibido",
+    entregadoEn: nadaQueCocinar ? ahora : undefined,
     pago: "pendiente",
     items,
-    base: uno ? uno.nombre : `${platos} platos`,
+    base: uno ? uno.nombre : platos ? `${platos} platos` : items.map((i) => i.nombre).join(", ").slice(0, 60),
     proteina: uno ? (uno.detalle?.match(/^con (.+?)(?: ·|$)/)?.[1] ?? "—") : "—",
     toppings: uno ? (uno.detalle?.match(/\+ (.+)$/)?.[1]?.split(", ") ?? []) : [],
     componentes,
-    subtotal,
-    impuesto,
+    subtotal: cuenta.subtotal,
+    impuesto: cuenta.impuesto,
+    impuestoPct,
+    impuestoIncluido: true,
+    bruto: cuenta.bruto,
+    descuentoFinal: 0,
     domicilio,
     propina: 0,
     descuento: 0,
-    total: totalDe({ subtotal, impuesto, domicilio }),
+    total: cuenta.total,
     costo,
     enredoId: uno?.enredoId,
     idemKey,
@@ -1783,7 +1881,12 @@ export async function cobrarPedido(
     throw new Error(`El pedido #${id} ya estaba cobrado. Usa "Corregir cobro" si te equivocaste.`);
   }
   if (p.estado === "cancelado") throw new Error("No se puede cobrar un pedido cancelado.");
-  const desc = Math.max(0, Math.min(p.subtotal, Math.round(descuento)));
+  const pct = cat.ajustes.impuestoPct ?? 0;
+  /* EL DESCUENTO SE TECLEA EN LO QUE DEJA DE PAGAR EL CLIENTE. En un pedido de precios
+     finales, "3.000 de descuento" son 3.000 menos en el total; en uno de antes se
+     aplicaba sobre la base sin impuesto, y así se respeta al corregirlo. */
+  const tope = p.impuestoIncluido ? (p.bruto ?? brutoDe(p)) : p.subtotal;
+  const desc = Math.max(0, Math.min(tope, Math.round(descuento)));
   /* UN DESCUENTO SIN MOTIVO NO ENTRA. Era la única salida de dinero del sistema que no
      dejaba una palabra escrita: anular pide motivo, devolver pide motivo, y regalar el
      plato entero con un descuento del 100% no pedía nada. */
@@ -1801,13 +1904,23 @@ export async function cobrarPedido(
   // Topes de cordura: un cero de más en la propina era irreversible, y un descuento
   // mayor que el plato dejaba totales imposibles.
   p.propina = Math.max(0, Math.min(500_000, Math.round(propina)));
-  p.descuento = desc;
   p.motivoDescuento = desc > 0 ? motivo : undefined;
-  /* El descuento BAJA LA BASE GRAVABLE. Antes se restaba después del impuesto, así que
-     una cortesía total dejaba el impoconsumo entero cobrándose sobre plata que nadie
-     facturó, y era imposible dejar un pedido en $0. */
-  const pct = cat.ajustes.impuestoPct ?? 0;
-  p.impuesto = Math.round(((p.subtotal - p.descuento) * pct) / 100);
+  if (p.impuestoIncluido) {
+    /* Se resta el descuento a lo que vio el cliente y DESPUÉS se separa el impuesto:
+       el total cuadra al peso con la carta y la base gravable baja con la rebaja. */
+    const c = cuentaIncluida({ bruto: tope, impuestoPct: pct, descuentoFinal: desc, domicilio: p.domicilio ?? 0 });
+    p.bruto = c.bruto;
+    p.subtotal = c.subtotal;
+    p.descuento = c.descuento;
+    p.descuentoFinal = c.descuentoFinal;
+    p.impuesto = c.impuesto;
+  } else {
+    /* El descuento BAJA LA BASE GRAVABLE. Antes se restaba después del impuesto, así
+       que una cortesía total dejaba el impoconsumo entero cobrándose sobre plata que
+       nadie facturó, y era imposible dejar un pedido en $0. */
+    p.descuento = desc;
+    p.impuesto = Math.round(((p.subtotal - p.descuento) * pct) / 100);
+  }
   /* La TARIFA se congela con el monto. Sin esto, el día que alguien mueva el porcentaje
      en Ajustes, cada reimpresión de un comprobante archivado diría un porcentaje que no
      corresponde a su monto. */
@@ -1818,6 +1931,127 @@ export async function cobrarPedido(
     `${corregir ? "Corrigió el cobro de" : "Cobró"} #${id} (${metodo} · ${formatCOP(p.total)})` +
       (desc > 0 ? ` · descuento ${formatCOP(desc)}: ${motivo}` : ""),
   );
+  return cat;
+}
+
+/**
+ * AGREGAR UN ADICIONAL A UNA CUENTA ABIERTA.
+ *
+ * Lo normal es que lo extra aparezca al final: la mesa ya pidió por QR y a la hora de
+ * pagar suma "dos limonadas de coco", o el grupo trae "$50.000 de almuerzos" que se
+ * cobran aparte. Antes no había dónde ponerlo y se cobraba por fuera del sistema, que
+ * es como se descuadra una caja. Solo en cuentas que no se han cobrado.
+ */
+export async function agregarAdicional(id: string, a: AdicionalNuevo): Promise<Catalog> {
+  const cat = await read();
+  const p = cat.pedidos.find((x) => x.id === id);
+  if (!p) throw new Error(`No existe el pedido #${id}.`);
+  if (p.estado === "cancelado") throw new Error("Ese pedido está cancelado.");
+  if (p.pago !== "pendiente") {
+    throw new Error(`El pedido #${id} ya se cobró: lo que falte va en una comanda nueva.`);
+  }
+  const pct = cat.ajustes.impuestoPct ?? 0;
+  const it = itemAdicional(a, pct);
+  aPreciosFinales(p, pct);
+  const lineas = p.items!;
+  if (lineas.length >= MAX_LINEAS * 2) throw new Error("Esta cuenta ya tiene demasiados renglones.");
+  /* El mismo concepto al mismo precio SUMA cantidad: tres toques en "Limonada de coco"
+     son "3× Limonada de coco", no tres renglones iguales en el papel. */
+  const igual = lineas.find(
+    (l) =>
+      l.adicional &&
+      l.nombre.toLowerCase() === it.nombre.toLowerCase() &&
+      (l.precioFinal ?? l.precio) === it.precioFinal &&
+      Boolean(l.cocina) === Boolean(it.cocina),
+  );
+  if (igual) igual.cantidad = Math.min(MAX_POR_LINEA, igual.cantidad + it.cantidad);
+  else lineas.push(it);
+  recalcularPendiente(p, pct);
+  await commit(
+    cat,
+    `Agregó ${it.cantidad > 1 ? `${it.cantidad}× ` : ""}"${it.nombre}" (${formatCOP((it.precioFinal ?? 0) * it.cantidad)}) a #${id}`,
+  );
+  return cat;
+}
+
+/**
+ * QUITAR UN ADICIONAL de una cuenta abierta. Solo adicionales: un plato que ya entró a
+ * cocina se saca cancelando, que es lo que deja el motivo escrito y devuelve despensa.
+ * Se identifica por posición Y nombre: la caja se repinta cada 10 s, y si entretanto
+ * cambió la cuenta, la posición sola podía borrar el renglón equivocado.
+ */
+export async function quitarAdicional(id: string, indice: number, nombre: string): Promise<Catalog> {
+  const cat = await read();
+  const p = cat.pedidos.find((x) => x.id === id);
+  if (!p) throw new Error(`No existe el pedido #${id}.`);
+  if (p.estado === "cancelado" || p.pago !== "pendiente") {
+    throw new Error("Solo se quitan adicionales de una cuenta que no se ha cobrado.");
+  }
+  const lineas = p.items ?? [];
+  let i = lineas[indice]?.adicional && lineas[indice].nombre === nombre ? indice : -1;
+  if (i < 0) i = lineas.findIndex((l) => l.adicional && l.nombre === nombre);
+  if (i < 0) throw new Error(`"${nombre}" ya no está en la cuenta.`);
+  if (lineas.length === 1) {
+    throw new Error("Es lo único que tiene la cuenta: si no va, cancela el pedido.");
+  }
+  const [fuera] = lineas.splice(i, 1);
+  const pct = cat.ajustes.impuestoPct ?? 0;
+  aPreciosFinales(p, pct);
+  recalcularPendiente(p, pct);
+  await commit(cat, `Quitó "${fuera.nombre}" de #${id}`);
+  return cat;
+}
+
+/**
+ * LOS ADICIONALES DE UN TOQUE, configurados en Precios. Viven en `ajustes`: los edita
+ * una sola persona y la fusión de escrituras los trata como el resto de la carta.
+ */
+export async function guardarAdicionalConfig(input: {
+  id?: string;
+  nombre: string;
+  precio: number;
+  cocina?: boolean;
+  activo?: boolean;
+}): Promise<Catalog> {
+  const cat = await read();
+  const it = itemAdicional({ nombre: input.nombre, precio: input.precio }, 0);
+  const lista = (cat.ajustes.adicionales ??= []);
+  const existente = input.id ? lista.find((a) => a.id === input.id) : undefined;
+  if (input.id && !existente) throw new Error("Ese adicional ya no existe. Recarga la página.");
+  const repetido = lista.find(
+    (a) => a.id !== existente?.id && a.nombre.toLowerCase() === it.nombre.toLowerCase(),
+  );
+  if (repetido) throw new Error(`Ya existe "${repetido.nombre}". Edita ese en vez de crear otro.`);
+  const precio = it.precioFinal ?? 0;
+  if (existente) {
+    existente.nombre = it.nombre;
+    existente.precio = precio;
+    existente.cocina = input.cocina ? true : undefined;
+    existente.activo = input.activo === false ? false : undefined;
+  } else {
+    if (lista.length >= 60) throw new Error("Ya hay 60 adicionales: borra los que no uses.");
+    const nuevo: AdicionalConfig = {
+      id: `ad-${slugify(it.nombre).slice(0, 30)}-${Date.now().toString(36)}`,
+      nombre: it.nombre,
+      precio,
+      cocina: input.cocina ? true : undefined,
+    };
+    lista.push(nuevo);
+  }
+  await commit(
+    cat,
+    `${existente ? "Editó" : "Creó"} el adicional "${it.nombre}" (${formatCOP(precio)})`,
+  );
+  return cat;
+}
+
+export async function borrarAdicionalConfig(id: string): Promise<Catalog> {
+  const cat = await read();
+  const lista = cat.ajustes.adicionales ?? [];
+  const a = lista.find((x) => x.id === id);
+  if (!a) throw new Error("Ese adicional ya no existe.");
+  cat.ajustes.adicionales = lista.filter((x) => x.id !== id);
+  await commit(cat, `Borró el adicional "${a.nombre}"`);
   return cat;
 }
 

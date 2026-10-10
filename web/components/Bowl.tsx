@@ -9,17 +9,18 @@ import IngImg from "./IngImg";
  */
 export default function Bowl({
   base,
-  proteina,
+  proteinas,
   toppings,
   mini = false,
 }: {
   base: Ingrediente;
-  proteina: Ingrediente;
+  /** Cero, una o varias: el plato sin proteína también existe. */
+  proteinas: Ingrediente[];
   toppings: Ingrediente[];
   mini?: boolean;
 }) {
-  // proteína primero (centro), luego toppings hacia afuera
-  const bits = [proteina, ...toppings];
+  // proteínas primero (centro), luego toppings hacia afuera
+  const bits = [...proteinas, ...toppings];
 
   return (
     <div className={`bowl3 ${mini ? "bowl3--mini" : ""}`} aria-hidden>

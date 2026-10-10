@@ -52,8 +52,10 @@ export default function Configurator({
   const [baseId, setBaseId] = useState(
     () => primeraDisponible(bases)[0]?.id ?? bases[0]?.id
   );
-  const [proteinaId, setProteinaId] = useState(
-    () => primeraDisponible(proteinas)[0]?.id ?? proteinas[0]?.id
+  /* PROTEÍNAS: las que quiera, o ninguna (lo pidió el dueño). Arranca con la primera
+     disponible para que el plato no se vea vacío, pero se puede quitar. */
+  const [proteinaIds, setProteinaIds] = useState<string[]>(() =>
+    primeraDisponible(proteinas).map((p) => p.id)
   );
   const [toppingIds, setToppingIds] = useState<string[]>(() =>
     primeraDisponible(toppingsCat, 2).map((t) => t.id)
@@ -68,12 +70,16 @@ export default function Configurator({
   const idem = useRef("");
 
   const base = find(baseId)!;
-  const proteina = find(proteinaId)!;
+  const prots = proteinaIds.map((id) => find(id)).filter(Boolean) as Ingrediente[];
   const toppings = toppingIds.map((id) => find(id)).filter(Boolean) as Ingrediente[];
 
   const toggleTopping = (id: string) =>
     setToppingIds((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  const toggleProteina = (id: string) =>
+    setProteinaIds((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
     );
 
   const sorprendeme = () => {
@@ -81,8 +87,8 @@ export default function Configurator({
     const dispB = primeraDisponible(bases, bases.length);
     const dispP = primeraDisponible(proteinas, proteinas.length);
     const dispT = primeraDisponible(toppingsCat, toppingsCat.length);
-    setBaseId(rnd(dispB).id);
-    setProteinaId(rnd(dispP).id);
+    if (dispB.length) setBaseId(rnd(dispB).id);
+    setProteinaIds(dispP.length ? [rnd(dispP).id] : []);
     const shuffled = [...dispT].sort(() => Math.random() - 0.5);
     setToppingIds(shuffled.slice(0, 2 + Math.floor(Math.random() * 2)).map((t) => t.id));
   };
@@ -91,13 +97,13 @@ export default function Configurator({
      cuando el ingrediente de verdad vale $0 en la carta (las salsas), no por cortesía. */
   const lineas: { label: string; valor: number; gratis?: boolean }[] = [
     { label: base.nombre, valor: base.precio },
-    { label: proteina.nombre, valor: proteina.precio },
+    ...prots.map((p) => ({ label: p.nombre, valor: p.precio })),
     ...toppings.map((t) => ({ label: t.nombre, valor: t.precio, gratis: t.precio === 0 })),
   ];
   // Un solo cálculo para todo el sitio (espejo de crearPedido) — lib/precios.ts
   const { subtotal, impuesto, domicilio, total } = calcularTotales({
     base,
-    proteinas: [proteina],
+    proteinas: prots,
     toppings,
     impuestoPct,
     tipo,
@@ -114,7 +120,7 @@ export default function Configurator({
       if (!idem.current) idem.current = nuevaClave();
       const r = await enviarPedido({
         baseId,
-        proteinaId,
+        proteinaIds,
         toppingIds,
         canal: "web",
         tipo,
@@ -136,7 +142,7 @@ export default function Configurator({
       whatsapp,
       `¡Hola Papaghetti! 🍝 Quiero armar mi enredo (${servicio}):\n` +
         `• Base: ${base.nombre}\n` +
-        `• Proteína: ${proteina.nombre}\n` +
+        `• Proteína: ${prots.map((p) => p.nombre).join(" + ") || "sin proteína"}\n` +
         `• Toppings: ${toppings.map((t) => t.nombre).join(", ") || "sin toppings"}\n` +
         `Total aprox: ${formatCOP(total)}`
     );
@@ -158,13 +164,13 @@ export default function Configurator({
               ))}
             </Group>
 
-            <Group titulo="2 · La proteína" nota="elige 1">
+            <Group titulo="2 · Las proteínas" nota="las que quieras, o ninguna">
               {proteinas.map((p) => (
                 <Chip
                   key={p.id}
                   ing={p}
-                  selected={proteinaId === p.id}
-                  onClick={() => setProteinaId(p.id)}
+                  selected={proteinaIds.includes(p.id)}
+                  onClick={() => toggleProteina(p.id)}
                   showExtra
                 />
               ))}
@@ -195,7 +201,7 @@ export default function Configurator({
 
           {/* ------- Bowl + ticket ------- */}
           <div className="bowl-panel">
-            <Bowl base={base} proteina={proteina} toppings={toppings} />
+            <Bowl base={base} proteinas={prots} toppings={toppings} />
 
             <div className="ticket">
               {lineas.map((l, i) => (
@@ -204,20 +210,8 @@ export default function Configurator({
                   <span>{l.gratis ? "incluido" : formatCOP(l.valor)}</span>
                 </div>
               ))}
-              {impuestoPct > 0 && (
-                <>
-                  <div className="ticket__row" style={{ marginTop: 6 }}>
-                    <span>Subtotal</span>
-                    <span>{formatCOP(subtotal)}</span>
-                  </div>
-                  <div className="ticket__row">
-                    <span>Impuesto ({impuestoPct}%)</span>
-                    <span>{formatCOP(impuesto)}</span>
-                  </div>
-                </>
-              )}
               {domicilio > 0 && (
-                <div className="ticket__row">
+                <div className="ticket__row" style={{ marginTop: 6 }}>
                   <span>Domicilio</span>
                   <span>{formatCOP(domicilio)}</span>
                 </div>
@@ -226,6 +220,13 @@ export default function Configurator({
                 <span>Tu enredo</span>
                 <b>{formatCOP(total)}</b>
               </div>
+              {/* Precio visto = precio pagado: los renglones de arriba YA suman el total.
+                  El impuesto se dice como incluido, no como una línea más que sumar. */}
+              {impuestoPct > 0 && impuesto > 0 && (
+                <p className="ticket__incluye">
+                  Incluye impuesto al consumo ({impuestoPct}%): {formatCOP(impuesto)}
+                </p>
+              )}
             </div>
 
             {!ok && (
@@ -327,7 +328,13 @@ export default function Configurator({
                 <button
                   className="btn btn--gold"
                   style={{ marginTop: 14 }}
-                  onClick={() => setOk(null)}
+                  /* CLAVE NUEVA para el pedido nuevo. Con la vieja, el servidor creía que
+                     era un reintento y devolvía el primer pedido: el segundo plato nunca
+                     llegaba a la cocina y el cliente no tenía cómo saberlo. */
+                  onClick={() => {
+                    idem.current = "";
+                    setOk(null);
+                  }}
                   type="button"
                 >
                   <span>Armar otro</span>
@@ -389,8 +396,8 @@ export default function Configurator({
             Tú mandas en el enredo
           </h2>
           <p className="lead">
-            Elige base, proteína y acompañantes. Cada cosa vale lo que dice la carta y las
-            salsas van con el plato.
+            Elige la base, las proteínas que quieras (o ninguna) y los acompañantes. Cada
+            cosa vale lo que dice la carta y las salsas van con el plato.
           </p>
         </Reveal>
         {cuerpo}

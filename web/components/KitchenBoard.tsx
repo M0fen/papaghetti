@@ -8,7 +8,7 @@ import {
   formatCOP,
   tipoLabel,
   tipoIcon,
-  lineasDe,
+  lineasCocina,
   type Pedido,
   type EstadoPedido,
 } from "@/lib/menu";
@@ -136,7 +136,14 @@ export default function KitchenBoard({ pedidos }: { pedidos: Pedido[] }) {
                         <b>#{p.id}</b>
                         <span className="ticket-card__tipo">
                           {tipoIcon[p.tipo]}{" "}
-                          {p.tipo === "mesa" ? `Mesa ${p.mesa ?? "?"}` : tipoLabel[p.tipo]}
+                          {/* Las mesas no se numeran: el "dónde" es la referencia que
+                              escribió el mesero ("ventanal", "barra"). Antes aquí salía
+                              "Mesa ?" y la cocina no sabía a quién llevarle el plato. */}
+                          {p.tipo === "mesa"
+                            ? [p.mesa ? `Mesa ${p.mesa}` : "", p.referencia?.trim() ?? ""]
+                                .filter(Boolean)
+                                .join(" · ") || tipoLabel.mesa
+                            : tipoLabel[p.tipo]}
                         </span>
                         {/* El cronómetro: lo que de verdad mira un cocinero. */}
                         <time className="ticket-card__crono" dateTime={p.creadoEn}>
@@ -152,7 +159,9 @@ export default function KitchenBoard({ pedidos }: { pedidos: Pedido[] }) {
                       {/* CADA PLATO, SU RENGLÓN. En la cocina esto es lo único que
                           importa: si la comanda lleva cuatro platos, se cocinan cuatro,
                           y la cantidad va delante y grande para que no se pase por alto. */}
-                      {lineasDe(p).map((l, i) => (
+                      {/* Los adicionales que no se cocinan ("Almuerzos") no son trabajo
+                          de la cocina: solo salen los platos y lo marcado "a cocina". */}
+                      {lineasCocina(p).map((l, i) => (
                         <div key={i} className="ticket-card__plato">
                           <p className="ticket-card__line">
                             {l.cantidad > 1 && <b className="ticket-card__x">{l.cantidad}×</b>}

@@ -18,6 +18,7 @@ import {
   tipoIcon,
   esVenta,
   ventaNeta,
+  lineasDe,
   type Periodo,
   type Pedido,
 } from "@/lib/menu";
@@ -162,14 +163,34 @@ export default async function FinanzasPage({
   const maxHora = Math.max(1, ...horas.map((x) => x.total));
   const horaPico = conVenta.length ? conVenta.reduce((a, b) => (b.total > a.total ? b : a)) : null;
 
-  /* LO QUE SE REGALÓ. No se veía en ninguna pantalla, nunca. */
-  const descuentos = sum(pedPer, (p) => p.descuento ?? 0);
-  const porMotivoDesc = [...new Set(pedPer.filter((p) => (p.descuento ?? 0) > 0).map((p) => p.motivoDescuento || "Sin motivo"))]
+  /* LO QUE SE REGALÓ. No se veía en ninguna pantalla, nunca. En los pedidos de precio
+     final se cuenta lo que dejó de pagar el cliente (lo que se tecleó en la caja), no su
+     parte sin impuesto: "regalé 3.000" tiene que verse como 3.000. */
+  const desc = (p: Pedido) => (p.impuestoIncluido ? (p.descuentoFinal ?? 0) : (p.descuento ?? 0));
+  const descuentos = sum(pedPer, desc);
+  const porMotivoDesc = [...new Set(pedPer.filter((p) => desc(p) > 0).map((p) => p.motivoDescuento || "Sin motivo"))]
     .map((m) => ({
       motivo: m,
-      total: sum(pedPer.filter((p) => (p.motivoDescuento || "Sin motivo") === m && (p.descuento ?? 0) > 0), (p) => p.descuento ?? 0),
+      total: sum(pedPer.filter((p) => (p.motivoDescuento || "Sin motivo") === m && desc(p) > 0), desc),
     }))
     .sort((a, b) => b.total - a.total);
+
+  /* LOS ADICIONALES: lo que se vende por fuera de la carta ("Limonada de coco",
+     "Almuerzos"). Van dentro de las ventas de arriba; aquí se ven aparte, a precio de
+     cliente, para saber cuánto pesan y cuáles conviene volver plato. */
+  const porAdicional = new Map<string, { nombre: string; n: number; total: number }>();
+  for (const p of pedPer) {
+    for (const l of lineasDe(p)) {
+      if (!l.adicional) continue;
+      const k = l.nombre.toLowerCase();
+      const x = porAdicional.get(k) ?? { nombre: l.nombre, n: 0, total: 0 };
+      x.n += l.cantidad;
+      x.total += (l.precioFinal ?? l.precio) * l.cantidad;
+      porAdicional.set(k, x);
+    }
+  }
+  const adicionalesVendidos = [...porAdicional.values()].sort((a, b) => b.total - a.total);
+  const totalAdicionales = adicionalesVendidos.reduce((s, a) => s + a.total, 0);
 
   // Lo que hay vs. lo que se necesita (estado actual de despensa)
   const necesita = cat.insumos
@@ -270,6 +291,23 @@ export default async function FinanzasPage({
             <div className="fin-flow__item" key={d.motivo}>
               <span>{d.motivo}</span>
               <b>{formatCOP(d.total)}</b>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adicionalesVendidos.length > 0 && (
+        <div className="fin-flow">
+          <div className="fin-flow__item">
+            <span>Adicionales · {label}</span>
+            <b>{formatCOP(totalAdicionales)}</b>
+          </div>
+          {adicionalesVendidos.slice(0, 4).map((a) => (
+            <div className="fin-flow__item" key={a.nombre}>
+              <span>
+                {a.n}× {a.nombre}
+              </span>
+              <b>{formatCOP(a.total)}</b>
             </div>
           ))}
         </div>

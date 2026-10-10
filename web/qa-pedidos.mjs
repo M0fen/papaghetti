@@ -55,11 +55,32 @@ try {
       "se nos acabó",
     );
   }
-  await rechaza(
-    "un pedido sin proteína",
-    () => cat.crearPedido({ baseId, proteinaId: "", toppingIds: [], tipo: "llevar" }),
-    "proteína",
-  );
+  /* SIN PROTEÍNA TAMBIÉN SE VENDE (lo pidió el dueño): una base sola es un plato.
+     Antes esto se rechazaba con "Falta la proteína del enredo". */
+  {
+    const p = await cat.crearPedido({ baseId, proteinaId: "", toppingIds: [], tipo: "llevar" });
+    const precioBase = original.bases[0].precio;
+    check("un pedido SIN proteína sí entra", Boolean(p.id));
+    check("y cobra solo lo que lleva (la base)", p.total === precioBase, `${p.total} vs ${precioBase}`);
+    check(
+      "sin inventarse un 'con …' en el renglón",
+      !/^con /.test(p.items?.[0]?.detalle ?? ""),
+      p.items?.[0]?.detalle ?? "(sin detalle)",
+    );
+    await cat.cancelarPedido(p.id, "QA");
+  }
+  /* Y VARIAS SIN TOPE: antes el servidor cortaba en 4 sin avisar (EMPLATA dejaba
+     elegir 5 y cobraba 4). La misma dos veces cuenta una: los botones prenden y apagan. */
+  {
+    const prots = original.proteinas.filter((x) => x.activo !== false && !x.agotado).map((x) => x.id);
+    const p = await cat.crearPedido({ baseId, proteinaIds: [...prots, prots[0]], toppingIds: [], tipo: "llevar" });
+    const esperado =
+      original.bases[0].precio + prots.reduce((s, id) => s + original.proteinas.find((x) => x.id === id).precio, 0);
+    check(`TODAS las proteínas (${prots.length}) se cobran`, p.total === esperado, `${p.total} vs ${esperado}`);
+    check("la repetida cuenta una sola vez", (p.componentes ?? []).filter((c) => c === prots[0]).length === 1);
+    check("y la cocina las ve todas", prots.every((id) => (p.items?.[0]?.detalle ?? "").includes(original.proteinas.find((x) => x.id === id).nombre)));
+    await cat.cancelarPedido(p.id, "QA");
+  }
   await rechaza(
     "un domicilio SIN dirección",
     () => cat.crearPedido({ baseId, proteinaId: protId, toppingIds: [], tipo: "domicilio", direccion: "" }),

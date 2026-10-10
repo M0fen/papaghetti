@@ -54,8 +54,12 @@ const pct = doc.ajustes.impuestoPct ?? 0;
 
 console.log("\n═══ UNA COMANDA CON VARIOS PLATOS ═══");
 const b = doc.bases[0], pr = doc.proteinas[0], tp = doc.toppings.find((t) => t.id === topId);
+/* PRECIO VISTO = PRECIO PAGADO: la caja vale lo que suman sus piezas en la carta y el
+   plato lo que dice la carta; el impuesto va dentro y se separa al final. */
 const precioCaja = b.precio + pr.precio + tp.precio;
-const precioPlato = precios.desglosarPrecioFinal(plato.precio, pct).subtotal;
+const precioPlato = plato.precio;
+const bruto = precioCaja * 2 + precioPlato;
+const base = (v) => Math.round(v / (1 + pct / 100));
 
 const comanda = await cat.crearComanda({
   lineas: [
@@ -69,16 +73,20 @@ const comanda = await cat.crearComanda({
 si("la comanda se creó", Boolean(comanda.id));
 eq("lleva dos renglones", comanda.items.length, 2);
 eq("el primero va por 2", comanda.items[0].cantidad, 2);
-eq("subtotal = 2 cajas + 1 plato", comanda.subtotal, precioCaja * 2 + precioPlato);
-eq("impuesto sobre el subtotal", comanda.impuesto, Math.round((comanda.subtotal * pct) / 100));
-eq("total = subtotal + impuesto", comanda.total, comanda.subtotal + comanda.impuesto);
+eq("lo que vio el cliente = 2 cajas + 1 plato, a precio de carta", comanda.bruto, bruto);
+eq("y es EXACTAMENTE el total (sin envío): nada se suma encima", comanda.total, bruto);
+eq("el impuesto va dentro", comanda.impuesto, bruto - base(bruto));
+eq("subtotal = la base sin impuesto", comanda.subtotal, base(bruto));
+eq("y la contabilidad cuadra: subtotal + impuesto = total", comanda.subtotal + comanda.impuesto, comanda.total);
+eq("cada renglón guarda su precio de carta", comanda.items.map((i) => i.precioFinal), [precioCaja, precioPlato]);
+si("y queda marcado como pedido de precio final", comanda.impuestoIncluido === true);
 eq("cuenta 3 platos", menu.platosDe(comanda), 3);
 eq("los componentes se repiten por porción", comanda.componentes.filter((c) => c === baseId).length, 2);
 si("el resumen dice cuántos platos van", comanda.base === "3 platos", comanda.base);
 
 console.log("\n═══ EL PEDIDO DE UN PLATO SIGUE SIENDO EL DE SIEMPRE ═══");
 const uno = await cat.crearPedido({ baseId, proteinaId: protId, toppingIds: [topId], tipo: "llevar" });
-eq("subtotal de una caja", uno.subtotal, precioCaja);
+eq("una caja cuesta lo que suma la carta", uno.total, precioCaja);
 eq("el resumen conserva el nombre de la base", uno.base, b.nombre);
 eq("y un solo renglón", uno.items.length, 1);
 si("lineasDe() de un pedido viejo (sin items) sintetiza uno", (() => {
@@ -181,7 +189,9 @@ console.log("\n=== UN DESCUENTO SIN MOTIVO NO ENTRA ===");
   si("y el pedido sigue sin cobrar", (await cat.getCatalog()).pedidos.find((x) => x.id === pd.id).pago === "pendiente");
   await cat.cobrarPedido(pd.id, "efectivo", 0, 2000, false, "Plato mal salido");
   const d = (await cat.getCatalog()).pedidos.find((x) => x.id === pd.id);
-  eq("con motivo si, y queda guardado", [d.descuento, d.motivoDescuento], [2000, "Plato mal salido"]);
+  eq("con motivo si, y queda guardado", [d.descuentoFinal, d.motivoDescuento], [2000, "Plato mal salido"]);
+  eq("el descuento son 2.000 menos de lo que dice la carta", d.total, plato.precio - 2000);
+  eq("y su parte sin impuesto baja la base", d.subtotal - d.descuento, base(plato.precio - 2000));
   await cat.cobrarPedido(pd.id, "efectivo", 0, 0, true);
   eq("al quitar el descuento se va tambien el motivo", (await cat.getCatalog()).pedidos.find((x) => x.id === pd.id).motivoDescuento, undefined);
 }

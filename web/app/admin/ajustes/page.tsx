@@ -46,7 +46,9 @@ export default async function AjustesPage() {
           <legend>💵 Cobro y servicio</legend>
           <div className="setgrid setgrid--nums">
             <label className="field">
-              <span>Impuesto % (impoconsumo)</span>
+              {/* Se dice aquí porque es donde alguien lo cambiaría pensando que se suma:
+                  los precios de la carta YA lo traen y el comprobante solo lo informa. */}
+              <span>Impuesto % (impoconsumo · ya va incluido en los precios)</span>
               <input className="admin-input" type="number" name="impuestoPct" min={0} max={30} defaultValue={ajustes.impuestoPct} />
             </label>
             {/* EL INTERRUPTOR QUE DESBLOQUEA EL PRIMER DÍA. Con la despensa sin

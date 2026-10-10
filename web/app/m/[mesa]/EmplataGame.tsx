@@ -1321,7 +1321,8 @@ export default function EmplataGame(props: {
   const faltaMin = faltaParaMinimo(subtotal, tipoActual, props.pedidoMinimo);
   // La barra de abajo muestra LA COMIDA. El envío aparece en la hoja final, cuando el
   // cliente ya eligió domicilio: cobrarlo antes de que lo pida se lee como sorpresa.
-  const totalComida = subtotal + impuesto;
+  // Precio visto = precio pagado: `subtotal` ya trae el impuesto dentro.
+  const totalComida = subtotal;
   /* Los precios por renglón solo se pintan si suman lo que se cobra: un plato de carta
      sin tocar va a precio cerrado, y ahí la suma de piezas mentiría. */
   const preciosCuadran = lineasCaja.reduce((a, l) => a + l.precio, 0) === subtotal;
@@ -6559,7 +6560,7 @@ export default function EmplataGame(props: {
                   ]
                     .filter(Boolean)
                     .join(" · ")}
-              {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
+              {impuesto > 0 ? ` · incluye imp. ${formatCOP(impuesto)}` : ""}
             </small>
             <div className="emp-total__row">
               <span className="emp-total__label">TOTAL</span>
@@ -6787,12 +6788,6 @@ export default function EmplataGame(props: {
             </div>
 
             <footer className="emp-comanda__pie">
-              {impuesto > 0 && (
-                <div className="emp-datos__linea">
-                  <span>Impuesto ({impuestoPct}%)</span>
-                  <span>{formatCOP(impuesto)}</span>
-                </div>
-              )}
               {domicilio > 0 && (
                 <div className="emp-datos__linea">
                   <span>Domicilio</span>
@@ -6803,6 +6798,13 @@ export default function EmplataGame(props: {
                 <span>Total</span>
                 <b>{formatCOP(total)}</b>
               </div>
+              {/* El impuesto va DENTRO del total: se dice, no se suma. */}
+              {impuesto > 0 && (
+                <div className="emp-datos__linea emp-datos__linea--incl">
+                  <span>Incluye impuesto ({impuestoPct}%)</span>
+                  <span>{formatCOP(impuesto)}</span>
+                </div>
+              )}
               <button
                 type="button"
                 className="emp-cta emp-datos__ok"

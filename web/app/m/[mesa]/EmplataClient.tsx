@@ -113,7 +113,11 @@ export default function EmplataClient({
   const disponibles = (l: Ingrediente[]) => l.filter((i) => !i.agotado);
   const [modo, setModo] = useState<Modo>("emplata");
   const [baseId, setBaseId] = useState<string>(() => disponibles(bases)[0]?.id ?? "");
-  const [proteinaId, setProteinaId] = useState<string>(() => disponibles(proteinas)[0]?.id ?? "");
+  /* PROTEÍNAS: las que quiera, o ninguna (lo pidió el dueño). Arranca con la primera
+     disponible para que la caja no salga vacía, pero se puede quitar. */
+  const [proteinaIds, setProteinaIds] = useState<string[]>(() =>
+    disponibles(proteinas).slice(0, 1).map((p) => p.id),
+  );
   const [toppingIds, setToppingIds] = useState<string[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [cerrando, setCerrando] = useState(false); // animación de cierre origami
@@ -146,7 +150,7 @@ export default function EmplataClient({
   const find = useCallback((id: string) => all.find((i) => i.id === id), [all]);
 
   const base = find(baseId);
-  const proteina = find(proteinaId);
+  const prots = useMemo(() => proteinaIds.map(find).filter(Boolean) as Ingrediente[], [proteinaIds, find]);
   const tops = useMemo(() => toppingIds.map(find).filter(Boolean) as Ingrediente[], [toppingIds, find]);
 
   /* PRECIO — la MISMA función que usa el servidor. Aquí vivía el último cálculo a
@@ -155,7 +159,7 @@ export default function EmplataClient({
      que cobraba la caja. */
   const { subtotal, impuesto, total } = calcularTotales({
     base,
-    proteinas: [proteina],
+    proteinas: prots,
     toppings: tops,
     impuestoPct,
     incluidos,
@@ -183,10 +187,14 @@ export default function EmplataClient({
     setBaseId(i.id);
     soltar(i);
   };
+  /** Prende y apaga, como los acompañantes: varias sin tope, o ninguna. */
   const elegirProteina = (i: Ingrediente) => {
     if (i.agotado) return;
-    setProteinaId(i.id);
-    soltar(i);
+    setProteinaIds((prev) => {
+      if (prev.includes(i.id)) return prev.filter((p) => p !== i.id);
+      soltar(i);
+      return [...prev, i.id];
+    });
   };
   const toggleTopping = (i: Ingrediente) => {
     if (i.agotado) return;
@@ -199,7 +207,7 @@ export default function EmplataClient({
 
   // ---- confirmar → cierre origami → enviarPedido (flujo existente, canal "qr") ----
   const confirmar = useCallback(async () => {
-    if (!abierto || enviando || !baseId || !proteinaId) return;
+    if (!abierto || enviando || !baseId) return;
     setEnviando(true);
     s.confirmar();
     if (navigator.vibrate) navigator.vibrate([18, 40, 24]);
@@ -211,7 +219,7 @@ export default function EmplataClient({
     try {
       const r = await enviarPedido({
         baseId,
-        proteinaId,
+        proteinaIds,
         toppingIds,
         canal: "qr",
         tipo: "mesa",
@@ -239,7 +247,7 @@ export default function EmplataClient({
       setError("No pudimos enviar el pedido. Intenta otra vez.");
     }
     setEnviando(false);
-  }, [abierto, enviando, baseId, proteinaId, toppingIds, mesa, reduce, s]);
+  }, [abierto, enviando, baseId, proteinaIds, toppingIds, mesa, reduce, s]);
 
   // ---- estado en vivo (polling suave del pedido existente) ----
   useEffect(() => {
@@ -378,11 +386,11 @@ export default function EmplataClient({
                       {base.foto ? <img src={base.foto} alt="" /> : base.emoji}
                     </span>
                   )}
-                  {proteina && (
-                    <span className="emp-ing emp-ing--prot" title={proteina.nombre}>
-                      {proteina.foto ? <img src={proteina.foto} alt="" /> : proteina.emoji}
+                  {prots.map((pr) => (
+                    <span key={pr.id} className="emp-ing emp-ing--prot" title={pr.nombre}>
+                      {pr.foto ? <img src={pr.foto} alt="" /> : pr.emoji}
                     </span>
-                  )}
+                  ))}
                   {tops.map((t) => (
                     <span key={t.id} className="emp-ing" title={t.nombre}>
                       {t.foto ? <img src={t.foto} alt="" /> : t.emoji}
@@ -415,10 +423,10 @@ export default function EmplataClient({
             </section>
             <section className="emp-paso">
               <h2>
-                <b>2</b> LA PROTEÍNA
+                <b>2</b> LAS PROTEÍNAS <small>las que quieras, o ninguna</small>
               </h2>
               <div className="emp-fila">
-                {proteinas.map((i) => chip(i, proteinaId === i.id, elegirProteina))}
+                {proteinas.map((i) => chip(i, proteinaIds.includes(i.id), elegirProteina))}
               </div>
             </section>
             <section className="emp-paso">
@@ -495,7 +503,7 @@ export default function EmplataClient({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                {impuesto > 0 ? ` · imp. ${formatCOP(impuesto)}` : ""}
+                {impuesto > 0 ? ` · incluye imp. ${formatCOP(impuesto)}` : ""}
               </small>
               <b>{formatCOP(total)}</b>
             </div>
@@ -503,7 +511,7 @@ export default function EmplataClient({
               type="button"
               className="emp-cta"
               onClick={confirmar}
-              disabled={!abierto || enviando || !base || !proteina}
+              disabled={!abierto || enviando || !base}
             >
               {enviando ? "Cerrando la caja…" : "EMPLATAR →"}
             </button>

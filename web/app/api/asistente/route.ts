@@ -22,7 +22,7 @@ import {
   type GastoCategoria,
   ventaNeta,
 } from "@/lib/menu";
-import { diaNegocio } from "@/lib/precios";
+import { diaNegocio, sinImpuesto } from "@/lib/precios";
 
 export const dynamic = "force-dynamic";
 
@@ -222,8 +222,10 @@ function resumen(cat: Catalog): string {
   const platos = items
     .map((i) => {
       const costo = costoReceta(i.receta, byId);
-      const margen = i.precio - costo;
-      const pct = i.precio > 0 ? Math.round((margen / i.precio) * 100) : 0;
+      // El precio de la carta trae el impuesto adentro: el margen va sobre la base.
+      const ingreso = sinImpuesto(i.precio, cat.ajustes.impuestoPct ?? 0);
+      const margen = ingreso - costo;
+      const pct = ingreso > 0 ? Math.round((margen / ingreso) * 100) : 0;
       return `- ${i.nombre} [${i.categoria}] precio ${formatCOP(i.precio)}: costo ${formatCOP(
         Math.round(costo)
       )} → margen ${formatCOP(Math.round(margen))} (${pct}%)${i.agotado ? " — NO DISPONIBLE" : ""}`;
@@ -231,7 +233,7 @@ function resumen(cat: Catalog): string {
     .join("\n");
 
   return [
-    `NEGOCIO: ${cat.ajustes.negocio} (Pereira). Impuesto ${cat.ajustes.impuestoPct}%. Estado: ${cat.ajustes.abierto === false ? "CERRADO" : "abierto"}.`,
+    `NEGOCIO: ${cat.ajustes.negocio} (Pereira). Impuesto ${cat.ajustes.impuestoPct}% (ya incluido en los precios de la carta). Estado: ${cat.ajustes.abierto === false ? "CERRADO" : "abierto"}.`,
     ``,
     `HOY: ${hoyPed.length} pedidos válidos, ventas ${formatCOP(ventasHoy)}, ticket ${formatCOP(ticket)}. Por cobrar: ${porCobrar.length} = ${formatCOP(sum(porCobrar, (p) => p.total))}. Activos: ${activos.length}. Mesas ocupadas: ${mesasOcup}/${cat.ajustes.numMesas}.`,
     ``,

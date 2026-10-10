@@ -20,6 +20,7 @@ export default async function RecetasPage() {
         proteinas={cat.proteinas}
         toppings={cat.toppings}
         insumos={cat.insumos}
+        impuestoPct={cat.ajustes.impuestoPct ?? 0}
       />
     </section>
   );

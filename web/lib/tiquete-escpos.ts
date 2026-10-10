@@ -22,7 +22,8 @@
  * se prueba en Node con un pedido de mentira.
  */
 
-import { formatCOP, lineasDe, metodoLabel, tipoLabel, type Ajustes, type Pedido } from "./menu";
+import { formatCOP, metodoLabel, tipoLabel, type Ajustes, type Pedido } from "./menu";
+import { cuentaImpresa } from "./precios";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -137,8 +138,7 @@ export function armarTiquete(p: Pedido, a: Ajustes, cols: number = COLUMNAS_80MM
   const sep = () => R.push({ texto: "-".repeat(cols) });
   const anulado = p.estado === "cancelado";
   const devuelto = p.pago === "devuelto";
-  const consumo = p.subtotal - (p.descuento ?? 0);
-  const total = consumo + (p.impuesto ?? 0) + (p.domicilio ?? 0);
+  const total = cuentaImpresa(p, a.impuestoPct).total;
 
   R.push({ texto: (a.negocio || "Papaghetti").toUpperCase(), alinear: "centro", negrita: true, tamano: 2 });
   const datos = [
@@ -172,9 +172,10 @@ export function armarTiquete(p: Pedido, a: Ajustes, cols: number = COLUMNAS_80MM
   if (p.cliente) R.push({ texto: `Cliente: ${p.cliente}` });
   sep();
 
-  for (const l of lineasDe(p)) {
+  const cuenta = cuentaImpresa(p, a.impuestoPct);
+  for (const l of cuenta.lineas) {
     const nombre = `${l.cantidad > 1 ? `${l.cantidad}x ` : ""}${l.nombre}`;
-    for (const t of fila(ascii(nombre), formatCOP(l.precio * l.cantidad), cols)) R.push({ texto: t });
+    for (const t of fila(ascii(nombre), formatCOP(l.importe), cols)) R.push({ texto: t });
     if (l.detalle) for (const t of partir(ascii(l.detalle), cols - 3)) R.push({ texto: `   ${t}` });
   }
   if (p.notas) {
@@ -183,15 +184,10 @@ export function armarTiquete(p: Pedido, a: Ajustes, cols: number = COLUMNAS_80MM
   }
   sep();
 
-  const sumas: [string, number][] = [
-    ["Consumo", p.subtotal],
-    ...(p.descuento ? ([["Descuento", -p.descuento]] as [string, number][]) : []),
-    ...(p.impuesto ? ([[`Impuesto (${p.impuestoPct ?? a.impuestoPct}%)`, p.impuesto]] as [string, number][]) : []),
-    ...(p.domicilio ? ([["Domicilio", p.domicilio]] as [string, number][]) : []),
-  ];
-  for (const [k, v] of sumas) for (const t of fila(k, formatCOP(v), cols)) R.push({ texto: t });
+  for (const [k, v] of cuenta.sumas) for (const t of fila(k, formatCOP(v), cols)) R.push({ texto: t });
   /* El total en letra doble ocupa el doble: se compone a la mitad de columnas. */
   for (const t of fila("TOTAL", formatCOP(total), Math.floor(cols / 2))) R.push({ texto: t, negrita: true, tamano: 2 });
+  if (cuenta.nota) R.push({ texto: ascii(cuenta.nota), alinear: "centro" });
   R.push({ texto: `Pago: ${pagoTexto(p)}`, negrita: true });
   sep();
   R.push({

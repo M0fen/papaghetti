@@ -1,23 +1,39 @@
 /**
  * EL PRECIO, UNA SOLA VEZ.
  *
- * `crearPedido` (catalog.ts) es la verdad del servidor. Este módulo es su ESPEJO para el
+ * `crearComanda` (catalog.ts) es la verdad del servidor. Este módulo es su ESPEJO para el
  * cliente: el armador clásico, el juego y el modal de los enredos insignia calculan aquí,
- * no cada uno por su cuenta. Si cambia la regla, cambia en dos sitios (aquí y crearPedido)
+ * no cada uno por su cuenta. Si cambia la regla, cambia en dos sitios (aquí y crearComanda)
  * y no en cinco.
  *
  * Reglas vivas:
+ *  · PRECIO VISTO = PRECIO PAGADO. Todo precio de la carta (bases, proteínas,
+ *    acompañantes, platos, adicionales) ya trae el impuesto dentro. Antes los platos de
+ *    carta lo traían y las cajas armadas lo sumaban al final: la carta decía $15.900 y
+ *    se cobraban $17.172. Ahora el impuesto se informa como "incluido", no se suma.
  *  · cada acompañante se cobra a su precio; nada va por cuenta de la casa
  *    (`incluidos` es 0 hoy; existe por si algún día hay promoción)
  *  · las salsas valen $0 en la carta: van con el plato siempre
- *  · las proteínas (hasta 2) van a precio completo
- *  · el impuesto se calcula sobre el subtotal
+ *  · las proteínas van a precio completo
  *  · el DOMICILIO se cobra aparte y solo cuando el servicio es a domicilio
- *  · un enredo insignia tiene precio de carta CERRADO (todo incluido): se desglosa hacia
- *    atrás para que el pedido guarde subtotal/impuesto coherentes con el resto
+ *  · el descuento se teclea en pesos que deja de pagar el cliente
  */
 
-import { TOPPINGS_INCLUIDOS, type Ingrediente, type TipoServicio } from "./menu";
+import {
+  TOPPINGS_INCLUIDOS,
+  formatCOP,
+  lineasDe,
+  type Ingrediente,
+  type Pedido,
+  type TipoServicio,
+} from "./menu";
+
+/** 1,08 con un impuesto del 8 %. */
+const factor = (impuestoPct?: number) => 1 + (impuestoPct ?? 0) / 100;
+
+/** Lo que queda de un precio final sin el impuesto (redondeado al peso). */
+export const sinImpuesto = (precioFinal: number, impuestoPct?: number): number =>
+  Math.round(precioFinal / factor(impuestoPct));
 
 /**
  * EL TOTAL DE UN PEDIDO, EN UN SOLO SITIO.
@@ -73,9 +89,12 @@ export function horaNegocio(fecha: string | Date): number {
 }
 
 export interface Totales {
+  /** Lo que suma la carta, con el impuesto dentro (es lo que paga por la comida). */
   subtotal: number;
+  /** La parte de `subtotal` que es impuesto. Se INFORMA, no se suma. */
   impuesto: number;
   domicilio: number;
+  /** subtotal + domicilio. */
   total: number;
 }
 
@@ -117,7 +136,7 @@ export function idsGratis(toppings: Ingrediente[], incluidos = TOPPINGS_INCLUIDO
 
 export function calcularTotales(opts: {
   base?: Ingrediente | null;
-  /** hasta 2; los undefined se ignoran */
+  /** las que vengan; los undefined se ignoran */
   proteinas?: (Ingrediente | null | undefined)[];
   toppings?: Ingrediente[];
   impuestoPct: number;
@@ -135,10 +154,126 @@ export function calcularTotales(opts: {
     prots.reduce((s, p) => s + p.precio, 0) +
     cobroToppings(tops, incluidos);
 
-  const impuesto = Math.round((subtotal * (opts.impuestoPct ?? 0)) / 100);
+  const impuesto = subtotal - sinImpuesto(subtotal, opts.impuestoPct);
   const domicilio = opts.tipo === "domicilio" ? opts.costoDomicilio ?? 0 : 0;
 
-  return { subtotal, impuesto, domicilio, total: subtotal + impuesto + domicilio };
+  return { subtotal, impuesto, domicilio, total: subtotal + domicilio };
+}
+
+/**
+ * LA CUENTA DE UN PEDIDO CON PRECIOS FINALES.
+ *
+ * Una sola función decide cómo se parte lo que paga el cliente entre lo que es del
+ * negocio y lo que es de la DIAN. El total sale EXACTO de la carta: se resta el
+ * descuento a lo que vio el cliente y solo después se separa el impuesto, así que
+ * nunca aparece un $40.901 donde la carta suma $40.900.
+ *
+ * Devuelve las dos caras:
+ *  · lo que vio el cliente: `bruto`, `descuentoFinal`, `neto`, `total`;
+ *  · la contabilidad sin impuesto que leen reportes y arqueo: `subtotal`, `descuento`,
+ *    `impuesto`, que cumplen subtotal − descuento + impuesto + domicilio = total.
+ */
+export interface CuentaIncluida {
+  bruto: number;
+  descuentoFinal: number;
+  neto: number;
+  subtotal: number;
+  descuento: number;
+  impuesto: number;
+  domicilio: number;
+  total: number;
+}
+export function cuentaIncluida(o: {
+  bruto: number;
+  impuestoPct?: number;
+  descuentoFinal?: number;
+  domicilio?: number;
+}): CuentaIncluida {
+  const bruto = Math.max(0, Math.round(o.bruto));
+  const descuentoFinal = Math.max(0, Math.min(bruto, Math.round(o.descuentoFinal ?? 0)));
+  const neto = bruto - descuentoFinal;
+  const subtotal = sinImpuesto(bruto, o.impuestoPct);
+  const baseNeta = sinImpuesto(neto, o.impuestoPct);
+  const domicilio = Math.max(0, Math.round(o.domicilio ?? 0));
+  return {
+    bruto,
+    descuentoFinal,
+    neto,
+    subtotal,
+    descuento: subtotal - baseNeta,
+    impuesto: neto - baseNeta,
+    domicilio,
+    total: neto + domicilio,
+  };
+}
+
+/** Lo que suma la carta en un pedido (precio final por renglón × cantidad). */
+export function brutoDe(p: Pedido): number {
+  return lineasDe(p).reduce((s, l) => s + (l.precioFinal ?? l.precio) * l.cantidad, 0);
+}
+
+/**
+ * EL PAPEL, UNA SOLA VEZ: renglones, sumas y total de un comprobante.
+ *
+ * Cuatro sitios lo imprimen (la imagen de la térmica, el texto ESC/POS, el WhatsApp y
+ * la vista en pantalla) y cada uno hacía su propia suma. Ahora todos leen de aquí.
+ *
+ * Un pedido con precios finales imprime cada renglón a precio de carta y el impuesto
+ * como "incluido". Uno de antes conserva su papel de siempre (renglones sin impuesto,
+ * impuesto sumado): reimprimirlo tiene que decir lo mismo que el día que se cobró.
+ */
+export interface CuentaImpresa {
+  lineas: { cantidad: number; nombre: string; detalle?: string; importe: number; adicional?: boolean }[];
+  sumas: [string, number][];
+  total: number;
+  /** "Incluye impuesto al consumo (8%): $3.852" — va debajo del total. */
+  nota?: string;
+}
+export function cuentaImpresa(p: Pedido, impuestoPctAjustes?: number): CuentaImpresa {
+  const pct = p.impuestoPct ?? impuestoPctAjustes;
+  const ls = lineasDe(p);
+  if (p.impuestoIncluido) {
+    const lineas = ls.map((l) => ({
+      cantidad: l.cantidad,
+      nombre: l.nombre,
+      detalle: l.detalle,
+      importe: (l.precioFinal ?? l.precio) * l.cantidad,
+      adicional: l.adicional,
+    }));
+    const bruto = p.bruto ?? lineas.reduce((s, l) => s + l.importe, 0);
+    const desc = p.descuentoFinal ?? 0;
+    const domicilio = p.domicilio ?? 0;
+    const sumas: [string, number][] = [];
+    /* "Subtotal" solo cuando algo lo separa del total: con un pedido sin descuento ni
+       envío, dos renglones con la misma cifra seguidos son ruido. */
+    if (desc || domicilio) sumas.push(["Subtotal", bruto]);
+    if (desc) sumas.push(["Descuento", -desc]);
+    if (domicilio) sumas.push(["Domicilio", domicilio]);
+    return {
+      lineas,
+      sumas,
+      total: bruto - desc + domicilio,
+      nota: p.impuesto
+        ? `Incluye impuesto al consumo${pct ? ` (${pct}%)` : ""}: ${formatCOP(p.impuesto)}`
+        : undefined,
+    };
+  }
+  const lineas = ls.map((l) => ({
+    cantidad: l.cantidad,
+    nombre: l.nombre,
+    detalle: l.detalle,
+    importe: l.precio * l.cantidad,
+    adicional: l.adicional,
+  }));
+  const sumas: [string, number][] = [["Consumo", p.subtotal]];
+  if (p.descuento) sumas.push(["Descuento", -p.descuento]);
+  if (p.impuesto) sumas.push([`Impuesto${pct ? ` (${pct}%)` : ""}`, p.impuesto]);
+  if (p.domicilio) sumas.push(["Domicilio", p.domicilio]);
+  return {
+    lineas,
+    sumas,
+    total: p.subtotal - (p.descuento ?? 0) + (p.impuesto ?? 0) + (p.domicilio ?? 0),
+  };
 }
 
 /**

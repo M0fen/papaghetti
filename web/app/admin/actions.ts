@@ -43,6 +43,8 @@ import {
   deshacer,
   rehacer,
   guardarFoto,
+  guardarAdicionalConfig,
+  borrarAdicionalConfig,
 } from "@/lib/catalog";
 import type {
   EstadoLead,
@@ -611,4 +613,40 @@ export async function eliminarEnredoAction(formData: FormData) {
   await deleteEnredo(id);
   reflejar();
   revalidatePath("/admin/menu");
+}
+
+/* ------------------------------------------------------------------ */
+/* ADICIONALES DE UN TOQUE (Precios)                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Crea o edita un adicional guardado: nombre, precio final y si se prepara en cocina.
+ * El precio se lee como lo escribe la gente ("9.000", "$9000"): solo cuentan los dígitos.
+ */
+export async function adicionalConfigAction(formData: FormData) {
+  if (!(await guard())) return;
+  const id = String(formData.get("id") ?? "").trim() || undefined;
+  const nombre = String(formData.get("nombre") ?? "");
+  const precio = Number(String(formData.get("precio") ?? "").replace(/\D/g, ""));
+  const cocina = formData.get("cocina") === "on" || formData.get("cocina") === "1";
+  /* Una casilla desmarcada NO viaja en el formulario: sin esta marca no se distingue
+     "lo apagaron" de "este formulario no tiene casilla" (el de crear, que nace activo). */
+  const activo = formData.get("_edicion") ? formData.get("activo") === "on" : undefined;
+  const ok = await intentar(
+    () => guardarAdicionalConfig({ id, nombre, precio, cocina, activo }),
+    id ? `Adicional guardado: ${nombre.trim()}` : `Nuevo adicional: ${nombre.trim()}`,
+  );
+  if (!ok) return;
+  revalidatePath("/admin/precios");
+  revalidatePath("/admin/pedidos");
+}
+
+export async function borrarAdicionalConfigAction(formData: FormData) {
+  if (!(await guard())) return;
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  const ok = await intentar(() => borrarAdicionalConfig(id), "Adicional borrado");
+  if (!ok) return;
+  revalidatePath("/admin/precios");
+  revalidatePath("/admin/pedidos");
 }

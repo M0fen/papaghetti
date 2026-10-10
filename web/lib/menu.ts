@@ -336,6 +336,44 @@ export interface ItemPedido {
   enredoId?: string;
   /** COGS de UNA unidad, congelado al crear. */
   costo?: number;
+  /**
+   * El precio de UNA unidad TAL COMO LO VE EL CLIENTE, con el impuesto dentro. Es lo
+   * que se imprime en el renglón: la carta dice $15.900 y el papel dice $15.900.
+   * Los pedidos de antes de "precio visto = precio pagado" no lo traen; en ellos manda
+   * `precio`, que era sin impuesto.
+   */
+  precioFinal?: number;
+  /**
+   * UN ADICIONAL: un concepto que no es un plato de la carta ("Limonada de coco",
+   * "Almuerzos"). Lo agrega la caja con su valor y sale en el comprobante como un
+   * renglón más. No gasta despensa.
+   */
+  adicional?: boolean;
+  /** Si el adicional se prepara en cocina (sale en la pantalla de cocina). */
+  cocina?: boolean;
+}
+
+/**
+ * UN ADICIONAL GUARDADO en Precios: un botón de un toque en la caja. El precio es el
+ * que paga el cliente (con el impuesto dentro), igual que el resto de la carta.
+ */
+export interface AdicionalConfig {
+  id: string;
+  nombre: string;
+  precio: number;
+  /** Se prepara en cocina: sale en la pantalla de cocina. */
+  cocina?: boolean;
+  /** Se puede sacar de la caja sin borrarlo. `undefined` = activo. */
+  activo?: boolean;
+}
+
+/** Un adicional que llega a la caja: de la lista guardada o escrito a mano. */
+export interface AdicionalNuevo {
+  nombre: string;
+  /** Precio de UNA unidad, impuesto incluido. */
+  precio: number;
+  cantidad?: number;
+  cocina?: boolean;
 }
 
 /**
@@ -367,7 +405,16 @@ export function lineasDe(p: Pedido): ItemPedido[] {
 
 /** Cuántos platos salen de la cocina para este pedido (no cuántos renglones). */
 export const platosDe = (p: Pedido): number =>
-  lineasDe(p).reduce((s, l) => s + Math.max(1, l.cantidad), 0);
+  lineasDe(p)
+    .filter((l) => !l.adicional)
+    .reduce((s, l) => s + Math.max(1, l.cantidad), 0);
+
+/**
+ * LO QUE VE LA COCINA: los platos y los adicionales que se preparan allá. "Almuerzos
+ * $50.000" es un cobro, no algo que cocinar, y no tiene por qué llenar la pantalla.
+ */
+export const lineasCocina = (p: Pedido): ItemPedido[] =>
+  lineasDe(p).filter((l) => !l.adicional || l.cocina);
 
 export interface Pedido {
   id: string;
@@ -472,6 +519,18 @@ export interface Pedido {
   propina: number;
   descuento: number;
   total: number; // subtotal + impuesto + domicilio + propina − descuento
+  /**
+   * PRECIO VISTO = PRECIO PAGADO. En los pedidos con esta marca todos los precios ya
+   * traen el impuesto dentro: cada renglón dice lo mismo que la carta y el impuesto
+   * se informa como "incluido". `subtotal`, `descuento` e `impuesto` siguen siendo la
+   * contabilidad SIN impuesto (lo que leen reportes y arqueo); `bruto` y
+   * `descuentoFinal` son lo que vio y pagó el cliente.
+   */
+  impuestoIncluido?: boolean;
+  /** La suma de los renglones a precio de carta, antes del descuento. */
+  bruto?: number;
+  /** El descuento tal como se tecleó en la caja, en pesos que deja de pagar el cliente. */
+  descuentoFinal?: number;
   /** Si el pedido nació de un enredo insignia, su id (precio de carta cerrado). */
   enredoId?: string;
   /** Costo de insumos (COGS) según receta, congelado al crear el pedido. */
@@ -680,6 +739,11 @@ export interface Ajustes {
   controlarStock?: boolean;
   /** Promos que el operador enciende/apaga; se reflejan en el sitio. */
   promos: Promo[];
+  /**
+   * Los ADICIONALES de un toque en la caja ("Limonada de coco", "Almuerzos"). Se
+   * configuran en Precios. Lo que no esté aquí se puede escribir a mano igual.
+   */
+  adicionales?: AdicionalConfig[];
 }
 /* APAGADAS de fábrica: son plantillas. Una promo encendida que nadie aprobó
    es una promesa que el local tiene que cumplir en la puerta. */
@@ -715,6 +779,7 @@ export const SEED_AJUSTES: Ajustes = {
   costoDomicilio: 5000,
   pedidoMinimo: 20000,
   promos: SEED_PROMOS,
+  adicionales: [],
 };
 
 /**

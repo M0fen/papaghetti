@@ -116,6 +116,18 @@ export default async function AyudaPage() {
         </article>
 
         <article className="ayuda-card">
+          <h3>Cobrar algo que no es un plato</h3>
+          <p>
+            Una limonada, un empaque, unos almuerzos que un grupo paga aparte: botón{" "}
+            <b>+ Adicional</b>, al tomar la comanda o en la cuenta ya abierta. Toca uno de los
+            guardados o escribe el concepto y el valor (<b>Almuerzos · 50.000</b>). Marca{" "}
+            <b>A cocina</b> si hay que prepararlo; si no, la cocina ni lo ve. Sale en el
+            comprobante con su nombre, y la <b>×</b> lo quita mientras no se haya cobrado. Los
+            de todos los días se guardan en <a href="/admin/precios#adicionales">Precios</a>.
+          </p>
+        </article>
+
+        <article className="ayuda-card">
           <h3>Abrir y cerrar la caja</h3>
           <p>
             En el tablero: <b>Abrir caja</b> con el fondo con el que arrancas. Al cerrar,
@@ -131,15 +143,16 @@ export default async function AyudaPage() {
             Base + proteína(s) a precio completo y <b>cada acompañante a su precio</b>: en
             Papaghetti nada va por cuenta de la casa. Las <b>salsas van con el plato</b>
             porque valen $0 en la carta. Los combos, ensaladas y platos a la carta tienen{" "}
-            <b>precio cerrado</b>.
+            <b>precio cerrado</b>. Todo precio de la carta <b>ya trae el impuesto</b>: el
+            comprobante dice cuánto va adentro, pero no lo suma.
           </p>
         </article>
 
         <article className="ayuda-card">
           <h3>El comprobante del cliente</h3>
           <p>
-            Botón <b>🧾 Comprobante</b> en cada pedido. Sale en papel de 80mm o en cualquier
-            impresora, y se puede mandar por WhatsApp. <b>Ojo:</b> es un comprobante interno,{" "}
+            Botón <b>🧾 Comprobante</b> en cada pedido. Sale en el rollo de la térmica (58 u
+            80 mm) o en cualquier impresora, y se puede mandar por WhatsApp. <b>Ojo:</b> es un comprobante interno,{" "}
             <b>no</b> una factura electrónica ni un documento equivalente de la DIAN.
           </p>
         </article>

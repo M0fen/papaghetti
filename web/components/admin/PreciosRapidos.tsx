@@ -224,9 +224,10 @@ export default function PreciosRapidos({
               <Lapiz size={20} /> Precios y productos
             </h2>
             <p className="prq__sub">
-              Cambia el nombre o el precio y guarda. Se aplica al instante en el menú
-              interactivo del QR, en la página web y en los pedidos nuevos; los pedidos ya
-              tomados conservan su precio.
+              Cambia el nombre o el precio y guarda. El precio es el que paga el cliente,
+              con el impuesto adentro. Se aplica al instante en el menú interactivo del QR,
+              en la página web y en los pedidos nuevos; los pedidos ya tomados conservan su
+              precio.
             </p>
           </div>
           {!inline && (

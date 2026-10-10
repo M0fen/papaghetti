@@ -27,8 +27,8 @@ import { imprimirImagen } from "@/lib/imprimir-imagen";
 import { trabajoEscPos } from "@/lib/escpos";
 import { pruebaTextoEscPos } from "@/lib/tiquete-escpos";
 import ImpresionDirecta, { type TrabajosDirectos } from "./ImpresionDirecta";
-import { ROLLOS, type Rollo } from "@/lib/rollo";
-import { useRollo } from "./useRollo";
+import { ALINEACIONES, ROLLOS, type Rollo } from "@/lib/rollo";
+import { useAlineacion, useRollo } from "./useRollo";
 
 /* El patrón se dibuja UNA vez por pestaña y rollo, y se sirve como "almacén externo":
    en el servidor no hay canvas (null), en el cliente se crea al primer render y se
@@ -43,6 +43,7 @@ const nadaQueSuscribir = () => () => {};
 
 export default function PruebaImpresora() {
   const [rollo, setRollo] = useRollo();
+  const [alinear, setAlinear] = useAlineacion();
   const R = ROLLOS[rollo];
   const patron = useSyncExternalStore(nadaQueSuscribir, () => leerPatron(rollo), () => null);
 
@@ -94,6 +95,29 @@ export default function PruebaImpresora() {
           . Al instalar: modelo <b>POS-58</b> (o XP-58), conexión USB, puerto <b>USB001</b>, con la
           impresora encendida y conectada. El corte es <b>manual</b>: se rasga contra la sierra.
         </p>
+        {/* DÓNDE CAE EL TIQUETE. El driver anuncia 58 mm y el cabezal quema 48: cada
+            driver pone los 10 que sobran en un lado distinto. En la TP586 del local van a
+            la izquierda, así que el tiquete se apoya a la DERECHA. */}
+        <div className="impresora__alinear">
+          <span>Posición en el papel</span>
+          <div className="cbte-papel" role="group" aria-label="Posición del tiquete en el papel">
+            {ALINEACIONES.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className={alinear === o.id ? "is-on" : ""}
+                onClick={() => setAlinear(o.id)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <small>
+            Si el patrón sale cortado de un lado (falta la raya del borde o el último dígito de
+            los precios), cambia esto y vuelve a imprimirlo. En la TP586 del local va a la
+            <b> derecha</b>. Se recuerda en este computador.
+          </small>
+        </div>
         <p>
           <b>Autotest:</b> impresora apagada, mantén <b>FEED</b> y enciéndela. Si ese papel no sale,
           el problema es la impresora o el rollo (la cara brillante va hacia el cabezal), no el
@@ -226,7 +250,9 @@ export default function PruebaImpresora() {
             type="button"
             className="btn btn--primary"
             disabled={!patron}
-            onClick={() => patron && imprimirImagen(patron.toDataURL("image/png"), true, "Patrón de prueba", R.mm)}
+            onClick={() =>
+              patron && imprimirImagen(patron.toDataURL("image/png"), true, "Patrón de prueba", R.mm, alinear)
+            }
           >
             <span>Imprimir el patrón de prueba</span>
           </button>

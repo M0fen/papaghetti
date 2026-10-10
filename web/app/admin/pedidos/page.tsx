@@ -47,6 +47,7 @@ export default async function PedidosPage() {
           platos={cat.enredos}
           impuestoPct={cat.ajustes.impuestoPct ?? 0}
           costoDomicilio={cat.ajustes.costoDomicilio}
+          adicionales={cat.ajustes.adicionales ?? []}
         />
         <PreciosRapidos
           bases={cat.bases}
@@ -55,7 +56,7 @@ export default async function PedidosPage() {
           platos={cat.enredos}
         />
       </div>
-      <OrdersTable pedidos={delDia} />
+      <OrdersTable pedidos={delDia} adicionales={cat.ajustes.adicionales ?? []} />
     </section>
   );
 }

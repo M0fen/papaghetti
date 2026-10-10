@@ -8,6 +8,7 @@ import {
   type Insumo,
   type RecetaItem,
 } from "@/lib/menu";
+import { sinImpuesto } from "@/lib/precios";
 import { guardarRecetaAction, setDisponibilidadAction } from "@/app/admin/actions";
 
 export default function RecetasEditor({
@@ -15,11 +16,14 @@ export default function RecetasEditor({
   proteinas,
   toppings,
   insumos,
+  impuestoPct = 0,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
   insumos: Insumo[];
+  /** El de Ajustes: los precios de la carta lo traen adentro y el margen va sin él. */
+  impuestoPct?: number;
 }) {
   const byId = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
   return (
@@ -28,9 +32,9 @@ export default function RecetasEditor({
         La receta define <b>cuánta despensa consume una porción</b> de cada componente.
         Cada venta la descuenta sola y te muestra el <b>costo y el margen</b>.
       </p>
-      <Grupo titulo="🥔 Bases" items={bases} insumos={insumos} byId={byId} />
-      <Grupo titulo="🍗 Proteínas" items={proteinas} insumos={insumos} byId={byId} />
-      <Grupo titulo="🌽 Toppings" items={toppings} insumos={insumos} byId={byId} />
+      <Grupo titulo="🥔 Bases" items={bases} insumos={insumos} byId={byId} pct={impuestoPct} />
+      <Grupo titulo="🍗 Proteínas" items={proteinas} insumos={insumos} byId={byId} pct={impuestoPct} />
+      <Grupo titulo="🌽 Toppings" items={toppings} insumos={insumos} byId={byId} pct={impuestoPct} />
     </>
   );
 }
@@ -40,18 +44,20 @@ function Grupo({
   items,
   insumos,
   byId,
+  pct,
 }: {
   titulo: string;
   items: Ingrediente[];
   insumos: Insumo[];
   byId: Map<string, Insumo>;
+  pct: number;
 }) {
   return (
     <section className="rec-group">
       <h2 className="ins-cat__title">{titulo}<span className="ins-cat__count">{items.length}</span></h2>
       <div className="rec-grid">
         {items.map((i) => (
-          <RecetaCard key={i.id} ing={i} insumos={insumos} byId={byId} />
+          <RecetaCard key={i.id} ing={i} insumos={insumos} byId={byId} pct={pct} />
         ))}
       </div>
     </section>
@@ -62,10 +68,12 @@ function RecetaCard({
   ing,
   insumos,
   byId,
+  pct,
 }: {
   ing: Ingrediente;
   insumos: Insumo[];
   byId: Map<string, Insumo>;
+  pct: number;
 }) {
   const [rows, setRows] = useState<RecetaItem[]>(
     ing.receta && ing.receta.length ? ing.receta : []
@@ -75,8 +83,12 @@ function RecetaCard({
     (s, r) => s + (byId.get(r.insumoId)?.costo ?? 0) * (r.cantidad || 0),
     0
   );
-  const margen = ing.precio - costo;
-  const margenPct = ing.precio > 0 ? Math.round((margen / ing.precio) * 100) : 0;
+  /* El precio de la carta YA trae el impuesto al consumo, y ese pedazo es de la DIAN:
+     el margen se saca sobre lo que le queda al negocio, no sobre lo que paga el cliente.
+     Sobre el precio completo, cada plato parecía dejar un 8% que nunca fue de la casa. */
+  const ingreso = sinImpuesto(ing.precio, pct);
+  const margen = ingreso - costo;
+  const margenPct = ingreso > 0 ? Math.round((margen / ingreso) * 100) : 0;
 
   const add = () =>
     setRows((r) => [...r, { insumoId: insumos[0]?.id ?? "", cantidad: 0 }]);
@@ -142,7 +154,10 @@ function RecetaCard({
 
         <div className="reccard__cost">
           <span className="reccard__chip">Costo <b>{formatCOP(Math.round(costo))}</b></span>
-          <span className={`reccard__chip ${margen < 0 ? "is-neg" : "is-pos"}`}>
+          <span
+            className={`reccard__chip ${margen < 0 ? "is-neg" : "is-pos"}`}
+            title={pct > 0 ? `Sobre ${formatCOP(ingreso)}: el precio sin el impuesto (${pct}%)` : undefined}
+          >
             Margen <b>{formatCOP(Math.round(margen))}</b> · {margenPct}%
           </span>
           <button type="submit" className="btn btn--primary btnmini reccard__save"><span>Guardar receta</span></button>

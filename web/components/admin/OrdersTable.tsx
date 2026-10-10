@@ -13,6 +13,7 @@ import {
   metodoEmoji,
   MOTIVOS_DESCUENTO,
   lineasDe,
+  type AdicionalConfig,
   type Pedido,
   type EstadoPedido,
 } from "@/lib/menu";
@@ -23,6 +24,8 @@ import {
   cancelarAction,
   devolverAction,
   corregirCobroAction,
+  agregarAdicionalAction,
+  quitarAdicionalAction,
 } from "@/app/pedido-actions";
 import { esVenta } from "@/lib/menu";
 /* El texto del comprobante para WhatsApp es el MISMO que el de la página del tiquete
@@ -31,7 +34,21 @@ import { waComprobanteHref } from "@/lib/comprobantes";
 
 type Filtro = "todos" | EstadoPedido | "porpagar";
 
-export default function OrdersTable({ pedidos }: { pedidos: Pedido[] }) {
+const soloDigitos = (s: string) => s.replace(/\D/g, "");
+/** "50000" → "50.000" mientras se escribe: un cero de más se ve antes de sumar. */
+const conPuntos = (s: string) => {
+  const d = soloDigitos(s).slice(0, 9);
+  return d ? Number(d).toLocaleString("es-CO") : "";
+};
+
+export default function OrdersTable({
+  pedidos,
+  adicionales = [],
+}: {
+  pedidos: Pedido[];
+  /** Los adicionales de un toque, configurados en Precios. */
+  adicionales?: AdicionalConfig[];
+}) {
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const router = useRouter();
 
@@ -97,14 +114,106 @@ export default function OrdersTable({ pedidos }: { pedidos: Pedido[] }) {
           </p>
         )}
         {filtrados.map((p) => (
-          <OrderCard key={p.id} p={p} />
+          <OrderCard key={p.id} p={p} adicionales={adicionales} />
         ))}
       </div>
     </>
   );
 }
 
-function OrderCard({ p }: { p: Pedido }) {
+/**
+ * SUMAR UN ADICIONAL A UNA CUENTA ABIERTA: lo que aparece a la hora de pagar ("dos
+ * limonadas", "los almuerzos van aparte"). Va plegado: se usa a menudo, pero no en
+ * cada cuenta, y abierto ocupaba media tarjeta.
+ */
+function AgregarAdicional({ p, adicionales }: { p: Pedido; adicionales: AdicionalConfig[] }) {
+  const [concepto, setConcepto] = useState("");
+  const [valor, setValor] = useState("");
+  const [cocina, setCocina] = useState(false);
+  /* Si el pedido ya salió de cocina, un adicional "a cocina" no lo vería nadie: la
+     cocina ya cerró esa tarjeta. Ahí solo se cobra. */
+  const enCocina = p.estado === "recibido" || p.estado === "cocina";
+  const guardados = adicionales.filter((a) => a.activo !== false);
+  return (
+    <details className="ocard__adic">
+      <summary className="btn btn--ghost btnmini">
+        <span>＋ Adicional</span>
+      </summary>
+      <div className="ocard__adicbox">
+        {guardados.length > 0 && (
+          <div className="ocard__adicchips">
+            {guardados.map((a) => (
+              <form key={a.id} action={agregarAdicionalAction}>
+                <input type="hidden" name="id" value={p.id} />
+                <input type="hidden" name="nombre" value={a.nombre} />
+                <input type="hidden" name="precio" value={a.precio} />
+                {a.cocina && enCocina && <input type="hidden" name="cocina" value="1" />}
+                <button type="submit" className="chipbtn">
+                  {a.nombre} · {formatCOP(a.precio)}
+                </button>
+              </form>
+            ))}
+          </div>
+        )}
+        <form
+          action={agregarAdicionalAction}
+          className="adic__escrito"
+          onSubmit={() =>
+            setTimeout(() => {
+              setConcepto("");
+              setValor("");
+              setCocina(false);
+            }, 400)
+          }
+        >
+          <input type="hidden" name="id" value={p.id} />
+          <input
+            name="nombre"
+            value={concepto}
+            onChange={(e) => setConcepto(e.target.value)}
+            maxLength={60}
+            placeholder="Concepto · ej. Almuerzos"
+            aria-label="Concepto del adicional"
+            required
+          />
+          <label className="prq__precio">
+            <span aria-hidden>$</span>
+            <input
+              name="precio"
+              inputMode="numeric"
+              value={valor}
+              onChange={(e) => setValor(conPuntos(e.target.value))}
+              placeholder="50.000"
+              aria-label="Valor del adicional"
+              required
+            />
+          </label>
+          {enCocina && (
+            <label className="adic__check">
+              <input
+                type="checkbox"
+                name="cocina"
+                value="1"
+                checked={cocina}
+                onChange={(e) => setCocina(e.target.checked)}
+              />
+              A cocina
+            </label>
+          )}
+          <button
+            type="submit"
+            className="btn btn--gold btnmini"
+            disabled={!concepto.trim() || !(Number(soloDigitos(valor)) > 0)}
+          >
+            <span>+ Sumar a la cuenta</span>
+          </button>
+        </form>
+      </div>
+    </details>
+  );
+}
+
+function OrderCard({ p, adicionales }: { p: Pedido; adicionales: AdicionalConfig[] }) {
   /* Una sola vez: arma el texto completo del comprobante y esta lista se repinta
      cada 10 segundos, con una tarjeta por pedido. */
   const wa = waComprobanteHref(p);
@@ -113,6 +222,9 @@ function OrderCard({ p }: { p: Pedido }) {
      devolver ni cancelar desde ninguna pantalla: el plato desaparecía del flujo y la
      cuenta se quedaba viva para siempre. Mientras no esté cobrado, siempre hay salida. */
   const corregible = p.estado !== "cancelado" && p.pago === "pendiente";
+  /* El descuento se teclea en lo que deja de pagar el cliente. En los pedidos de antes
+     se había guardado sobre la base sin impuesto, y así se muestra al corregirlos. */
+  const descuentoVisto = p.impuestoIncluido ? (p.descuentoFinal ?? 0) : (p.descuento ?? 0);
   return (
     <article className={`ocard ${p.estado === "cancelado" ? "is-cancelado" : ""}`}>
       <div className="ocard__top">
@@ -154,12 +266,25 @@ function OrderCard({ p }: { p: Pedido }) {
           resumen de una línea los volvía ilegibles. */}
       <ul className="ocard__lineas">
         {lineasDe(p).map((l, i) => (
-          <li key={i}>
+          <li key={i} className={l.adicional ? "is-adicional" : undefined}>
             {l.cantidad > 1 && <b className="ocard__x">{l.cantidad}×</b>}
             <span>
               {l.nombre}
               {l.detalle ? <em> {l.detalle}</em> : null}
+              {/* El valor de un adicional se escribió a mano: se deja a la vista para
+                  que un cero de más se note antes de cobrar. */}
+              {l.adicional ? <em> · {formatCOP((l.precioFinal ?? l.precio) * l.cantidad)}</em> : null}
             </span>
+            {l.adicional && corregible && (
+              <form action={quitarAdicionalAction} className="ocard__quitar">
+                <input type="hidden" name="id" value={p.id} />
+                <input type="hidden" name="indice" value={i} />
+                <input type="hidden" name="nombre" value={l.nombre} />
+                <button type="submit" aria-label={`Quitar ${l.nombre}`} title="Quitar de la cuenta">
+                  ×
+                </button>
+              </form>
+            )}
           </li>
         ))}
       </ul>
@@ -190,6 +315,7 @@ function OrderCard({ p }: { p: Pedido }) {
             </button>
           </form>
         )}
+        {corregible && <AgregarAdicional p={p} adicionales={adicionales} />}
         {p.pago === "pendiente" && p.estado !== "cancelado" && (
           <form action={cobrarAction} className="ocard__cobrar">
             <input type="hidden" name="id" value={p.id} />
@@ -199,7 +325,7 @@ function OrderCard({ p }: { p: Pedido }) {
                 muestra es un total que no cuadra con lo que el cliente leyó.
                 step="any" en el descuento: con step=500 el navegador rechazaba en
                 silencio $1.200 y el cobro simplemente no ocurría, sin ningún mensaje. */}
-            <label className="ocard__pd">
+            <label className="ocard__pd" title="En pesos que deja de pagar el cliente">
               Descuento
               <input type="number" name="descuento" min={0} step="any" defaultValue={0} aria-label="Descuento" />
             </label>
@@ -238,7 +364,7 @@ function OrderCard({ p }: { p: Pedido }) {
               <input type="hidden" name="id" value={p.id} />
               <label className="ocard__pd">
                 Descuento
-                <input type="number" name="descuento" min={0} step="any" defaultValue={p.descuento ?? 0} aria-label="Descuento" />
+                <input type="number" name="descuento" min={0} step="any" defaultValue={descuentoVisto} aria-label="Descuento" />
               </label>
               <label className="ocard__pd">
                 Motivo

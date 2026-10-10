@@ -13,6 +13,7 @@ import {
   calcularTotales,
   desglosarPrecioFinal,
   idsGratis,
+  cuentaIncluida,
 } from "./lib/precios.ts";
 import { inicioDe, esVenta, ventaNeta } from "./lib/menu.ts";
 
@@ -96,9 +97,12 @@ console.log("\n═══ EL ESPEJO DEL CLIENTE COINCIDE CON EL SERVIDOR ══�
      el que queda (2.000): nunca "los dos primeros del array", que llegaba en el orden en
      que el cliente los tocó y hacía que el mismo plato costara distinto según los clics. */
   eq("con promoción de 2, se descuentan los dos más caros", t.subtotal, 18900 + 9000 + 2000);
-  eq("impuesto", t.impuesto, Math.round(29900 * 0.08));
-  eq("total del espejo", t.total, 29900 + 2392 + 5000);
-  eq("y coincide con totalDe()", totalDe(t), 37292);
+  /* PRECIO VISTO = PRECIO PAGADO: la carta ya trae el impuesto. El espejo lo informa
+     (lo que hay DENTRO de los 29.900) y no lo suma encima. */
+  eq("impuesto incluido, no sumado", t.impuesto, 29900 - Math.round(29900 / 1.08));
+  eq("total del espejo = carta + envío", t.total, 29900 + 5000);
+  const servidor = cuentaIncluida({ bruto: t.subtotal, impuestoPct: 8, domicilio: 5000 });
+  eq("y coincide con la cuenta del servidor", [servidor.total, servidor.impuesto], [t.total, t.impuesto]);
 
   // El orden de los clics ya NO cambia el precio.
   const alReves = calcularTotales({

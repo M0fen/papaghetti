@@ -125,9 +125,11 @@ console.log("\n=== LO QUE LLEGA A LA IMPRESORA ===");
 check("se manda un documento", Boolean(docImp));
 if (docImp) {
   check("contiene UNA imagen y nada más de HTML", /<img[^>]+src="data:image\/png/.test(docImp) && !/<div|<p |<span/.test(docImp));
-  /* El ancho ÚTIL del cabezal, centrado, no 100%: la TP586 del local es de 58 mm e
-     imprime 48 (384 puntos). A 48mm los 384px caen uno a uno sobre sus puntos. */
-  check("la imagen va a 48mm centrados (los puntos del cabezal, 1:1)", /img\{display:block;width:48mm;max-width:100%;margin:0 auto/.test(docImp));
+  /* El ancho ÚTIL del cabezal, no 100%: la TP586 del local es de 58 mm e imprime 48
+     (384 puntos). A 48mm los 384px caen uno a uno sobre sus puntos. Y APOYADA A LA
+     DERECHA: ese driver quema los 48 mm de la derecha del papel; centrada se comía el
+     último dígito de cada precio (ver ALINEACION_POR_DEFECTO en lib/rollo). */
+  check("la imagen va a 48mm apoyada a la derecha (los puntos del cabezal, 1:1)", /img\{display:block;width:48mm;max-width:100%;margin:0 0 0 auto/.test(docImp));
   check("NO lleva el panel", !/adminx__side/.test(docImp));
   /* SIN `size`: Epson y Bixolon declaran 80×297 y 80×3276 y no arrancan en el mismo;
      si el @page no coincide con el papel del driver, Chrome encoge o centra la página.
@@ -180,6 +182,31 @@ const doc80 = await p.evaluate(() => window.__doc);
 check("y el documento va a 72mm", /width:72mm/.test(doc80 || ""));
 await p.getByRole("button", { name: /Térmica 58mm/ }).click();
 await p.waitForTimeout(1500);
+
+/* La posición se escoge en Impresora y se recuerda en el equipo: otra impresora puede
+   quemar los 48 mm del centro. Lo escogido allá tiene que llegar al papel de acá. */
+await p.goto(`${B}/admin/impresora`, { waitUntil: "networkidle" });
+await p.locator(".impresora__alinear").getByRole("button", { name: "Centro" }).click();
+await p.goto(B + href, { waitUntil: "networkidle" });
+await p.waitForSelector(".cbte-imagen", { timeout: 20000 });
+await p.evaluate(() => {
+  window.__doc = null;
+  const orig = window.open;
+  window.open = function () {
+    const w = orig.call(window, "", "_blank");
+    if (w) w.print = () => { window.__doc = w.document.documentElement.outerHTML; };
+    return w;
+  };
+});
+await p.getByRole("button", { name: /^Imprimir$/ }).click();
+await p.waitForTimeout(2000);
+const docCentro = await p.evaluate(() => window.__doc);
+check("con 'Centro' en Impresora, el tiquete sale centrado", /width:48mm;max-width:100%;margin:0 auto/.test(docCentro || ""));
+await p.goto(`${B}/admin/impresora`, { waitUntil: "networkidle" });
+await p.locator(".impresora__alinear").getByRole("button", { name: "Derecha" }).click();
+await p.goto(B + href, { waitUntil: "networkidle" });
+await p.waitForSelector(".cbte-imagen", { timeout: 20000 });
+
 check("hay tinta ARRIBA (logo y datos)", px.negro[0] > 500);
 check("hay tinta EN MEDIO (renglones y sumas) — no solo el logo", px.negro[2] > 500 && px.negro[3] > 500, `${px.negro[2]} / ${px.negro[3]}`);
 check("hay tinta ABAJO (total, pago y pie)", px.negro[4] + px.negro[5] > 500);

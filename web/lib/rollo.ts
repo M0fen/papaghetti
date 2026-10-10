@@ -36,3 +36,29 @@ export const CLAVE_ROLLO = "pg_rollo";
 export function rolloValido(v: unknown): Rollo {
   return v === "80" || v === 80 ? 80 : v === "58" || v === 58 ? 58 : ROLLO_POR_DEFECTO;
 }
+
+/**
+ * DÓNDE CAE EL TIQUETE DENTRO DEL PAPEL DEL DRIVER.
+ *
+ * El driver dice que el papel mide 58 mm, pero el cabezal solo quema 48: hay 10 mm que
+ * no existen, y cada driver los pone en un lado distinto. El tiquete iba CENTRADO y en
+ * la TP586 del local se comía el último dígito de cada precio, porque ese driver quema
+ * los 48 mm de la DERECHA. Se arreglaba moviendo los márgenes en el diálogo de Chrome,
+ * pero eso vive en el navegador y se pierde con borrar sus datos. Aquí queda escrito.
+ *
+ * Es cosa del APARATO, como el rollo: se guarda por equipo, y el de fábrica es el del
+ * local. El patrón de prueba dice cuál es: la raya del lado que no sale es el lado que
+ * sobra.
+ */
+export type Alineacion = "izq" | "centro" | "der";
+export const ALINEACIONES: { id: Alineacion; label: string }[] = [
+  { id: "izq", label: "Izquierda" },
+  { id: "centro", label: "Centro" },
+  { id: "der", label: "Derecha" },
+];
+export const ALINEACION_POR_DEFECTO: Alineacion = "der";
+export const CLAVE_ALINEACION = "pg_alinear";
+
+export function alineacionValida(v: unknown): Alineacion {
+  return v === "izq" || v === "centro" || v === "der" ? v : ALINEACION_POR_DEFECTO;
+}
