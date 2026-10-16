@@ -7141,6 +7141,19 @@ body.enreda-jugando .sticky-pedir {
 /* ══════════════════════════════════════════════════════════════════════════
    FASE 1 · DOS BASES (pantallas). Cada fase escribe SOLO entre sus dos marcas.
    ══════════════════════════════════════════════════════════════════════════ */
+/* Nueva comanda: la pista de cómo se cobran dos bases, bajo las casillas. El reset de
+   Tailwind deja los <p> sin margen y la nota quedaba pegada a los botones. */
+.npedido__nota-bases {
+  margin: 6px 2px 0;
+}
+/* Armador: el renglón de dos bases ("A / B · mitad y mitad") envuelve en el teléfono y el
+   precio quedaba pegado al texto. Con hueco y el precio entero, se lee como un ticket. */
+.ticket__row {
+  gap: 12px;
+}
+.ticket__row > span:last-child {
+  white-space: nowrap;
+}
 
 /* ═══ (fin de la fase 1) ═══ */
 

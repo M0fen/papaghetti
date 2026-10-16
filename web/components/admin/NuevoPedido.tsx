@@ -26,6 +26,8 @@ import {
   formatCOP,
   grupoPlatoLabel,
   GRUPOS_PLATO,
+  basesMaxDe,
+  cobroBasesDe,
   type AdicionalConfig,
   type CobroBases,
   type EnredoInsignia,
@@ -33,7 +35,14 @@ import {
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
-import { sinImpuesto } from "@/lib/precios";
+import {
+  alternarBase,
+  basesElegidas,
+  calcularTotales,
+  modoBasesTexto,
+  nombreBases,
+  sinImpuesto,
+} from "@/lib/precios";
 import { crearComandaPanelAction } from "@/app/pedido-actions";
 import IngImg from "@/components/IngImg";
 import PlatoImg from "@/components/PlatoImg";
@@ -43,7 +52,8 @@ import { nuevaClave } from "@/lib/idem";
 type Renglon = {
   key: string;
   enredoId?: string;
-  baseId?: string;
+  /** Una o dos bases, en el orden de la carta (vacío en platos y adicionales). */
+  baseIds?: string[];
   proteinaIds: string[];
   toppingIds: string[];
   cantidad: number;
@@ -103,8 +113,9 @@ export default function NuevoPedido({
   basesMax?: 1 | 2;
   cobroBases?: CobroBases;
 }) {
-  void basesMax; // (los usa el armador de la caja; ver la fase de dos bases)
-  void cobroBases;
+  /* DOS BASES (Ajustes → Cobro y servicio), con los mismos lectores que el servidor. */
+  const maxBases = basesMaxDe({ basesMax });
+  const modoBases = cobroBasesDe({ cobroBases });
   const [abierto, setAbierto] = useState(false);
   /* Clave de idempotencia: era el ÚNICO canal sin ella. Un doble toque en el
      mostrador creaba dos comandas y descontaba la despensa dos veces. Va en ESTADO,
@@ -114,7 +125,8 @@ export default function NuevoPedido({
   const [tipo, setTipo] = useState<TipoServicio>("llevar");
   const [renglones, setRenglones] = useState<Renglon[]>([]);
   // El armador de UN renglón, que se vacía cada vez que se agrega a la comanda.
-  const [baseId, setBaseId] = useState("");
+  // Las bases van en el orden en que se tocaron: con dos, la última cede su sitio.
+  const [baseIds, setBaseIds] = useState<string[]>([]);
   const [protIds, setProtIds] = useState<string[]>([]);
   const [topIds, setTopIds] = useState<string[]>([]);
   const [verPlatos, setVerPlatos] = useState(false);
@@ -134,41 +146,52 @@ export default function NuevoPedido({
   const todos = useMemo(() => [...bases, ...proteinas, ...toppings], [bases, proteinas, toppings]);
   const find = (id: string) => todos.find((i) => i.id === id);
 
-  /* El precio unitario del renglón que se está armando. Es el MISMO cálculo del
-     servidor (lib/precios): las salsas valen $0 y cada acompañante se cobra. */
-  const precioArmado = (b: string, ps: string[], ts: string[]) =>
-    (find(b)?.precio ?? 0) +
-    ps.reduce((s, id) => s + (find(id)?.precio ?? 0), 0) +
-    ts.reduce((s, id) => {
-      const i = find(id);
-      return s + (i && i.categoria !== "salsa" ? i.precio : 0);
-    }, 0);
+  /* Las bases elegidas que de verdad se pueden preparar. Si una se agota mientras se
+     arma (la página se refresca tras cada comanda), sale sola de la selección en vez de
+     quedarse invisible dentro de la caja y hacer que el servidor rechace la comanda. */
+  const tocadas = baseIds.filter((id) => basesD.some((b) => b.id === id));
+  /** En el ORDEN DE LA CARTA: así se nombra el renglón, igual lo arme quien lo arme. */
+  const basesSel = basesElegidas(tocadas, basesD);
+
+  /* El precio unitario del renglón que se está armando, con la MISMA función que usan las
+     pantallas del cliente (lib/precios): dos bases según Ajustes, las salsas a $0 y cada
+     acompañante a su precio. Aquí vivía una copia de la fórmula escrita a mano: con un
+     segundo modo de cobro, la caja y el sitio habrían dicho precios distintos. */
+  const precioArmado = (bs: Ingrediente[], ps: string[], ts: string[]) =>
+    calcularTotales({
+      bases: bs,
+      cobroBases: modoBases,
+      proteinas: ps.map(find),
+      toppings: ts.map(find).filter(Boolean) as Ingrediente[],
+      impuestoPct,
+    }).subtotal;
 
   const agregarArmado = () => {
     // Solo la base es obligatoria: un plato sin proteína también se vende.
-    if (!baseId) return;
-    const b = find(baseId);
+    if (!basesSel.length) return;
     const ps = protIds.map(find).filter(Boolean) as Ingrediente[];
     const ts = topIds.map(find).filter(Boolean) as Ingrediente[];
     setRenglones((r) => [
       ...r,
       {
         key: `${Date.now()}-${r.length}`,
-        baseId,
+        baseIds: basesSel.map((b) => b.id),
         proteinaIds: protIds,
         toppingIds: topIds,
         cantidad: 1,
-        nombre: b?.nombre ?? "—",
+        nombre: nombreBases(basesSel),
         detalle: [
+          // Con dos bases, lo primero que lee la cocina es cómo va el plato.
+          basesSel.length > 1 ? modoBasesTexto(modoBases) : "",
           ps.length ? `con ${ps.map((p) => p.nombre).join(" + ")}` : "",
           ts.length ? `+ ${ts.map((t) => t.nombre).join(", ")}` : "",
         ]
           .filter(Boolean)
           .join(" · "),
-        precio: precioArmado(baseId, protIds, topIds),
+        precio: precioArmado(basesSel, protIds, topIds),
       },
     ]);
-    setBaseId("");
+    setBaseIds([]);
     setProtIds([]);
     setTopIds([]);
   };
@@ -273,7 +296,7 @@ export default function NuevoPedido({
         // Deja el formulario listo para la comanda siguiente, sin arrastrar nada.
         setTimeout(() => {
           setRenglones([]);
-          setBaseId("");
+          setBaseIds([]);
           setProtIds([]);
           setTopIds([]);
           setConcepto("");
@@ -295,7 +318,8 @@ export default function NuevoPedido({
             .filter((r) => !r.adicional)
             .map((r) => ({
               enredoId: r.enredoId,
-              baseId: r.baseId,
+              baseId: r.baseIds?.[0], // el campo de siempre: la primera
+              baseIds: r.baseIds, // una o dos: si viene, manda sobre baseId
               proteinaIds: r.proteinaIds,
               toppingIds: r.toppingIds,
               cantidad: r.cantidad,
@@ -516,23 +540,37 @@ export default function NuevoPedido({
         </div>
       )}
       <fieldset className="npedido__grupo">
-        <legend>Base</legend>
+        {/* Empieza siempre por "Base": así la busca la prueba de la caja (qa-comprobante). */}
+        <legend>{maxBases > 1 ? "Base · elige 1 o 2" : "Base"}</legend>
         <div className="npedido__chips">
           {basesD.length === 0 && <em className="npedido__nada">Ninguna disponible hoy</em>}
-          {basesD.map((b) => (
-            <label key={b.id} className={`chipbtn ${baseId === b.id ? "is-on" : ""}`}>
-              <input
-                type="radio"
-                name="_baseId"
-                value={b.id}
-                checked={baseId === b.id}
-                onChange={() => setBaseId(b.id)}
-                className="visually-hidden"
-              />
-              <IngImg ing={b} className="chipbtn__img" /> {b.nombre} · {formatCOP(b.precio)}
-            </label>
-          ))}
+          {basesD.map((b) => {
+            const on = tocadas.includes(b.id);
+            return (
+              <label key={b.id} className={`chipbtn ${on ? "is-on" : ""}`}>
+                <input
+                  /* Con tope 1, botón de radio como siempre (tocar otra la reemplaza);
+                     con 2, casillas que prenden y apagan (lib/precios: alternarBase). */
+                  type={maxBases > 1 ? "checkbox" : "radio"}
+                  name="_baseId"
+                  value={b.id}
+                  checked={on}
+                  onChange={() => setBaseIds(alternarBase(tocadas, b.id, maxBases))}
+                  className="visually-hidden"
+                />
+                <IngImg ing={b} className="chipbtn__img" /> {b.nombre} · {formatCOP(b.precio)}
+              </label>
+            );
+          })}
         </div>
+        {/* Que el operario pueda contestar "¿y por qué vale eso?" sin abrir Ajustes. */}
+        {basesSel.length > 1 && (
+          <p className="field__nota npedido__nota-bases">
+            {modoBases === "mitad"
+              ? "Mitad y mitad: se cobra la base más cara."
+              : "Dos bases completas: se cobra cada una."}
+          </p>
+        )}
       </fieldset>
 
       <fieldset className="npedido__grupo">
@@ -580,11 +618,11 @@ export default function NuevoPedido({
         type="button"
         className="btn btn--gold comanda__sumar"
         onClick={agregarArmado}
-        disabled={!baseId}
+        disabled={!basesSel.length}
       >
         <span>
           + Agregar esta caja a la comanda
-          {baseId ? ` · ${formatCOP(precioArmado(baseId, protIds, topIds))}` : ""}
+          {basesSel.length ? ` · ${formatCOP(precioArmado(basesSel, protIds, topIds))}` : ""}
         </span>
       </button>
 

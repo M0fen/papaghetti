@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { Ingrediente } from "@/lib/menu";
 import type { CSSVars } from "@/lib/cssVars";
 import IngImg from "./IngImg";
@@ -8,12 +9,16 @@ import IngImg from "./IngImg";
  * cada uno con micro-rebote al añadirse.
  */
 export default function Bowl({
-  base,
+  bases,
   proteinas,
   toppings,
   mini = false,
 }: {
-  base: Ingrediente;
+  /**
+   * Una o dos (Ajustes → Cobro y servicio), en el orden de la carta. Vacía solo si la
+   * carta no trae ninguna: antes recibía UNA base obligatoria y, sin ella, reventaba.
+   */
+  bases: Ingrediente[];
   /** Cero, una o varias: el plato sin proteína también existe. */
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
@@ -21,19 +26,24 @@ export default function Bowl({
 }) {
   // proteínas primero (centro), luego toppings hacia afuera
   const bits = [...proteinas, ...toppings];
+  /* Con dos bases las hebras se alternan entre sus colores: el "mitad y mitad" se VE en
+     el bol. Con una, todas llevan el suyo, exactamente como siempre. */
+  const hebra = (k: number) => bases[k % bases.length].color;
 
   return (
     <div className={`bowl3 ${mini ? "bowl3--mini" : ""}`} aria-hidden>
       <div className="bowl3__vessel">
         {/* Nido de noodles — su color ES la base elegida */}
-        <svg className="bowl3__noodles" viewBox="0 0 200 200" fill="none">
-          <g stroke={base.color} strokeWidth={7} strokeLinecap="round">
-            <path d="M40 120 C 30 80, 90 70, 100 100 S 170 90, 160 130 S 90 160, 100 120 S 40 150, 55 110" opacity="0.9" />
-            <path d="M55 100 C 70 70, 140 80, 130 110 S 60 130, 80 95" opacity="0.7" />
-            <path d="M45 135 C 80 160, 150 150, 150 115 S 95 95, 115 135" opacity="0.8" />
-            <path d="M70 90 C 110 75, 150 100, 135 130" opacity="0.55" />
-          </g>
-        </svg>
+        {bases.length > 0 && (
+          <svg className="bowl3__noodles" viewBox="0 0 200 200" fill="none">
+            <g strokeWidth={7} strokeLinecap="round">
+              <path stroke={hebra(0)} d="M40 120 C 30 80, 90 70, 100 100 S 170 90, 160 130 S 90 160, 100 120 S 40 150, 55 110" opacity="0.9" />
+              <path stroke={hebra(1)} d="M55 100 C 70 70, 140 80, 130 110 S 60 130, 80 95" opacity="0.7" />
+              <path stroke={hebra(2)} d="M45 135 C 80 160, 150 150, 150 115 S 95 95, 115 135" opacity="0.8" />
+              <path stroke={hebra(3)} d="M70 90 C 110 75, 150 100, 135 130" opacity="0.55" />
+            </g>
+          </svg>
+        )}
 
         {/* Proteína + toppings apilados */}
         <div className="bowl3__pile">
@@ -57,9 +67,16 @@ export default function Bowl({
 
         <div className="bowl3__shine" />
       </div>
-      <p className="bowl3__base">
-        <IngImg ing={base} className="bowl3__baseimg" claseEmoji="bowl3__emoji" /> {base.nombre}
-      </p>
+      {bases.length > 0 && (
+        <p className="bowl3__base">
+          {bases.map((b, i) => (
+            <Fragment key={b.id}>
+              {i > 0 && " / "}
+              <IngImg ing={b} className="bowl3__baseimg" claseEmoji="bowl3__emoji" /> {b.nombre}
+            </Fragment>
+          ))}
+        </p>
+      )}
     </div>
   );
 }

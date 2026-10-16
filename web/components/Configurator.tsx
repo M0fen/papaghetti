@@ -8,11 +8,21 @@ import {
   formatCOP,
   waLink as waHref,
   whatsappValido,
+  basesMaxDe,
+  cobroBasesDe,
   type CobroBases,
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
-import { calcularTotales, faltaParaMinimo } from "@/lib/precios";
+import {
+  alternarBase,
+  basesElegidas,
+  calcularTotales,
+  faltaParaMinimo,
+  modoBasesTexto,
+  nombreBases,
+  renglonesBases,
+} from "@/lib/precios";
 import { nuevaClave } from "@/lib/idem";
 import { enviarPedido } from "@/app/pedido-actions";
 import Reveal from "./Reveal";
@@ -33,6 +43,8 @@ export default function Configurator({
   pedidoMinimo = 0,
   abierto = true,
   embebido,
+  basesMax,
+  cobroBases,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
@@ -52,10 +64,18 @@ export default function Configurator({
 }) {
   const all = [...bases, ...proteinas, ...toppingsCat];
   const find = (id: string) => all.find((i) => i.id === id);
+  /* DOS BASES (Ajustes → Cobro y servicio), leídas con los mismos lectores que usa el
+     servidor: si el ajuste no llega, el de fábrica. Pantalla y caja cobran igual. */
+  const maxBases = basesMaxDe({ basesMax });
+  const modoBases = cobroBasesDe({ cobroBases });
 
-  const [baseId, setBaseId] = useState(
-    () => primeraDisponible(bases)[0]?.id ?? bases[0]?.id
-  );
+  /* LAS BASES, en el orden en que se tocaron (con dos, la última tocada es la que cede
+     su sitio). Arranca con la primera disponible, o la primera de la carta, para que el
+     plato nunca se vea vacío. */
+  const [baseIds, setBaseIds] = useState<string[]>(() => {
+    const id = primeraDisponible(bases)[0]?.id ?? bases[0]?.id;
+    return id ? [id] : [];
+  });
   /* PROTEÍNAS: las que quiera, o ninguna (lo pidió el dueño). Arranca con la primera
      disponible para que el plato no se vea vacío, pero se puede quitar. */
   const [proteinaIds, setProteinaIds] = useState<string[]>(() =>
@@ -73,7 +93,17 @@ export default function Configurator({
   // Idempotencia: se rellena al ENVIAR, no en el render. Ver lib/idem.ts.
   const idem = useRef("");
 
-  const base = find(baseId)!;
+  /* Antes era `find(baseId)!`: si la base elegida salía de la carta (o la carta no traía
+     ninguna) el armador reventaba entero. Ahora, si la elegida ya no está, cae a la primera
+     disponible; y si no hay ninguna, el plato queda sin base y "Pedir" se apaga. */
+  const enCarta = baseIds.filter((id) => bases.some((b) => b.id === id));
+  const tocadas = enCarta.length ? enCarta : primeraDisponible(bases).map((b) => b.id);
+  /** Las elegidas en el ORDEN DE LA CARTA: así se nombran, se cobran y se mandan. */
+  const basesSel = basesElegidas(tocadas, bases);
+  const idsBases = basesSel.map((b) => b.id);
+  /* El mismo gesto del juego y del QR (lib/precios): con tope 1 tocar reemplaza; con 2,
+     prende y apaga, y la única elegida no se suelta. */
+  const tocarBase = (id: string) => setBaseIds(alternarBase(tocadas, id, maxBases));
   const prots = proteinaIds.map((id) => find(id)).filter(Boolean) as Ingrediente[];
   const toppings = toppingIds.map((id) => find(id)).filter(Boolean) as Ingrediente[];
 
@@ -91,22 +121,25 @@ export default function Configurator({
     const dispB = primeraDisponible(bases, bases.length);
     const dispP = primeraDisponible(proteinas, proteinas.length);
     const dispT = primeraDisponible(toppingsCat, toppingsCat.length);
-    if (dispB.length) setBaseId(rnd(dispB).id);
+    if (dispB.length) setBaseIds([rnd(dispB).id]);
     setProteinaIds(dispP.length ? [rnd(dispP).id] : []);
     const shuffled = [...dispT].sort(() => Math.random() - 0.5);
     setToppingIds(shuffled.slice(0, 2 + Math.floor(Math.random() * 2)).map((t) => t.id));
   };
 
   /* Ticket: base + proteína + acompañantes, cada uno a su precio. `gratis` solo se marca
-     cuando el ingrediente de verdad vale $0 en la carta (las salsas), no por cortesía. */
+     cuando el ingrediente de verdad vale $0 en la carta (las salsas), no por cortesía.
+     Dos bases en "mitad y mitad" van en UN renglón a precio de la más cara; en "suma",
+     cada una con el suyo. Los renglones siempre suman el total. */
   const lineas: { label: string; valor: number; gratis?: boolean }[] = [
-    { label: base.nombre, valor: base.precio },
+    ...renglonesBases(basesSel, modoBases).map((r) => ({ label: r.nombre, valor: r.precio })),
     ...prots.map((p) => ({ label: p.nombre, valor: p.precio })),
     ...toppings.map((t) => ({ label: t.nombre, valor: t.precio, gratis: t.precio === 0 })),
   ];
   // Un solo cálculo para todo el sitio (espejo de crearPedido) — lib/precios.ts
   const { subtotal, impuesto, domicilio, total } = calcularTotales({
-    base,
+    bases: basesSel,
+    cobroBases: modoBases,
     proteinas: prots,
     toppings,
     impuestoPct,
@@ -123,7 +156,8 @@ export default function Configurator({
       setError(null);
       if (!idem.current) idem.current = nuevaClave();
       const r = await enviarPedido({
-        baseId,
+        baseId: idsBases[0], // el campo de siempre (quien solo lo lee, recibe la primera)
+        baseIds: idsBases, // una o dos: si viene, manda sobre baseId
         proteinaIds,
         toppingIds,
         canal: "web",
@@ -145,7 +179,9 @@ export default function Configurator({
     return waHref(
       whatsapp,
       `¡Hola Papaghetti! 🍝 Quiero armar mi enredo (${servicio}):\n` +
-        `• Base: ${base.nombre}\n` +
+        `• Base: ${nombreBases(basesSel) || "sin base"}${
+          basesSel.length > 1 ? ` (${modoBasesTexto(modoBases)})` : ""
+        }\n` +
         `• Proteína: ${prots.map((p) => p.nombre).join(" + ") || "sin proteína"}\n` +
         `• Toppings: ${toppings.map((t) => t.nombre).join(", ") || "sin toppings"}\n` +
         `Total aprox: ${formatCOP(total)}`
@@ -156,13 +192,13 @@ export default function Configurator({
     <div className="config">
           {/* ------- Selección ------- */}
           <div className="config__steps">
-            <Group titulo="1 · La base" nota="elige 1">
+            <Group titulo="1 · La base" nota={maxBases > 1 ? "elige 1 o 2" : "elige 1"}>
               {bases.map((b) => (
                 <Chip
                   key={b.id}
                   ing={b}
-                  selected={baseId === b.id}
-                  onClick={() => setBaseId(b.id)}
+                  selected={idsBases.includes(b.id)}
+                  onClick={() => tocarBase(b.id)}
                   showPrice
                 />
               ))}
@@ -205,7 +241,7 @@ export default function Configurator({
 
           {/* ------- Bowl + ticket ------- */}
           <div className="bowl-panel">
-            <Bowl base={base} proteinas={prots} toppings={toppings} />
+            <Bowl bases={basesSel} proteinas={prots} toppings={toppings} />
 
             <div className="ticket">
               {lineas.map((l, i) => (
@@ -357,7 +393,7 @@ export default function Configurator({
                   className="btn btn--primary"
                   style={{ width: "100%", justifyContent: "center", marginTop: 16 }}
                   onClick={pedir}
-                  disabled={pending || falta > 0 || !abierto}
+                  disabled={pending || falta > 0 || !abierto || !basesSel.length}
                   type="button"
                 >
                   <span>{pending ? "Enviando…" : "Pedir aquí"}</span>
@@ -400,7 +436,7 @@ export default function Configurator({
             Tú mandas en el enredo
           </h2>
           <p className="lead">
-            Elige la base, las proteínas que quieras (o ninguna) y los acompañantes. Cada
+            Elige {maxBases > 1 ? "una o dos bases" : "la base"}, las proteínas que quieras (o ninguna) y los acompañantes. Cada
             cosa vale lo que dice la carta y las salsas van con el plato.
           </p>
         </Reveal>
@@ -448,6 +484,8 @@ function Chip({
       className={`chip ${selected ? "is-selected" : ""} ${agotado ? "is-agotado" : ""}`}
       onClick={onClick}
       disabled={agotado}
+      /* Prende y apaga: el lector de pantalla tiene que oír si quedó elegido. */
+      aria-pressed={selected}
       type="button"
     >
       <IngImg ing={ing} className="chip__ing" />

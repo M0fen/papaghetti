@@ -1535,3 +1535,21 @@
 
 /* El impuesto va DENTRO del total: una línea informativa debajo, no una suma. */
 .emp-datos__linea--incl { font-size: 11.5px; opacity: 0.8; }
+
+/* EL "NO" DEL SERVIDOR, LEGIBLE (barra 2D). La regla de globals.css pinta el texto rosa
+   claro, pensado para un fondo oscuro: sobre el papel crema de esta barra no se leía, y la
+   barra, que no envuelve, lo apretaba en una columna angosta junto al total. Flota encima
+   de la barra, a lo ancho, en tinta tomate sobre papel opaco: «Este plato lleva máximo una
+   base.» o «No nos alcanza "X" para toda la comanda.» se leen sin mover el total ni el botón. */
+.emp-bar > .emp-bar__error {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% + 8px);
+  margin: 0;
+  background: #fbe4dc;
+  border: 1px solid rgba(209, 56, 31, 0.55);
+  color: #8f2614;
+  font-weight: 700;
+  box-shadow: 0 6px 16px rgba(30, 22, 17, 0.16);
+}
