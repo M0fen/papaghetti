@@ -176,6 +176,156 @@ try {
     const final = leerDisco().insumos.find((i) => i.id === ins).stock;
     eq("los dos movimientos sobreviven (−10 del otro, +5 mío)", final, antes - 10 + 5);
   }
+
+  /* ═══ LA CARTA Y LOS AJUSTES, A TRES VÍAS ═══
+     La misma carrera, pero el "otro" es OTRA INSTANCIA de verdad: un módulo fresco con su
+     propio memo, que lee, cambia y escribe por su cuenta (lo que haría otra lambda). Yo
+     llego después con la copia que leí un instante antes. */
+  const precios = await import("./lib/precios.ts");
+  const vendible = () => ({
+    ajustes: { ...original.ajustes, abierto: true, controlarStock: false, adicionales: [{ id: "ad-a", nombre: "Limonada FUSION", precio: 9000 }] },
+    bases: original.bases.map((b, i) => (i === 0 ? { ...b, activo: true, agotado: false } : b)),
+  });
+  let n = 0;
+  const carreraConOtro = async (pedidosIniciales, otro, mia) => {
+    sembrar(pedidosIniciales, vendible());
+    await cat.getCatalog(); // (1) mi copia, en el memo
+    await otro(await import(`./lib/catalog.ts?otra=${Date.now()}-${n++}`)); // (2) la otra instancia
+    await mia(); // (3) yo, con la copia de hace un instante
+    return leerDisco();
+  };
+  const base0 = original.bases[0];
+
+  console.log("\n═══ UN AJUSTE DE PRECIOS NO SE PIERDE ENTRE DISPOSITIVOS ═══");
+  {
+    const final = await carreraConOtro(
+      [],
+      async (otra) => {
+        const plan = precios.planAjuste(precios.listasAjusteDe(await otra.getCatalog()), 10, ["bases", "adicionales"]);
+        await otra.ajustarPrecios({ pct: 10, grupos: ["bases", "adicionales"], firma: plan.firma });
+      },
+      () => cat.crearPedido({ baseId: base0.id, toppingIds: [], tipo: "llevar" }), // un pedido por QR
+    );
+    eq(
+      "las bases nuevas sobreviven a un pedido que traía la copia vieja",
+      final.bases.map((b) => b.precio),
+      original.bases.map((b) => precios.precioAjustado(b.precio, 10)),
+    );
+    eq("y el adicional también", final.ajustes.adicionales.map((a) => a.precio), [9900]);
+    eq("el pedido entró igual", final.pedidos.length, 1);
+    si("y el ajuste sigue a mano para Deshacer", (final.undo ?? []).at(-1)?.etiqueta?.startsWith("Subió 10 %"));
+  }
+  {
+    const final = await carreraConOtro(
+      [pedido("TOQ1")],
+      (otra) => otra.toggleAbierto(), // otra pantalla: «Cerrar el negocio»
+      () => cat.avanzarPedido("TOQ1"), // la cocina, con su copia
+    );
+    eq("«Cerrar el negocio» sobrevive a un toque de la cocina", final.ajustes.abierto, false);
+    eq("y el toque de la cocina también", final.pedidos.find((p) => p.id === "TOQ1")?.estado, "cocina");
+  }
+  {
+    const prot = original.proteinas[0];
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.updateIngrediente(prot.id, { agotado: true }), // «se acabó», en la cocina
+      () => cat.crearPedido({ baseId: base0.id, toppingIds: [], tipo: "llevar" }),
+    );
+    eq("un «se acabó» de la cocina sobrevive a un pedido con la copia vieja", final.proteinas.find((p) => p.id === prot.id)?.agotado, true);
+  }
+  {
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.updateAjustes({ comprobante: { mensajeCierre: "Del otro" } }, "Cambió el comprobante"),
+      () => cat.updateAjustes({ costoDomicilio: 6500 }, "Cambió el cobro"),
+    );
+    eq("dos secciones de Ajustes guardadas a la vez: las dos quedan", [final.ajustes.costoDomicilio, final.ajustes.comprobante?.mensajeCierre], [6500, "Del otro"]);
+  }
+
+  console.log("\n═══ MI PROPIO CAMBIO SIGUE GANANDO ═══");
+  {
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.updateIngrediente(base0.id, { nombre: "Nombre del otro" }),
+      () => cat.updateIngrediente(base0.id, { precio: 99900 }),
+    );
+    const b = final.bases.find((x) => x.id === base0.id);
+    eq("lo que yo cambié manda, y lo que cambió el otro en la misma ficha también queda", [b?.precio, b?.nombre], [99900, "Nombre del otro"]);
+  }
+  {
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.updateIngrediente(base0.id, { precio: 11100 }),
+      () => cat.updateIngrediente(base0.id, { precio: 22200 }),
+    );
+    eq("los dos tocamos el mismo precio: gana el último que guarda (yo)", final.bases.find((x) => x.id === base0.id)?.precio, 22200);
+  }
+
+  console.log("\n═══ BORRAR FUNCIONA ═══");
+  {
+    const [t1, t2] = original.toppings.filter((t) => t.categoria !== "salsa");
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.updateIngrediente(t1.id, { precio: 12300 }),
+      () => cat.deleteIngrediente(t2.id),
+    );
+    si("lo que yo borré se va", !final.toppings.some((t) => t.id === t2.id));
+    eq("y el cambio del otro en otra ficha se queda", final.toppings.find((t) => t.id === t1.id)?.precio, 12300);
+  }
+  {
+    const [, , t3] = original.toppings.filter((t) => t.categoria !== "salsa");
+    const final = await carreraConOtro(
+      [pedido("TOQ2")],
+      (otra) => otra.deleteIngrediente(t3.id),
+      () => cat.avanzarPedido("TOQ2"),
+    );
+    si("lo que borró el otro NO resucita por venir en mi copia", !final.toppings.some((t) => t.id === t3.id));
+  }
+  {
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.guardarAdicionalConfig({ nombre: "Jugo FUSION", precio: 7000 }),
+      () => cat.borrarAdicionalConfig("ad-a"),
+    );
+    eq("borrar un adicional mientras otro crea uno: se va el mío, queda el suyo", final.ajustes.adicionales.map((a) => a.nombre), ["Jugo FUSION"]);
+  }
+
+  console.log("\n═══ DOS ALTAS A LA VEZ SOBREVIVEN ═══");
+  {
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.createIngrediente({ categoria: "topping", nombre: "FUSION del otro", precio: 1000 }),
+      () => cat.createIngrediente({ categoria: "topping", nombre: "FUSION mio", precio: 2000 }),
+    );
+    const nombres = final.toppings.map((t) => t.nombre);
+    si("los dos productos nuevos quedan", nombres.includes("FUSION del otro") && nombres.includes("FUSION mio"), nombres.join(", "));
+    eq("y el orden es el mío, con lo ajeno al final", nombres.slice(-2), ["FUSION mio", "FUSION del otro"]);
+  }
+  {
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.guardarAdicionalConfig({ nombre: "Jugo FUSION", precio: 7000 }),
+      () => cat.guardarAdicionalConfig({ nombre: "Té FUSION", precio: 6000 }),
+    );
+    eq("dos adicionales creados a la vez", final.ajustes.adicionales.map((a) => a.nombre), ["Limonada FUSION", "Té FUSION", "Jugo FUSION"]);
+  }
+  {
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.upsertPromo({ id: "", texto: "Promo FUSION del otro", tono: "oro", banner: false, activo: false }),
+      () => cat.upsertPromo({ id: "", texto: "Promo FUSION mia", tono: "oro", banner: false, activo: false }),
+    );
+    const textos = final.ajustes.promos.map((p) => p.texto);
+    si("dos promos creadas a la vez", textos.includes("Promo FUSION del otro") && textos.includes("Promo FUSION mia"), textos.join(" | "));
+  }
+  {
+    const final = await carreraConOtro(
+      [],
+      (otra) => otra.createInsumo({ nombre: "Insumo FUSION", unidad: "g", stock: 50, parStock: 50 }),
+      () => cat.abastecerInsumo(original.insumos[0].id, 3),
+    );
+    si("un insumo que creó el otro no desaparece por mi copia vieja", final.insumos.some((i) => i.nombre === "Insumo FUSION"));
+  }
 } catch (e) {
   mal++;
   console.log("  ❌ reventó:", e?.stack ?? e);

@@ -7148,6 +7148,169 @@ body.enreda-jugando .sticky-pedir {
 /* ══════════════════════════════════════════════════════════════════════════
    FASE 2 · AJUSTE DE PRECIOS
    ══════════════════════════════════════════════════════════════════════════ */
+/* Precios → «Ajustar precios» (components/admin/AjustePrecios.tsx). Mide lo mismo que
+   el bloque de reglas y adicionales que tiene encima (860 px, y todo el ancho desde 1100),
+   y sus filas se acomodan a LA TARJETA (container), no a la ventana. */
+.ajp { container-type: inline-size; max-width: 860px; margin-bottom: 18px; scroll-margin-top: 80px; }
+@media (min-width: 1100px) {
+  .ajp { max-width: none; }
+}
+/* El renglón de dos bases en «Cómo se cobra» lleva su enlace a Ajustes: que se vea enlace. */
+.cobro-reglas__cambiar { color: var(--pg-pomodoro, #c8321e); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.ajp__sub { margin: -4px 0 14px; font-size: 0.88rem; line-height: 1.5; opacity: 0.75; max-width: 64ch; }
+.ajp__listo {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(76, 154, 90, 0.12);
+  border: 1px solid rgba(76, 154, 90, 0.38);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.ajp__form { display: grid; gap: 14px; }
+.ajp__campos,
+.ajp__grupos { border: 0; padding: 0; margin: 0; min-width: 0; }
+.ajp__campos { display: grid; gap: 10px; }
+/* Mientras se aplica no se puede cambiar lo que se está aplicando. */
+.ajp__campos:disabled { opacity: 0.6; }
+.ajp__cuanto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ajp__sentido,
+.ajp__rapidos,
+.ajp__chips { display: flex; flex-wrap: wrap; gap: 7px; }
+/* Objetivos táctiles de verdad: todo esto se toca con el pulgar. */
+.ajp .chipbtn { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 0.86rem; cursor: pointer; }
+.ajp .chipbtn.is-on { background: var(--pg-oro, #f2a516); border-color: transparent; color: #241a0c; }
+/* La casilla de verdad está escondida dentro del chip: el foco se dibuja en el chip, y solo
+   cuando se llega con el teclado (con el dedo, un anillo después de cada toque estorba). */
+.ajp label.chipbtn:has(input:focus-visible) { outline: 2px solid var(--pg-oro-ink, #9a6300); outline-offset: 2px; }
+.ajp .chipbtn small { font-size: 0.74rem; font-weight: 700; opacity: 0.6; }
+.ajp .chipbtn.is-vacio { opacity: 0.45; cursor: not-allowed; }
+.ajp__pct {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 2px solid rgba(30, 22, 17, 0.16);
+  background: #fff;
+}
+.ajp__pct:focus-within { border-color: var(--pg-oro, #f2a516); }
+.ajp__pct input {
+  width: 4ch;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 800;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ajp__pct input:focus { outline: none; }
+.ajp__pct > span:last-child { font-size: 1.1rem; font-weight: 800; opacity: 0.6; }
+.ajp__grupos legend {
+  margin-bottom: 7px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+.ajp__grupos .field__nota { display: block; margin-top: 8px; max-width: 70ch; }
+.ajp__falta { margin: 0; }
+.ajp__previa { display: grid; gap: 10px; padding-top: 14px; border-top: 1px dashed rgba(30, 22, 17, 0.16); }
+.ajp__resumen { margin: 0; font-size: 0.98rem; font-weight: 800; }
+.ajp__resumen span { font-weight: 600; opacity: 0.7; }
+/* Acotada: el botón de aplicar queda a la vista justo debajo, aun con la carta entera. */
+.ajp__lista {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 14px 6px;
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  border-radius: 14px;
+  background: #fffdf8;
+}
+/* El nombre del grupo se queda arriba mientras se baja por sus precios. */
+.ajp__grupo h3 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 12px 0 6px;
+  background: #fffdf8;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(30, 22, 17, 0.62);
+}
+.ajp__grupo h3 span { margin-left: 4px; font-weight: 800; }
+.ajp__grupo ul { list-style: none; margin: 0; padding: 0; }
+.ajp__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(30, 22, 17, 0.06);
+  font-size: 0.9rem;
+}
+.ajp__grupo li:last-child { border-bottom: 0; }
+.ajp__item.is-igual { opacity: 0.62; }
+.ajp__nombre { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.ajp__off {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--pg-crema-2, #f3e4c9);
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ajp__precios {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.ajp__precios s { opacity: 0.55; }
+.ajp__precios b { font-weight: 800; }
+.ajp__precios small { font-size: 0.74rem; font-weight: 600; opacity: 0.75; }
+.ajp__precios .ajp__dif { color: var(--pg-oro-ink, #9a6300); font-weight: 800; opacity: 1; }
+.ajp__avisos {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(242, 165, 22, 0.55);
+  background: #fff6ea;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+.ajp__avisos ul { display: grid; gap: 4px; margin: 6px 0 0; padding-left: 18px; }
+.ajp__cuentas { display: block; margin: 0; font-size: 0.8rem; }
+.ajp__pie { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px 14px; }
+.ajp__error { flex: 1 1 260px; margin: 0; font-size: 0.86rem; }
+.ajp__aplicar { min-height: 48px; justify-content: center; text-align: center; }
+.ajp__aplicar:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+@container (max-width: 520px) {
+  .ajp__item { grid-template-columns: minmax(0, 1fr); }
+  .ajp__precios { justify-content: flex-start; }
+  .ajp__aplicar { width: 100%; }
+  /* En el celular la lista ocupa media pantalla: al llegar a su final, el siguiente gesto
+     del pulgar sigue bajando la página (sin tener que buscar un borde libre para tocar). */
+  .ajp__lista { overscroll-behavior: auto; }
+}
+/* La hoja de siempre, justo debajo (PreciosRapidos). A 390 px el buscador no cedía ancho
+   (un campo de texto no se encoge por debajo de su ancho natural) y empujaba «+ Nuevo
+   producto» fuera de la tarjeta, cortado a la mitad. Ahora, si no caben juntos, el botón
+   baja a su propio renglón. */
+.prq__buscar { flex-wrap: wrap; }
+.prq__buscar input { min-width: min(100%, 180px); }
 
 /* ═══ (fin de la fase 2) ═══ */
 
