@@ -14,6 +14,10 @@ import {
   cuentaIncluida,
   brutoDe,
   sinImpuesto,
+  precioBases,
+  basesElegidas,
+  nombreBases,
+  modoBasesTexto,
 } from "./precios";
 import {
   SEED_CATALOG,
@@ -41,6 +45,7 @@ import {
   costoReceta,
   formatCOP,
   lineasDe,
+  findIn,
   type Insumo,
   type InsumoCategoria,
   type RecetaItem,
@@ -1392,7 +1397,6 @@ function asegurarConsecutivos(pedidos: Pedido[]): void {
 const insumosPorId = (cat: Catalog): Map<string, Insumo> =>
   new Map(cat.insumos.map((i) => [i.id, i]));
 
-/** ¿Alcanza la despensa para preparar una porción de este componente? */
 /**
  * ¿Manda la despensa sobre lo que se puede vender?
  *
@@ -1402,8 +1406,30 @@ const insumosPorId = (cat: Catalog): Map<string, Insumo> =>
  */
 export const controlaStock = (cat: Catalog): boolean => cat.ajustes.controlarStock !== false;
 
+/**
+ * Lo que gasta de un insumo UNA porción a factor `f` (1 = entera, 0.5 = la media de un
+ * "mitad y mitad"), a 3 decimales, que es como se guarda la despensa. Es el MISMO número
+ * al validar, al descontar y al devolver: si cada camino redondeara por su lado, cancelar
+ * un plato de dos bases dejaría milésimas de más o de menos, pedido tras pedido.
+ */
+const enPorcion = (cantidad: number, f: number): number => Number((cantidad * f).toFixed(3));
+
+/** Lo que una comanda pide de UN componente: unidades en porción entera y a media porción. */
+type Pide = { enteras: number; medias: number };
+/** Cuánto gasta de un insumo lo que se pide de un componente, sumado como lo descuenta la venta. */
+const gastoDe = (cantidad: number, n: Pide): number =>
+  Number((n.enteras * enPorcion(cantidad, 1) + n.medias * enPorcion(cantidad, 0.5)).toFixed(3));
+
+/**
+ * ¿Alcanza la despensa para preparar una porción ENTERA de este componente? Eso es lo que
+ * significa "agotado", también con dos bases: con media porción en la despensa, la base
+ * sale agotada hasta que se abastezca (se pierde menos de una porción, y la carta nunca
+ * ofrece lo que no puede servir entero).
+ */
 function puedePreparar(ing: Ingrediente, byId: Map<string, Insumo>): boolean {
-  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) > 0;
+  // Stock suelto (sin receta): una porción entera es 1. Con "> 0", la media que deja un
+  // "mitad y mitad" nunca agotaba el componente y las enteras fallaban al cobrar.
+  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) >= 1;
   return ing.receta.every((r) => {
     const ins = byId.get(r.insumoId);
     // FAIL-CLOSED: un insumo que la receta nombra y que ya no existe significa que no
@@ -1413,12 +1439,12 @@ function puedePreparar(ing: Ingrediente, byId: Map<string, Insumo>): boolean {
   });
 }
 
-/** ¿Alcanza para N porciones del mismo componente en un solo pedido? */
-function alcanzaPara(ing: Ingrediente, byId: Map<string, Insumo>, veces: number): boolean {
-  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) >= veces;
+/** ¿Alcanza para todo lo que la comanda pide de este componente, enteras y medias? */
+function alcanzaPara(ing: Ingrediente, byId: Map<string, Insumo>, n: Pide): boolean {
+  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) >= n.enteras + n.medias / 2;
   return ing.receta.every((r) => {
     const ins = byId.get(r.insumoId);
-    return ins ? ins.stock >= r.cantidad * veces : false;
+    return ins ? ins.stock >= gastoDe(r.cantidad, n) : false;
   });
 }
 
@@ -1658,12 +1684,66 @@ export async function buscarPedido(id: string): Promise<Pedido | undefined> {
   return undefined;
 }
 
-/** Descuenta de la despensa los insumos de la receta de un componente. */
-function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>): void {
+/**
+ * Descuenta de la despensa los insumos de la receta de un componente: una porción entera
+ * (`f = 1`) o media (`f = 0.5`, cada base de un "mitad y mitad").
+ */
+function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>, f = 1): void {
   for (const r of ing.receta ?? []) {
     const ins = byId.get(r.insumoId);
-    if (ins) ins.stock = Math.max(0, Number((ins.stock - r.cantidad).toFixed(3)));
+    if (ins) ins.stock = Math.max(0, Number((ins.stock - enPorcion(r.cantidad, f)).toFixed(3)));
   }
+}
+
+/**
+ * Lo que ya no alcanza para una porción ENTERA sale de la carta al instante, se haya
+ * vendido o no: si las dos bases de un plato gastaron el último aceite, la cebolla crispy
+ * —que también lo lleva— tampoco se puede preparar, y la carta no puede seguir
+ * ofreciéndola hasta que el cobro la rechace. Solo AGOTA: devolver algo a la carta es
+ * cosa de `reactivarPreparables`.
+ */
+function agotarLoQueNoAlcanza(cat: Catalog, byId: Map<string, Insumo>, insumos: ReadonlySet<string>): void {
+  for (const g of GRUPOS_ING) {
+    for (const it of cat[g]) {
+      if (it.agotado || !it.receta?.some((r) => insumos.has(r.insumoId))) continue;
+      if (!puedePreparar(it, byId)) it.agotado = true;
+    }
+  }
+}
+
+/**
+ * Las bases que trae un renglón armado: `baseIds` si viene con algo, si no el `baseId` de
+ * siempre (los clientes viejos solo mandan ese). Lo que llega no tiene tipos —el QR es
+ * público—, así que solo cuentan los textos no vacíos.
+ */
+function basesPedidas(l: LineaComanda): string[] {
+  const crudas: unknown[] = Array.isArray(l.baseIds) && l.baseIds.length ? l.baseIds : [l.baseId];
+  return crudas.filter((x): x is string => typeof x === "string" && x !== "");
+}
+
+/**
+ * LAS BASES DE UN RENGLÓN, validadas contra lo GUARDADO (el tope sale de Ajustes, nunca
+ * del cliente). Devuelve las de la carta en el ORDEN DE LA CARTA, no en el de los toques:
+ * el mismo plato se llama igual lo pida quien lo pida.
+ */
+function resolverBases(cat: Catalog, ids: string[], max: 1 | 2): Ingrediente[] {
+  if (!ids.length) throw new Error("Falta la base del enredo.");
+  if (new Set(ids).size < ids.length) throw new Error("Elegiste la misma base dos veces.");
+  if (ids.length > max) {
+    throw new Error(max === 1 ? "Este plato lleva máximo una base." : "Este plato lleva máximo dos bases.");
+  }
+  for (const id of ids) {
+    if (cat.bases.some((b) => b.id === id)) continue;
+    /* La base se buscaba en los tres grupos, así que una proteína mandada como base
+       entraba: se cobraba a su precio y salía para la cocina como si lo fuera. */
+    const otro = [...cat.proteinas, ...cat.toppings].find((x) => x.id === id);
+    throw new Error(
+      otro
+        ? `"${otro.nombre}" no es una base. Elige la base entre las de la carta.`
+        : "Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.",
+    );
+  }
+  return basesElegidas(ids, cat.bases);
 }
 
 /**
@@ -1681,6 +1761,11 @@ function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>): void {
  * ORDEN SAGRADO, igual que antes: resolver TODO → VALIDAR TODO → recién entonces
  * consumir. Con varios renglones importa más: si el tercer plato no alcanza, los dos
  * primeros no pueden haber descontado ya la despensa.
+ *
+ * DOS BASES POR PLATO (Ajustes → Cobro y servicio). En "mitad y mitad" el plato se cobra
+ * a la base más cara y cada base gasta MEDIA porción (va a `mitades`); en "suma" se
+ * cobran las dos y cada una gasta su porción entera (va a `componentes`, como siempre).
+ * Con una sola base todo sale exactamente como antes.
  */
 export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   const cat = await read();
@@ -1713,23 +1798,40 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   };
 
   const impuestoPct = cat.ajustes.impuestoPct ?? 0;
+  /* DOS BASES: cuántas caben y cómo se cobran salen de lo GUARDADO, nunca de lo que
+     mande el cliente (`enviarPedido` es pública). */
+  const maxBases = basesMaxDe(cat.ajustes);
+  const modoBases = cobroBasesDe(cat.ajustes);
 
   /* — 2. RESOLVER cada renglón. Todavía no se toca nada: solo se averigua qué es
          cada uno, cuánto vale una unidad y qué componentes consume. */
   type Resuelto = {
     item: ItemPedido;
-    /** Ids a consumir por CADA unidad (vacío en los platos de cocina). */
-    consume: string[];
+    /** Ids que CADA unidad gasta en porción entera (vacío en los platos de cocina). */
+    enteras: string[];
+    /** Ids que CADA unidad gasta a MEDIA porción: las dos bases de un "mitad y mitad". */
+    medias: string[];
+    /** Lo resuelto, para el resumen de siempre (p.proteina / p.toppings). */
+    prots: Ingrediente[];
+    tops: Ingrediente[];
   };
   const resueltos: Resuelto[] = [];
 
   for (const l of lineas) {
-    const cantidad = Math.max(1, Math.min(MAX_POR_LINEA, Math.round(l.cantidad ?? 1)));
+    // `|| 1`: una cantidad que no es número (la caja manda los renglones en JSON) no
+    // puede volverse NaN y colarse en la cuenta y en la despensa.
+    const cantidad = Math.max(1, Math.min(MAX_POR_LINEA, Math.round(Number(l.cantidad ?? 1)) || 1));
 
     const insignia = l.enredoId ? cat.enredos.find((e) => e.id === l.enredoId) : undefined;
     if (l.enredoId && !insignia) throw new Error("Ese plato ya no está en la carta.");
     if (insignia && insignia.activo === false) {
       throw new Error(`Hoy no tenemos "${insignia.nombre}".`);
+    }
+    /* Un plato de la carta trae SU base y manda sobre lo armado. Con dos bases encima,
+       la segunda ni se cocinaba ni se cobraba: se dice, en vez de tragársela. */
+    const pedidas = basesPedidas(l);
+    if (insignia && pedidas.length > 1) {
+      throw new Error(`"${insignia.nombre}" ya trae su base. Para combinar dos bases, arma el plato por partes.`);
     }
 
     /* PLATO DE COCINA (ensaladas, a la carta, especiales): precio cerrado y SIN
@@ -1747,7 +1849,10 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
           enredoId: insignia.id,
           costo: 0,
         },
-        consume: [],
+        enteras: [],
+        medias: [],
+        prots: [],
+        tops: [],
       });
       continue;
     }
@@ -1769,16 +1874,16 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
        despensa real. */
     const topIdsCrudos = insignia ? insignia.toppingIds : l.toppingIds;
     const topIds = (Array.isArray(topIdsCrudos) ? topIdsCrudos : []).slice(0, MAX_TOPPINGS);
-    const baseId = (insignia ? insignia.baseId : l.baseId) ?? "";
 
-    /* Dos fallos distintos que el operario vive distinto: "no elegiste base" es un
-       formulario a medio llenar, y "la base ya no existe" es que el catálogo cambió
-       debajo mientras armaba. El mensaje tiene que decir cuál de los dos es. */
-    if (!baseId) throw new Error("Falta la base del enredo.");
-    const base = buscar(baseId);
-    if (!base) {
-      throw new Error("Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.");
-    }
+    /* Fallos distintos que el operario vive distinto: "no elegiste base" es un
+       formulario a medio llenar, "la base ya no existe" es que el catálogo cambió
+       debajo mientras armaba, y el resto (dos veces la misma, más de las que permite
+       Ajustes, algo que no es una base) es un envío que la pantalla no debió dejar
+       salir. El mensaje tiene que decir cuál de todos es. */
+    const bases = resolverBases(cat, insignia ? (insignia.baseId ? [insignia.baseId] : []) : pedidas, maxBases);
+    // Dos bases en "mitad y mitad": cada una a media porción. En "suma", enteras.
+    const mitad = bases.length > 1 && modoBases === "mitad";
+    const fBase = mitad ? 0.5 : 1;
     const prots: Ingrediente[] = [];
     const tops: Ingrediente[] = [];
     for (const id of protIds) {
@@ -1797,7 +1902,9 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
        impuesto dentro. Las SALSAS valen $0: fuera del conteo de lo que se cobra. */
     const cobrables = tops.filter((t) => t.categoria !== "salsa");
     const armado =
-      base.precio +
+      // Una base: su precio. Dos: la más cara ("mitad") o las dos ("suma"). La MISMA
+      // función que usan las pantallas: no pueden decir un precio y cobrar otro.
+      precioBases(bases, modoBases) +
       prots.reduce((s, p) => s + p.precio, 0) + // todas las proteínas a precio completo
       /* MISMA función que usa el cliente (lib/precios.ts). Hoy TOPPINGS_INCLUIDOS es
          0, o sea que suma todos; sigue pasando por aquí para que, si alguna vez hay
@@ -1805,13 +1912,19 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
       cobroToppings(cobrables, TOPPINGS_INCLUIDOS);
     const precioFinal = insignia ? insignia.precio : armado;
 
-    const consume = [baseId, ...protIds, ...topIds];
+    const idsBases = bases.map((b) => b.id);
+    const enteras = [...(mitad ? [] : idsBases), ...protIds, ...topIds];
+    const medias = mitad ? idsBases : [];
     resueltos.push({
       item: {
-        nombre: insignia ? insignia.nombre : base.nombre,
+        /* Con dos, "Spaghetti / Papa criolla" y el modo AL FRENTE del detalle, que es lo
+           primero que la cocina tiene que saber. Nada de " · " en el nombre (Mesas une
+           los platos con ese separador) ni de "½" (el tiquete de texto lo borra). */
+        nombre: insignia ? insignia.nombre : nombreBases(bases),
         detalle: insignia
           ? insignia.gancho || undefined
           : [
+              bases.length > 1 ? modoBasesTexto(modoBases) : "",
               prots.length ? `con ${prots.map((p) => p.nombre).join(" + ")}` : "",
               tops.length ? `+ ${tops.map((t) => t.nombre).join(", ")}` : "",
             ]
@@ -1820,36 +1933,45 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
         cantidad,
         precio: sinImpuesto(precioFinal, impuestoPct),
         precioFinal,
-        componentes: consume,
+        componentes: enteras,
+        ...(medias.length ? { mitades: medias } : {}),
         enredoId: insignia?.id,
+        // Media receta de cada base en "mitad": cuesta lo que de verdad gasta.
         costo: Math.round(
-          costoReceta(base.receta, byId) +
+          bases.reduce((s, b) => s + costoReceta(b.receta, byId) * fBase, 0) +
             prots.reduce((s, p) => s + costoReceta(p.receta, byId), 0) +
             tops.reduce((s, t) => s + costoReceta(t.receta, byId), 0),
         ),
       },
-      consume,
+      enteras,
+      medias,
+      prots,
+      tops,
     });
   }
 
   /* — 2b. LOS ADICIONALES: conceptos que no son platos. No consumen despensa ni se
          validan contra la carta; solo se revisa que tengan nombre y valor de verdad. */
   for (const a of adicionales) {
-    resueltos.push({ item: itemAdicional(a, impuestoPct), consume: [] });
+    resueltos.push({ item: itemAdicional(a, impuestoPct), enteras: [], medias: [], prots: [], tops: [] });
   }
 
   /* — 3. DISPONIBILIDAD, sumando TODA la comanda. Aquí está la diferencia con el
          pedido de un plato: dos renglones que llevan aguacate piden dos aguacates, y
          hay que saberlo ANTES de descontar el primero. Si no, la mesa se quedaba a
-         medias con la despensa ya tocada. */
-  const necesarias = new Map<string, number>();
+         medias con la despensa ya tocada. Las medias porciones cuentan como medias:
+         dos "mitad y mitad" con la misma base piden UNA porción de ella, no dos. */
+  const pide = new Map<string, Pide>();
+  const sumar = (id: string, campo: keyof Pide, n: number) => {
+    const x = pide.get(id) ?? { enteras: 0, medias: 0 };
+    x[campo] += n;
+    pide.set(id, x);
+  };
   for (const r of resueltos) {
-    for (const id of r.consume) {
-      necesarias.set(id, (necesarias.get(id) ?? 0) + r.item.cantidad);
-    }
+    for (const id of r.enteras) sumar(id, "enteras", r.item.cantidad);
+    for (const id of r.medias) sumar(id, "medias", r.item.cantidad);
   }
-  const controla = controlaStock(cat);
-  for (const [id, veces] of necesarias) {
+  for (const id of pide.keys()) {
     const ing = buscar(id)!;
     /* Lo que se decidió A MANO bloquea SIEMPRE, se controle la despensa o no: sacar
        algo de la carta, o marcar "se acabó el pollo", es la acción más frecuente de
@@ -1857,13 +1979,37 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
        desactiva es la ARITMÉTICA de la despensa. */
     if (ing.activo === false) throw new Error(`"${ing.nombre}" ya no está en la carta.`);
     if (ing.agotado) throw new Error(`Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`);
-    if (!controla) continue; // sin control de inventario, la receta no bloquea
-    if (!alcanzaPara(ing, byId, veces)) {
+  }
+  const controla = controlaStock(cat);
+  if (controla) {
+    // Cada componente con lo suyo: el mensaje nombra lo que hay que quitar.
+    for (const [id, n] of pide) {
+      const ing = buscar(id)!;
+      if (alcanzaPara(ing, byId, n)) continue;
+      const veces = n.enteras + n.medias / 2;
+      // Nada de "para 1.5 de…": nadie pide porciones con decimales.
       throw new Error(
-        veces > 1
-          ? `No nos alcanza para ${veces} de "${ing.nombre}".`
-          : `Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`,
+        veces <= 1
+          ? `Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`
+          : Number.isInteger(veces)
+            ? `No nos alcanza para ${veces} de "${ing.nombre}".`
+            : `No nos alcanza "${ing.nombre}" para toda la comanda.`,
       );
+    }
+    /* Y cada INSUMO, sumando todo lo que lo usa. Las dos bases de un plato comparten el
+       aceite: mirando componente por componente cada una cabía sola, la comanda pasaba
+       y la segunda se descontaba de un aceite que ya no estaba. */
+    const total = new Map<string, number>();
+    for (const [id, n] of pide) {
+      for (const r of buscar(id)!.receta ?? []) {
+        total.set(r.insumoId, (total.get(r.insumoId) ?? 0) + gastoDe(r.cantidad, n));
+      }
+    }
+    for (const [insumoId, cuanto] of total) {
+      const ins = byId.get(insumoId);
+      if (!ins || ins.stock < Number(cuanto.toFixed(3))) {
+        throw new Error(`No nos alcanza "${ins?.nombre ?? insumoId}" para toda la comanda.`);
+      }
     }
   }
 
@@ -1889,26 +2035,35 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   }
 
   // — 6. Ya validado TODO: ahora sí se consume la despensa, unidad por unidad.
-  const consumir = (id: string) => {
+  const tocados = new Set<string>(); // los insumos que se movieron
+  const consumir = (id: string, f: number) => {
     const it = buscar(id)!;
     if (it.receta && it.receta.length > 0) {
-      consumirReceta(it, byId); // ← descuenta despensa real
-      // Solo se auto-agota si la despensa manda; si no, el inventario baja y ya.
-      if (controla) it.agotado = !puedePreparar(it, byId);
+      consumirReceta(it, byId, f); // ← descuenta despensa real
+      for (const r of it.receta) tocados.add(r.insumoId);
     } else if (typeof it.stock === "number") {
-      it.stock = Math.max(0, it.stock - 1); // legado: unidades abstractas
-      if (controla && it.stock === 0) it.agotado = true;
+      it.stock = Math.max(0, Number((it.stock - f).toFixed(3))); // legado: unidades abstractas
+      if (controla) it.agotado = !puedePreparar(it, byId);
     }
   };
+  /* Las mismas listas que se guardan, una entrada por unidad vendida: son lo que cancelar
+     y devolver ponen de vuelta en la despensa, ni más ni menos. */
   const componentes: string[] = [];
+  const mitades: string[] = [];
   for (const r of resueltos) {
     for (let n = 0; n < r.item.cantidad; n++) {
-      for (const id of r.consume) {
-        consumir(id);
+      for (const id of r.enteras) {
+        consumir(id, 1);
         componentes.push(id);
+      }
+      for (const id of r.medias) {
+        consumir(id, 0.5);
+        mitades.push(id);
       }
     }
   }
+  // Solo se auto-agota si la despensa manda; si no, el inventario baja y ya.
+  if (controla) agotarLoQueNoAlcanza(cat, byId, tocados);
 
   const items = resueltos.map((r) => r.item);
   const costo = Math.round(items.reduce((s, i) => s + (i.costo ?? 0) * i.cantidad, 0));
@@ -1917,7 +2072,8 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
      guardados desde antes de que existieran los renglones, y hay pantallas y textos
      de WhatsApp que leen estos campos. Con un solo renglón dicen exactamente lo de
      antes; con varios, dicen cuántos platos van. */
-  const uno = items.length === 1 && items[0].cantidad === 1 ? items[0] : null;
+  const unoR = resueltos.length === 1 && resueltos[0].item.cantidad === 1 ? resueltos[0] : null;
+  const uno = unoR?.item ?? null;
   const platos = items.filter((i) => !i.adicional).reduce((s, i) => s + i.cantidad, 0);
   /* Una cuenta hecha SOLO de adicionales que no se cocinan ("Almuerzos $50.000") no
      tiene nada que hacer en la pantalla de cocina: entra ya entregada y espera el cobro.
@@ -1946,9 +2102,13 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
     pago: "pendiente",
     items,
     base: uno ? uno.nombre : platos ? `${platos} platos` : items.map((i) => i.nombre).join(", ").slice(0, 60),
-    proteina: uno ? (uno.detalle?.match(/^con (.+?)(?: ·|$)/)?.[1] ?? "—") : "—",
-    toppings: uno ? (uno.detalle?.match(/\+ (.+)$/)?.[1]?.split(", ") ?? []) : [],
+    /* De lo resuelto, no releyendo el detalle con una expresión regular: con varias
+       proteínas la de los acompañantes se tragaba media frase ("Pollo · + Parmesano"),
+       y con dos bases el detalle ya no empieza por "con". */
+    proteina: unoR?.prots.length ? unoR.prots.map((p) => p.nombre).join(" + ") : "—",
+    toppings: unoR ? unoR.tops.map((t) => t.nombre) : [],
     componentes,
+    ...(mitades.length ? { mitades } : {}),
     subtotal: cuenta.subtotal,
     impuesto: cuenta.impuesto,
     impuestoPct,
@@ -1992,6 +2152,10 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
       {
         enredoId: input.enredoId,
         baseId: input.baseId,
+        /* Sin esta línea la segunda base del QR y de la web se perdía aquí, en silencio:
+           el renglón se rearmaba solo con `baseId`. Se pasa tal cual llega; quien la
+           valida es crearComanda (cuántas, cuáles, que sean bases de verdad). */
+        baseIds: input.baseIds,
         proteinaIds,
         toppingIds: input.toppingIds,
         cantidad: 1,
@@ -2250,13 +2414,39 @@ export async function borrarAdicionalConfig(id: string): Promise<Catalog> {
 }
 
 /**
- * Cancela un pedido y DEVUELVE la despensa si todavía no se había cocinado.
+ * LO QUE GASTÓ UN PEDIDO QUE NUNCA SE COCINÓ, DE VUELTA A LA DESPENSA. Una sola función
+ * para cancelar y para devolver: cada porción entera de `componentes` y cada media de
+ * `mitades`, con el MISMO redondeo con que la venta las descontó. Antes cada una tenía
+ * su copia y las dos devolvían una receta ENTERA por id: con las medias porciones de un
+ * "mitad y mitad", cancelar habría fabricado despensa que nunca existió.
  *
- * Antes solo escribía `estado = "cancelado"`. Tres agujeros a la vez: se podía cancelar
- * un pedido ya cobrado (el ingreso salía de los reportes y el efectivo se quedaba en la
- * caja sin rastro), los insumos consumidos no volvían nunca (merma invisible que se
- * acumulaba día a día), y no quedaba constancia de por qué.
+ * Y vuelve a la carta solo lo que esta despensa devuelta deja preparar. Devolver
+ * des-agotaba a ciegas todo lo del pedido, también el "se acabó" que alguien marcó a mano.
  */
+function devolverDespensa(cat: Catalog, p: Pedido): void {
+  const byId = insumosPorId(cat);
+  const controla = controlaStock(cat);
+  const tocados = new Set<string>();
+  const mover = (id: string, f: number) => {
+    const it = findIn(cat, id);
+    if (!it) return; // se borró de la carta después: no hay a qué devolverle
+    if (it.receta?.length) {
+      for (const r of it.receta) {
+        const ins = byId.get(r.insumoId);
+        if (!ins) continue;
+        ins.stock = Number((ins.stock + enPorcion(r.cantidad, f)).toFixed(3));
+        tocados.add(ins.id);
+      }
+    } else if (typeof it.stock === "number") {
+      it.stock = Number((it.stock + f).toFixed(3));
+      if (controla && it.agotado && puedePreparar(it, byId)) it.agotado = false;
+    }
+  };
+  for (const id of p.componentes ?? []) mover(id, 1);
+  for (const id of p.mitades ?? []) mover(id, 0.5);
+  if (tocados.size) reactivarPreparables(cat, tocados);
+}
+
 /**
  * DEVOLVER EL DINERO DE UN PEDIDO YA COBRADO. La salida que no existía.
  *
@@ -2286,25 +2476,7 @@ export async function devolverPedido(id: string, motivo: string): Promise<Catalo
   if (!razon) throw new Error("Escribe por qué se devuelve el dinero.");
 
   const seCocino = p.estado !== "recibido";
-  if (!seCocino && p.componentes?.length) {
-    const byId = insumosPorId(cat);
-    for (const compId of p.componentes) {
-      for (const g of ["bases", "proteinas", "toppings"] as const) {
-        const it = cat[g].find((x) => x.id === compId);
-        if (!it) continue;
-        if (it.receta?.length) {
-          for (const r of it.receta) {
-            const ins = byId.get(r.insumoId);
-            if (ins) ins.stock = Number((ins.stock + r.cantidad).toFixed(3));
-          }
-        } else if (typeof it.stock === "number") {
-          it.stock += 1;
-        }
-        it.agotado = false;
-        break;
-      }
-    }
-  }
+  if (!seCocino) devolverDespensa(cat, p);
 
   p.devolucion = { monto: p.total, motivo: razon.slice(0, 200), fecha: new Date().toISOString() };
   p.pago = "devuelto";
@@ -2314,6 +2486,14 @@ export async function devolverPedido(id: string, motivo: string): Promise<Catalo
   return cat;
 }
 
+/**
+ * Cancela un pedido y DEVUELVE la despensa si todavía no se había cocinado.
+ *
+ * Antes solo escribía `estado = "cancelado"`. Tres agujeros a la vez: se podía cancelar
+ * un pedido ya cobrado (el ingreso salía de los reportes y el efectivo se quedaba en la
+ * caja sin rastro), los insumos consumidos no volvían nunca (merma invisible que se
+ * acumulaba día a día), y no quedaba constancia de por qué.
+ */
 export async function cancelarPedido(id: string, motivo?: string): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
@@ -2326,25 +2506,7 @@ export async function cancelarPedido(id: string, motivo?: string): Promise<Catal
     );
   }
   // Si aún no entró a cocina, la comida no se tocó: la despensa vuelve.
-  if (p.estado === "recibido" && p.componentes?.length) {
-    const byId = insumosPorId(cat);
-    for (const compId of p.componentes) {
-      for (const g of ["bases", "proteinas", "toppings"] as const) {
-        const it = cat[g].find((x) => x.id === compId);
-        if (!it) continue;
-        if (it.receta?.length) {
-          for (const r of it.receta) {
-            const ins = byId.get(r.insumoId);
-            if (ins) ins.stock = Number((ins.stock + r.cantidad).toFixed(3));
-          }
-        } else if (typeof it.stock === "number") {
-          it.stock += 1;
-        }
-        break;
-      }
-    }
-    reactivarPreparables(cat);
-  }
+  if (p.estado === "recibido") devolverDespensa(cat, p);
   p.estado = "cancelado";
   p.motivoCancelacion = motivo?.trim().slice(0, 140) || undefined;
   await commit(cat, `Canceló #${id}${motivo ? ` — ${motivo.trim().slice(0, 60)}` : ""}`, { transaccional: true });
@@ -2415,8 +2577,10 @@ export async function restock(id: string, cantidad: number): Promise<Catalog> {
   for (const grupo of ["bases", "proteinas", "toppings"] as const) {
     const it = cat[grupo].find((x) => x.id === id);
     if (it) {
-      it.stock = Math.max(0, (it.stock ?? 0) + cantidad);
-      if (it.stock > 0) it.agotado = false;
+      it.stock = Math.max(0, Number(((it.stock ?? 0) + cantidad).toFixed(3)));
+      // "Hay" es que alcance para una porción ENTERA (ver puedePreparar): con la media
+      // que deja un "mitad y mitad" no vuelve a la carta.
+      if (it.stock >= 1) it.agotado = false;
       break;
     }
   }
@@ -2428,13 +2592,24 @@ export async function restock(id: string, cantidad: number): Promise<Catalog> {
 /* INSUMOS + RECETAS (despensa real / ficha técnica)                  */
 /* ------------------------------------------------------------------ */
 
-/** Reactiva componentes cuya despensa volvió a alcanzar (tras abastecer). */
-function reactivarPreparables(cat: Catalog, insumoId?: string): void {
+/**
+ * Reactiva componentes cuya despensa volvió a alcanzar (tras abastecer, cancelar o
+ * devolver). Con `insumos`, solo los que usan alguno de ellos: lo demás no cambió.
+ *
+ * Con el control APAGADO no hace nada. Ahí nada se agota solo, así que todo `agotado`
+ * que haya lo marcó una persona ("se acabó el pollo") y tiene que sobrevivir a una
+ * compra o a una cancelación — es lo que promete `recalcularDisponibilidad`. Antes
+ * corría igual y lo borraba.
+ */
+function reactivarPreparables(cat: Catalog, insumos?: string | ReadonlySet<string>): void {
+  if (!controlaStock(cat)) return;
   const byId = insumosPorId(cat);
+  const usa = (insumoId: string) =>
+    insumos === undefined || (typeof insumos === "string" ? insumoId === insumos : insumos.has(insumoId));
   for (const g of ["bases", "proteinas", "toppings"] as const) {
     for (const it of cat[g]) {
       if (!it.receta || it.receta.length === 0) continue;
-      if (insumoId && !it.receta.some((r) => r.insumoId === insumoId)) continue;
+      if (!it.receta.some((r) => usa(r.insumoId))) continue;
       if (it.agotado && puedePreparar(it, byId)) it.agotado = false;
     }
   }

@@ -23,6 +23,7 @@ import {
   type Pedido,
 } from "@/lib/menu";
 import { diaNegocio, horaNegocio } from "@/lib/precios";
+import { porcionesPorComponente, platosPorEnredo, masPedidos, porcionesTexto } from "@/lib/porciones";
 import { crearGastoAction, eliminarMovimientoAction } from "../actions";
 import GastoRapido from "@/components/admin/GastoRapido";
 import type { CSSVars } from "@/lib/cssVars";
@@ -115,12 +116,11 @@ export default async function FinanzasPage({
     total: gastos.filter((g) => g.categoria === c).reduce((s, g) => s + g.monto, 0),
   })).filter((x) => x.total > 0);
 
-  // Desempeño: top productos
-  const rank = (getter: (p: Pedido) => string) => {
-    const m = new Map<string, number>();
-    pedPer.forEach((p) => m.set(getter(p), (m.get(getter(p)) ?? 0) + 1));
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-  };
+  /* Desempeño: lo más pedido, en PORCIONES que salieron de cocina. Contaba el texto del
+     resumen una vez por pedido: una mesa de tres platos era un "3 platos", un plato de la
+     carta pasaba por base y un "mitad y mitad" habría sido una base inventada. */
+  const porciones = porcionesPorComponente(pedPer);
+  const platosVendidos = platosPorEnredo(pedPer);
   const porMetodo = METODOS.map((m) => ({
     m,
     total: sum(pedPer.filter((p) => p.pago === "pagado" && p.metodoPago === m), (p) => p.total),
@@ -479,10 +479,16 @@ export default async function FinanzasPage({
 
         <article className="card">
           <div className="card__h"><h2>Lo más pedido</h2></div>
+          <p className="fin-sec-cap">
+            Porciones servidas, contando las de los platos de la carta. Un plato mitad y mitad cuenta media
+            porción de cada base.
+          </p>
           <h3 className="rank__h">Bases</h3>
-          <RankList data={rank((p) => p.base)} />
+          <RankList data={masPedidos(porciones, cat.bases)} />
           <h3 className="rank__h">Proteínas</h3>
-          <RankList data={rank((p) => p.proteina)} />
+          <RankList data={masPedidos(porciones, cat.proteinas)} />
+          <h3 className="rank__h">Platos de la carta</h3>
+          <RankList data={masPedidos(platosVendidos, cat.enredos)} />
           <div className="fin-two">
             <div>
               <h3 className="rank__h">Cobros por método</h3>
@@ -554,7 +560,7 @@ function RankList({ data }: { data: [string, number][] }) {
           <span className="rank__bar">
             <span className="rank__fill" style={{ "--w": `${(n / max) * 100}%` } as CSSVars} />
           </span>
-          <span className="rank__n">{n}</span>
+          <span className="rank__n">{porcionesTexto(n)}</span>
         </li>
       ))}
     </ul>
