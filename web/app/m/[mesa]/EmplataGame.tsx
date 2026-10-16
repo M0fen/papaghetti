@@ -1240,12 +1240,24 @@ export default function EmplataGame(props: {
    * DOS BASES: `baseIds` guarda una o dos en el orden de los toques (con dos, la última
    * tocada cede su sitio); `basesSel`, en el de la carta, es lo que se cobra, se nombra y
    * se manda. `baseId` (la primera) sigue siendo la llave de todas las guardas de arriba.
+   *
+   * Con `precargar` (llegaste desde un plato de la carta) la selección NACE con ese plato,
+   * en el estado inicial y no en un efecto: antes el "primer servicio" la ponía con
+   * setState dentro del efecto (un render en cascada). El fideo igual la trae en cascada.
+   * La base solo si sigue en la carta: un id que no está no se cobra ni se dibuja, y
+   * contaría como una de las dos al elegir la siguiente.
    */
-  const [baseIds, setBaseIds] = useState<string[]>([]);
-  const basesSel = basesElegidas(baseIds, bases);
+  const [baseIds, setBaseIds] = useState<string[]>(() => {
+    const p = props.precargar;
+    return p && bases.some((b) => b.id === p.baseId) ? [p.baseId] : [];
+  });
+  const basesSel = useMemo(() => basesElegidas(baseIds, bases), [baseIds, bases]);
   const baseId = basesSel[0]?.id ?? "";
-  const [proteinaIds, setProteinaIds] = useState<string[]>([]); // N proteínas, sin tope
-  const [toppingIds, setToppingIds] = useState<string[]>([]);
+  // N proteínas, sin tope
+  const [proteinaIds, setProteinaIds] = useState<string[]>(() =>
+    props.precargar?.proteinaId ? [props.precargar.proteinaId] : [],
+  );
+  const [toppingIds, setToppingIds] = useState<string[]>(() => props.precargar?.toppingIds ?? []);
   const [tab, setTab] = useState<0 | 1 | 2>(0);
   const [enviando, setEnviando] = useState(false);
   const [pedido, setPedido] = useState<PedidoHecho | null>(null);
@@ -1282,8 +1294,9 @@ export default function EmplataGame(props: {
   const sel = useRef({
     baseId: "",
     baseIds: [] as string[],
-    basesMax: 2 as 1 | 2,
-    cobroBases: "mitad" as CobroBases,
+    // desde el primer cuadro con el ajuste real: con tope 1 no se asoma ni un "BASES"
+    basesMax: basesMax as 1 | 2,
+    cobroBases: modoBases as CobroBases,
     proteinaIds: [] as string[],
     toppingIds: [] as string[],
     tab: 0 as 0 | 1 | 2,
@@ -1792,13 +1805,7 @@ export default function EmplataGame(props: {
       : baseIds;
     const ings = ids.map(find).filter(Boolean) as Ingrediente[];
     if (!ings.length) return;
-    if (p) {
-      /* Solo si esa base sigue en la carta: un id que no está no se cobra ni se dibuja,
-         y contaría como una de las dos al elegir la siguiente. */
-      setBaseIds(bases.some((b) => b.id === p.baseId) ? [p.baseId] : []);
-      setProteinaIds(p.proteinaId ? [p.proteinaId] : []);
-      setToppingIds(p.toppingIds ?? []);
-    }
+    // (la selección del plato precargado ya nació en el estado inicial: ver `baseIds`)
     const W = cv.clientWidth || window.innerWidth;
     const H = cv.clientHeight || window.innerHeight;
     const timers = ings.map((ing, i) =>
@@ -5671,10 +5678,11 @@ export default function EmplataGame(props: {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = `rgba(242,165,22,${0.55 + 0.35 * Math.sin(wd.t * 0.06)})`;
-        ctx.fillText("ELIGE TU BASE", W / 2, trayY - 44 * U);
+        // con dos bases permitidas, el rótulo lo dice: si no, nadie descubre el mitad y mitad
+        ctx.fillText(sel.current.basesMax > 1 ? "ELIGE 1 O 2 BASES" : "ELIGE TU BASE", W / 2, trayY - 44 * U);
       }
-      // pestañas
-      const tabsTxt = ["LA BASE", "PROTEÍNA", "TOPPINGS"] as const;
+      // pestañas (con dos bases permitidas, la primera se llama en plural: caben las dos)
+      const tabsTxt = [sel.current.basesMax > 1 ? "BASES" : "LA BASE", "PROTEÍNA", "TOPPINGS"] as const;
       const TG = tabsGeo();
       const tw = TG.tw;
       const th0 = TG.th;

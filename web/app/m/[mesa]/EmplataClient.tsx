@@ -23,7 +23,7 @@ import {
 } from "@/lib/menu";
 import PlatosCarta from "@/components/PlatosCarta";
 import Salsas from "@/components/Salsas";
-import { alternarBase, basesElegidas, calcularTotales, soloCobrables } from "@/lib/precios";
+import { alternarBase, basesElegidas, calcularTotales, modoBasesTexto, soloCobrables } from "@/lib/precios";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { nuevaClave } from "@/lib/idem";
 import { useSonido } from "./sonido";
@@ -278,7 +278,11 @@ export default function EmplataClient({
       setError("No pudimos enviar el pedido. Intenta otra vez.");
     }
     setEnviando(false);
-  }, [abierto, enviando, basesSel, proteinaIds, toppingIds, mesa, reduce, s]);
+    /* `referencia` y `notas` se leen arriba y faltaban aquí: solo no se notaba porque `s`
+       cambia en cada render y rehace la función. Sin ellas, la mesa y la alergia escritas
+       justo antes de pedir podían irse vacías. `mesa` ya no se lee, pero se queda: sin
+       ella el compilador de React no logra conservar esta memoización (error de lint). */
+  }, [abierto, enviando, basesSel, proteinaIds, toppingIds, referencia, notas, mesa, reduce, s]);
 
   // ---- estado en vivo (polling suave del pedido existente) ----
   useEffect(() => {
@@ -446,7 +450,14 @@ export default function EmplataClient({
           <main className={`emp-main ${modo === "rapido" ? "emp-main--rapido" : ""}`}>
             <section className="emp-paso">
               <h2>
-                <b>1</b> LA BASE {maxBases > 1 && <small>elige 1 o 2</small>}
+                {/* Aquí no hay ticket por renglones: con dos elegidas, el rótulo dice cómo
+                    van (y por qué el total sube lo que sube). */}
+                <b>1</b> LA BASE{" "}
+                {maxBases > 1 && (
+                  <small>
+                    elige 1 o 2{basesSel.length > 1 ? ` · ${modoBasesTexto(modoBases)}` : ""}
+                  </small>
+                )}
               </h2>
               <div className="emp-fila">
                 {bases.map((i) => chip(i, baseIds.includes(i.id), elegirBase))}
