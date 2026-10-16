@@ -1,5 +1,6 @@
 import { getCatalog } from "@/lib/catalog";
-import { formatCOP, TOPPINGS_INCLUIDOS } from "@/lib/menu";
+import { formatCOP, TOPPINGS_INCLUIDOS, basesMaxDe, cobroBasesDe } from "@/lib/menu";
+import { usuariosDe } from "@/lib/usuarios";
 import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ export default async function AyudaPage() {
   if (!(await haySesion())) return null;
   const cat = await getCatalog();
   const a = cat.ajustes;
+  const dosBases = basesMaxDe(a) === 2;
+  const mitad = cobroBasesDe(a) === "mitad";
 
   return (
     <section className="ayuda">
@@ -148,6 +151,15 @@ export default async function AyudaPage() {
             porque valen $0 en la carta. Los combos, ensaladas y platos a la carta tienen{" "}
             <b>precio cerrado</b>. Todo precio de la carta <b>ya trae el impuesto</b>: el
             comprobante dice cuánto va adentro, pero no lo suma.
+            {dosBases && (
+              <>
+                <br />
+                <b>Con dos bases</b>{" "}
+                {mitad
+                  ? "se cobra la más cara y cada una sale en media porción (mitad y mitad)."
+                  : "se cobran las dos, cada una a su precio y en porción completa."}
+              </>
+            )}
           </p>
         </article>
 
@@ -157,6 +169,12 @@ export default async function AyudaPage() {
             Botón <b>🧾 Comprobante</b> en cada pedido. Sale en el rollo de la térmica (58 u
             80 mm) o en cualquier impresora, y se puede mandar por WhatsApp. <b>Ojo:</b> es un comprobante interno,{" "}
             <b>no</b> una factura electrónica ni un documento equivalente de la DIAN.
+            <br />
+            Lo que dice el papel (nombre, NIT, dirección, teléfono, tu logo, el mensaje del
+            final, hasta tres líneas como el Wi-Fi o el Instagram y qué datos del cliente
+            salen) se cambia en{" "}
+            <a href="/admin/ajustes#comprobante">Ajustes → Comprobante</a>, con una vista previa
+            del papel. El título y la nota legal son fijos.
           </p>
         </article>
 
@@ -172,6 +190,68 @@ export default async function AyudaPage() {
           </p>
         </article>
 
+        <article className="ayuda-card">
+          <h3>Dos bases en un plato</h3>
+          <p>
+            {dosBases
+              ? "Hoy el cliente puede elegir una o dos bases: en el sitio, en el QR y en la caja se toca la segunda base y se suma al plato. "
+              : "Hoy cada plato lleva una sola base. "}
+            Se cambia en <a href="/admin/ajustes#cobro">Ajustes → Cobro y servicio</a>:{" "}
+            <b>mitad y mitad</b> cobra la base más cara y gasta media porción de cada una;{" "}
+            <b>las dos completas</b> cobra las dos y gasta porción entera de cada una. En la
+            cocina y en el papel el plato sale con las dos bases y cómo van.
+          </p>
+        </article>
+        <article className="ayuda-card">
+          <h3>Subir o bajar todos los precios</h3>
+          <p>
+            En <a href="/admin/precios#ajustar">Precios → Ajustar precios</a>: escribe el
+            porcentaje, marca los grupos (bases, proteínas, acompañantes, platos de precio
+            cerrado, adicionales), revisa la <b>vista previa</b> con el antes y el después y
+            confirma. Todo queda redondeado a $100; las salsas no se tocan. Si no era eso,{" "}
+            <b>Deshacer</b> lo revierte entero. Las cuentas que ya estaban abiertas conservan
+            sus precios.
+          </p>
+        </article>
+        <article className="ayuda-card">
+          <h3>Los textos y las fotos del sitio</h3>
+          <p>
+            En <a href="/admin/ajustes#sitio">Ajustes → Sitio web</a> cambias la portada, la
+            historia, los horarios, la dirección, el teléfono, el WhatsApp, las redes, los
+            enlaces de Rappi, DiDi y Google Maps, las fotos y lo que dice Google. Un enlace
+            vacío esconde su botón. <b>Restaurar</b> devuelve el texto original. Las reseñas
+            solo pueden ser <b>reales</b>, copiadas de una fuente pública: nunca inventadas.
+          </p>
+        </article>
+        <article className="ayuda-card">
+          <h3>Quién entra al panel</h3>
+          <p>
+            Los nombres de la pantalla de entrada se ponen en{" "}
+            <a href="/admin/ajustes#usuarios">Ajustes → Usuarios del panel</a>. La contraseña
+            es una sola; el nombre es para que el <a href="/admin/historial">Historial</a> diga
+            quién hizo cada cosa.
+          </p>
+        </article>
+        <article className="ayuda-card">
+          <h3>Deshacer</h3>
+          <p>
+            El botón <b>Deshacer</b> de arriba revierte el último cambio de <b>carta o de
+            ajustes</b>: un precio, un ajuste de precios, una receta, un texto del sitio. Pasa
+            el dedo (o el mouse) por encima y te dice qué va a deshacer. <b>No</b> deshace
+            pedidos, cobros, la caja ni lo que gastó la despensa: eso pasó de verdad. Para
+            eso están Cancelar, Corregir cobro y Devolver dinero.
+          </p>
+        </article>
+        <article className="ayuda-card">
+          <h3>Tu copia de seguridad</h3>
+          <p>
+            En <a href="/admin/ajustes#copia">Ajustes → Dónde se guarda todo</a>, el botón{" "}
+            <b>Descargar copia completa</b> baja un archivo con todo el negocio. Guárdalo en un
+            lugar privado (tiene teléfonos de clientes) una vez por semana y siempre antes de
+            cambiar algo de las cuentas. Además, el sistema guarda una copia automática cada
+            día.
+          </p>
+        </article>
         <article className="ayuda-card">
           <h3>Se cayó internet</h3>
           <p>
@@ -228,6 +308,20 @@ export default async function AyudaPage() {
           <b>{formatCOP(a.pedidoMinimo ?? 0)}</b>
         </li>
         <li>
+          <span>Bases por plato</span>
+          <b>{dosBases ? "hasta dos" : "una"}</b>
+        </li>
+        {dosBases && (
+          <li>
+            <span>Con dos bases se cobra</span>
+            <b>{mitad ? "la más cara (mitad y mitad)" : "las dos completas"}</b>
+          </li>
+        )}
+        <li>
+          <span>Entran al panel</span>
+          <b>{usuariosDe(a).join(", ")}</b>
+        </li>
+        <li>
           <span>La carta tiene</span>
           <b>
             {cat.bases.length} bases · {cat.proteinas.length} proteínas ·{" "}
@@ -239,9 +333,10 @@ export default async function AyudaPage() {
       </ul>
 
       <p className="ayuda__pie">
-        ¿Algo no cuadra? En <a href="/admin/ajustes">Ajustes</a> está la ficha del negocio y,
-        al final, <b>dónde se está guardando todo</b>. Y el <b>Historial</b> guarda cada
-        acción con su hora.
+        ¿Algo no cuadra? En <a href="/admin/ajustes">Ajustes</a> están el cobro, el
+        comprobante, el sitio, los usuarios y, al final, <b>dónde se está guardando todo</b>{" "}
+        con la copia de seguridad. Y el <b>Historial</b> guarda cada acción con su hora y
+        quién la hizo.
       </p>
     </section>
   );

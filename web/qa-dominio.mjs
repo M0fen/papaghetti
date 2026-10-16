@@ -16,6 +16,7 @@ import {
   cuentaIncluida,
 } from "./lib/precios.ts";
 import { inicioDe, esVenta, ventaNeta } from "./lib/menu.ts";
+import { porcionesPorComponente, platosPorEnredo, masPedidos, porcionesTexto } from "./lib/porciones.ts";
 
 let ok = 0,
   mal = 0;
@@ -147,6 +148,35 @@ console.log("\n═══ EL ESPEJO DEL CLIENTE COINCIDE CON EL SERVIDOR ══�
   // Enredo insignia: precio de carta cerrado, desglosado hacia atrás.
   const d = desglosarPrecioFinal(28900, 8);
   eq("el desglose reconstruye el precio de carta", d.subtotal + d.impuesto, 28900);
+}
+
+console.log("\n═══ LO MÁS PEDIDO SE CUENTA EN PORCIONES (y un mitad y mitad vale media) ═══");
+{
+  const venta = (items, extra = {}) => ({ estado: "entregado", items, base: "", proteina: "—", toppings: [], ...extra });
+  const pedidos = [
+    venta([
+      { nombre: "Spaghetti", cantidad: 2, precio: 0, componentes: ["spa", "carne"] },
+      { nombre: "Spaghetti / Papa criolla", cantidad: 1, precio: 0, componentes: ["carne"], mitades: ["spa", "criolla"] },
+      { nombre: "Limonada", cantidad: 3, precio: 0, componentes: [], adicional: true },
+    ]),
+    venta([{ nombre: "El enredo clásico", cantidad: 2, precio: 0, componentes: ["spa", "carne"], enredoId: "clasico" }]),
+    // De antes de los renglones: un plato con sus ids en el resumen (lo sintetiza lineasDe).
+    { estado: "entregado", base: "Papa criolla", proteina: "Pollo", toppings: [], componentes: ["criolla", "pollo"], subtotal: 0 },
+    // Un cancelado no es venta: no cuenta.
+    venta([{ nombre: "Spaghetti", cantidad: 5, precio: 0, componentes: ["spa"] }], { estado: "cancelado" }),
+  ];
+  const c = porcionesPorComponente(pedidos);
+  // spa: 2 enteras + ½ del mitad y mitad + 2 del plato de la carta; criolla: ½ + 1 del pedido viejo.
+  eq("un mitad y mitad le suma MEDIA porción a cada base", [c.get("spa"), c.get("criolla")], [4.5, 1.5]);
+  eq("las proteínas cuentan por porción y por cantidad", [c.get("carne"), c.get("pollo")], [5, 1]);
+  const carta = [
+    { id: "horno", nombre: "Papa al horno" },
+    { id: "criolla", nombre: "Papa criolla" },
+    { id: "spa", nombre: "Spaghetti" },
+  ];
+  eq("lo más pedido sale con los nombres de la carta, sin lo que no se vendió", masPedidos(c, carta), [["Spaghetti", 4.5], ["Papa criolla", 1.5]]);
+  eq("los platos de la carta, por unidades vendidas", Object.fromEntries(platosPorEnredo(pedidos)), { clasico: 2 });
+  eq("las porciones se escriben como se dicen", [porcionesTexto(4.5), porcionesTexto(3)], ["4,5", "3"]);
 }
 
 console.log(`\n═══ ${ok} ✅  ·  ${mal} ❌ ═══\n`);

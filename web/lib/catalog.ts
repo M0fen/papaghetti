@@ -10,11 +10,17 @@ import {
   faltaParaMinimo,
   totalDe,
   diaNegocio,
+  ZONA_NEGOCIO,
   cobroToppings,
   cuentaIncluida,
   brutoDe,
   sinImpuesto,
+  precioBases,
+  basesElegidas,
+  nombreBases,
+  modoBasesTexto,
 } from "./precios";
+import { CARPETA_FOTOS, direccionFoto, formatoFoto, rutaFoto } from "./fotos";
 import {
   SEED_CATALOG,
   SEED_INSUMOS,
@@ -41,6 +47,7 @@ import {
   costoReceta,
   formatCOP,
   lineasDe,
+  findIn,
   type Insumo,
   type InsumoCategoria,
   type RecetaItem,
@@ -75,16 +82,16 @@ const slugify = (s: string) =>
 /**
  * EL CEREBRO — capa de acceso a datos del catálogo (single source of truth).
  *
- * Hoy persiste en un JSON local (data/catalog.json) para operar ya, en el local.
- * Para producción/multi-canal, activar Supabase: setear SUPABASE_URL +
- * SUPABASE_SERVICE_ROLE y reemplazar read()/write() por el adaptador
- * (esquema SQL en PLAN-MAESTRO.md §5.2 / README). La interfaz pública
- * (getCatalog / updateIngrediente / updateEnredo) NO cambia.
+ * En producción vive en Vercel Blob (un documento privado); en local, en
+ * data/catalog.json. Supabase está cableado como destino futuro (ver "DÓNDE VIVE EL
+ * CEREBRO" más abajo), pero HOY no se usa: con sus dos variables puestas, el cerebro
+ * pasaría a leer de una base vacía. La interfaz pública (getCatalog /
+ * updateIngrediente / updateEnredo) no cambia con el backend.
  */
 
 // En Vercel serverless el FS del proyecto es de solo lectura → usamos /tmp
 // (efímero) para no romper. En local, data/ persiste de verdad.
-// Persistencia real en producción = Supabase (se activa solo con las env vars).
+// Persistencia real en producción = el almacén de Vercel Blob (ver blobEnabled).
 const DATA_DIR = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), "data");
 const FILE = path.join(DATA_DIR, "catalog.json");
 
@@ -172,10 +179,53 @@ function migrate(cat: Catalog): Catalog {
  * sin esta condición `next dev` escribiría sobre los datos REALES del restaurante
  * mientras se programa. En local manda siempre el archivo.
  * (`PG_BLOB=1` fuerza el backend para poder probarlo a mano.)
+ *
+ * Y vale con CUALQUIERA de las dos credenciales (ver `almacenBlob`). Antes solo contaba
+ * el token: al conectar el almacén a un proyecto, o al trasladarlo a otra cuenta, Vercel
+ * pone `BLOB_STORE_ID` y puede no dejar token, y entonces el sitio caía EN SILENCIO al
+ * disco temporal (/tmp), donde cada reinicio se lleva el turno.
  */
 const blobEnabled = (): boolean =>
-  Boolean(process.env.BLOB_READ_WRITE_TOKEN) &&
-  Boolean(process.env.VERCEL || process.env.PG_BLOB);
+  almacenBlob() !== null && Boolean(process.env.VERCEL || process.env.PG_BLOB);
+
+/** Con qué almacén habla la app y cómo entra (lo muestra Ajustes → Dónde se guarda todo). */
+export interface AlmacenBlob {
+  /**
+   * "store_…", como lo muestra Vercel en Storage → el almacén → Settings. NO es secreto:
+   * es el subdominio de las direcciones del almacén. El token sí lo es, y no sale de aquí.
+   */
+  id: string;
+  /** La conexión del proyecto (`BLOB_STORE_ID` + OIDC, la renueva Vercel) o el token fijo. */
+  credencial: "oidc" | "token";
+  /** Si la conexión y el token apuntan a almacenes DISTINTOS: el del token. */
+  otro?: string;
+}
+
+/**
+ * LAS CREDENCIALES DEL ALMACÉN, LEÍDAS COMO LAS LEE EL SDK (@vercel/blob 2.x): una variable
+ * vacía o con solo espacios es como si no estuviera, el almacén del token es el cuarto
+ * pedazo de `vercel_blob_rw_<almacén>_<secreto>`, y si están las dos gana la conexión
+ * (el SDK la prefiere siempre que Vercel le entregue su credencial). Recibe el entorno por
+ * parámetro para poder probarla sin tocar el de verdad.
+ *
+ * La conexión solo cuenta DENTRO de Vercel, que es donde existe su credencial. En un
+ * computador el SDK iría a pedirla con la sesión de la herramienta de Vercel del
+ * desarrollador y entraría al almacén REAL del restaurante; además, el seguro que impide
+ * correr las pruebas contra producción (qa-ts.mjs) reconoce el token, no la conexión.
+ */
+export function almacenBlob(env: Record<string, string | undefined> = process.env): AlmacenBlob | null {
+  const leer = (k: string) => (env[k] ?? "").trim();
+  const conPrefijo = (s: string) => (s ? `store_${s.replace(/^store_/, "")}` : "");
+  const token = leer("BLOB_READ_WRITE_TOKEN");
+  const delToken = conPrefijo(token.split("_")[3] ?? "");
+  const conexion = env.VERCEL ? conPrefijo(leer("BLOB_STORE_ID")) : "";
+  if (conexion) {
+    // Mayúsculas o minúsculas da igual: el almacén es un subdominio.
+    const otro = delToken && delToken.toLowerCase() !== conexion.toLowerCase() ? delToken : "";
+    return otro ? { id: conexion, credencial: "oidc", otro } : { id: conexion, credencial: "oidc" };
+  }
+  return token ? { id: delToken, credencial: "token" } : null;
+}
 /**
  * CADA ENTORNO, SU CEREBRO. `blobEnabled` solo exige estar en Vercel, y eso es cierto
  * también en los despliegues de PRUEBA de una rama: con una sola ruta constante,
@@ -502,6 +552,14 @@ async function escribirDoc<T>(clave: string, doc: T): Promise<void> {
  * subiría megabytes.
  *
  * Así que la imagen se sube como ARCHIVO aparte y en el documento queda su dirección.
+ *
+ * EN PRIVADO, como el cerebro. El almacén se creó privado (ahí están los pedidos y la
+ * caja) y se le pedía una foto "pública": eso no se puede, así que TODA subida fallaba,
+ * la foto se quedaba como texto sin que nadie se enterara y la portada pública cargaba
+ * varias fotos incrustadas en su HTML. Lo que se guarda ahora es la dirección de la
+ * puerta propia del sitio (`/foto/fotos/…`, ver lib/fotos.ts y app/foto): no lleva el
+ * nombre del almacén ni el dominio, así que sigue sirviendo tras un traslado de cuenta.
+ *
  * En local no hay almacén: ahí se queda el texto, que es inofensivo porque el archivo de
  * desarrollo no lo lee nadie más. Lo que ya esté guardado como texto sigue funcionando:
  * solo se convierte al volver a subirlo.
@@ -511,17 +569,28 @@ export async function guardarFoto(valor: string | undefined, id: string): Promis
   if (!blobEnabled()) return valor; // desarrollo: sin almacén, se queda como está
   const m = valor.match(/^data:image\/([a-z+]+);base64,(.+)$/i);
   if (!m) return undefined;
-  const ext = m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase();
+  // Solo lo que la puerta sabe servir: un SVG, por ejemplo, puede llevar código.
+  const formato = formatoFoto(m[1]);
+  if (!formato) return undefined;
   const bytes = Buffer.from(m[2], "base64");
   try {
     const { put } = await import("@vercel/blob");
-    const r = await put(`fotos/${entornoBlob()}${slugify(id)}.${ext}`, bytes, {
-      access: "public",
-      contentType: `image/${m[1].toLowerCase()}`,
-      addRandomSuffix: true, // nombre nuevo por subida: el CDN no sirve la foto vieja
-      cacheControlMaxAge: 31_536_000,
-    });
-    return r.url;
+    // Igual que writeBlob (privado, con reintento), salvo el nombre: aquí uno nuevo por subida.
+    const r = await conReintento(() =>
+      put(`${CARPETA_FOTOS}${entornoBlob()}${slugify(id)}.${formato.ext}`, bytes, {
+        access: "private",
+        contentType: formato.tipo,
+        addRandomSuffix: true, // nombre nuevo por subida: ninguna caché sirve la foto vieja
+        cacheControlMaxAge: 31_536_000,
+      }),
+    );
+    // Lo guardado tiene que pasar por la puerta. Un nombre que no esperábamos sería una
+    // foto rota para siempre: mejor quedarse con el texto, como si la subida fallara.
+    if (!rutaFoto(r.pathname)) {
+      console.warn("[papaghetti] el almacén devolvió un nombre de foto inesperado:", r.pathname);
+      return valor;
+    }
+    return direccionFoto(r.pathname);
   } catch (e) {
     // Si el almacén falla, mejor guardar el texto que perder la foto del operario.
     console.warn("[papaghetti] no se pudo subir la foto:", (e as Error)?.message ?? e);
@@ -553,8 +622,176 @@ async function borrarDoc(clave: string): Promise<void> {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   LO QUE SALE DEL ALMACÉN SIN TOCARLO
+
+   Dos lecturas que no escriben nada: la foto que el sitio pide por su puerta propia
+   (/foto/…, sin sesión) y la copia completa del negocio que el dueño descarga desde
+   Ajustes (con sesión).
+   ══════════════════════════════════════════════════════════════════════════ */
+
 /**
- * ¿Estamos en Vercel SIN Supabase? Entonces el cerebro escribe en /tmp, que es
+ * Una foto del almacén para la puerta /foto/…: su contenido, o `null` si no hay (no
+ * existe, o no hay almacén: en local las fotos viven como texto dentro del cerebro).
+ * LANZA si el almacén no responde, para que la puerta no lo confunda con "no existe".
+ *
+ * Vuelve a validar la ruta aunque la puerta ya lo haya hecho: es la única lectura del
+ * almacén que pide alguien SIN sesión, y por ningún camino puede llegar a cerebro/. Con
+ * la caché del almacén encendida (al revés que el cerebro): cada foto tiene nombre
+ * único y no cambia nunca.
+ */
+export async function leerFoto(pathname: string): Promise<ReadableStream<Uint8Array> | null> {
+  if (!rutaFoto(pathname)) return null;
+  if (!blobEnabled()) return null;
+  const { get } = await import("@vercel/blob");
+  try {
+    const b = await conReintento(() => get(pathname, { access: "private" }));
+    return b && b.statusCode === 200 && b.stream ? b.stream : null;
+  } catch (e) {
+    if ((e as Error)?.name === "BlobNotFoundError") return null;
+    throw e;
+  }
+}
+
+/** Una foto que vive FUERA del documento: dónde se usa y su dirección. */
+export interface FotoEnlazada {
+  /** "bases/pollo", "enredos/la-clasica", "ajustes/sitio/portada/foto"… */
+  donde: string;
+  url: string;
+}
+
+/** El archivo de Ajustes → Descargar copia completa. */
+export interface CopiaCompleta {
+  formato: "papaghetti/copia-completa";
+  version: 1;
+  generadoEn: string;
+  /** El día en Pereira ("AAAA-MM-DD"). */
+  diaNegocio: string;
+  origen: { backend: "supabase" | "blob" | "archivo"; entorno: string; almacen?: string };
+  conteos: {
+    pedidos: number;
+    pedidosArchivados: number;
+    /** Pedidos de cada mes archivado. */
+    porMes: Record<string, number>;
+    /** Meses que el índice apunta pero cuyo documento no apareció: no van en `archivo`. */
+    mesesSinDocumento: string[];
+    movimientos: number;
+    leads: number;
+    arqueos: number;
+    historial: number;
+    /** Fotos que viven como archivo aparte (van en `fotos`, como dirección). */
+    fotosEnlazadas: number;
+    /** Fotos guardadas como texto: ya van dentro de `cerebro`. */
+    fotosDentro: number;
+  };
+  /** El documento principal tal cual, salvo las pilas de deshacer y rehacer. */
+  cerebro: Catalog;
+  /** Cada mes archivado, exactamente como está guardado ("AAAA-MM" → su documento). */
+  archivo: Record<string, ArchivoMes>;
+  fotos: FotoEnlazada[];
+  /** SIEMPRE la última clave: si el archivo llegó cortado, no está. */
+  completo: true;
+}
+
+/** Las fotos del documento: las que son un archivo aparte se listan; las de texto se cuentan. */
+function fotosDe(cat: Catalog): { enlazadas: FotoEnlazada[]; dentro: number } {
+  const enlazadas: FotoEnlazada[] = [];
+  let dentro = 0;
+  const anotar = (donde: string, v: unknown) => {
+    // Las de la carta son texto; las del sitio, { url, ancho, alto }.
+    const url =
+      typeof v === "string" ? v : typeof (v as { url?: unknown } | null)?.url === "string" ? (v as { url: string }).url : "";
+    if (!url) return;
+    if (url.startsWith("data:")) dentro++;
+    else enlazadas.push({ donde, url });
+  };
+  for (const g of ["bases", "proteinas", "toppings", "enredos"] as const) {
+    for (const x of cat[g] ?? []) anotar(`${g}/${x.id}`, x.foto);
+  }
+  for (const r of RUTAS_IMAGEN_AJUSTES) anotar(`ajustes/${r.join("/")}`, leerRuta(cat.ajustes, r));
+  return { enlazadas, dentro };
+}
+
+/**
+ * LA COPIA COMPLETA DEL DUEÑO: todo el negocio, listo para guardar fuera de Vercel.
+ *
+ * El respaldo diario vive en el MISMO almacén que los datos y solo lleva el documento
+ * principal; si se pierde el almacén (un traslado de cuenta mal hecho, una variable
+ * equivocada), se pierde con él. Esta copia la descarga el dueño y la guarda donde quiera.
+ *
+ * · El documento principal se lee FRESCO (sin el memo de 2 s) y ya migrado. Sin las pilas
+ *   de deshacer y rehacer: son copias viejas de la carta, no registros del negocio, y al
+ *   restaurar dejarían que un "Deshacer" saltara hacia atrás por encima de la restauración.
+ *   El historial sí va: dice quién hizo qué.
+ * · DESPUÉS, cada mes archivado, uno por uno y tal como está guardado. El orden importa:
+ *   archivar muda pedidos del principal a su mes, así que leyendo primero el principal un
+ *   pedido puede salir repetido (inofensivo: se une por id), pero nunca perdido. Al revés
+ *   sí podría perderse.
+ * · Las fotos que son archivo aparte van como lista de direcciones (copiar los archivos
+ *   es tarea del desarrollador); las guardadas como texto ya van dentro del documento.
+ *
+ * NO ESCRIBE NADA: ni historial, ni pila de deshacer, ni respaldo. (La única escritura
+ * posible es la de siempre al leer: si el almacén está VACÍO, `read` siembra la carta de
+ * fábrica, igual que lo haría cualquier pantalla.) Si una lectura falla, lanza y no hay
+ * copia a medias: la ruta lo convierte en un error limpio.
+ */
+export async function copiaCompleta(ahora: Date = new Date()): Promise<CopiaCompleta> {
+  const backend = supabaseEnabled() ? "supabase" : blobEnabled() ? "blob" : "archivo";
+  olvidar();
+  const cat = await read();
+  const archivo: Record<string, ArchivoMes> = {};
+  const porMes: Record<string, number> = {};
+  const mesesSinDocumento: string[] = [];
+  for (const mes of [...new Set(cat.archivoMeses ?? [])].sort()) {
+    // El índice lo escribe la app, pero se valida igual: con él se arma el nombre del documento.
+    const doc = /^\d{4}-\d{2}$/.test(mes) ? await leerDoc<ArchivoMes>(claveMes(mes)) : null;
+    if (!doc) {
+      mesesSinDocumento.push(mes);
+      continue;
+    }
+    archivo[mes] = doc;
+    porMes[mes] = Array.isArray(doc.pedidos) ? doc.pedidos.length : 0;
+  }
+  const { enlazadas, dentro } = fotosDe(cat);
+  const almacen = backend === "blob" ? almacenBlob()?.id : undefined;
+  return {
+    formato: "papaghetti/copia-completa",
+    version: 1,
+    generadoEn: ahora.toISOString(),
+    diaNegocio: diaNegocio(ahora),
+    origen: { backend, entorno: process.env.VERCEL_ENV || "local", ...(almacen ? { almacen } : {}) },
+    conteos: {
+      pedidos: cat.pedidos.length,
+      pedidosArchivados: Object.values(porMes).reduce((s, n) => s + n, 0),
+      porMes,
+      mesesSinDocumento,
+      movimientos: cat.movimientos.length,
+      leads: cat.leads.length,
+      arqueos: (cat.arqueos ?? []).length,
+      historial: (cat.historial ?? []).length,
+      fotosEnlazadas: enlazadas.length,
+      fotosDentro: dentro,
+    },
+    cerebro: { ...cat, undo: [], redo: [] },
+    archivo,
+    fotos: enlazadas,
+    completo: true,
+  };
+}
+
+const fmtHoraMinuto = new Intl.DateTimeFormat("en-GB", {
+  timeZone: ZONA_NEGOCIO,
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23", // "00:05", nunca "24:05"
+});
+/** "papaghetti-copia-AAAA-MM-DD-HHMM.json", con el día y la hora de Pereira (no los del servidor). */
+export function nombreCopia(fecha: Date = new Date()): string {
+  return `papaghetti-copia-${diaNegocio(fecha)}-${fmtHoraMinuto.format(fecha).replace(":", "")}.json`;
+}
+
+/**
+ * ¿Estamos en Vercel SIN almacén (ni Blob ni Supabase)? Entonces el cerebro escribe en /tmp, que es
  * efímero y distinto por instancia de lambda: el pedido que entra por QR puede no
  * existir para la pantalla de cocina. No lanzamos (tumbaría el sitio público),
  * pero el panel muestra la alarma y aquí queda el rastro en los logs.
@@ -570,6 +807,11 @@ export function persistenciaEnRiesgo(): boolean {
  * adivinar: si el POS pierde el turno, se entera al día siguiente y ya es tarde.
  * Esto hace una lectura REAL y reporta el backend, el peso del documento y cuántos
  * pedidos hay dentro.
+ *
+ * Con el almacén de Vercel dice además CUÁL almacén y cómo entra. Después de un traslado
+ * de cuenta, la prueba de que el negocio sigue siendo el mismo es que el identificador
+ * no cambió: con la variable de OTRO almacén, el sitio arranca con la carta de fábrica y
+ * cero pedidos, y eso se ve igual que "se borró todo".
  */
 export async function estadoPersistencia(): Promise<{
   backend: "supabase" | "blob" | "archivo";
@@ -579,6 +821,15 @@ export async function estadoPersistencia(): Promise<{
   detalle: string;
   pedidos?: number;
   peso?: string;
+  /** Solo con el almacén de Vercel. */
+  almacen?: {
+    id: string;
+    credencial: AlmacenBlob["credencial"];
+    /** La credencial, dicha para el dueño. */
+    como: string;
+    /** Hay dos almacenes configurados: cuál sobra y qué hacer. */
+    aviso?: string;
+  };
 }> {
   const backend = supabaseEnabled() ? "supabase" : blobEnabled() ? "blob" : "archivo";
   const nombre =
@@ -590,6 +841,22 @@ export async function estadoPersistencia(): Promise<{
           ? "Disco temporal (/tmp)"
           : "Archivo local";
   const durable = backend !== "archivo" || !process.env.VERCEL;
+  const a = backend === "blob" ? almacenBlob() : null;
+  const almacen = a
+    ? {
+        id: a.id,
+        credencial: a.credencial,
+        como: a.credencial === "oidc" ? "la conexión del proyecto (OIDC)" : "el token del almacén",
+        ...(a.otro
+          ? {
+              aviso:
+                `También hay un token de OTRO almacén (${a.otro}). Hoy se usa ${a.id}, el de la ` +
+                "conexión; si la conexión fallara, el sistema pasaría al otro sin avisar. Deja una " +
+                "sola: en Vercel, borra la variable que sobre y vuelve a desplegar.",
+            }
+          : {}),
+      }
+    : undefined;
   try {
     olvidar();
     const cat = await read();
@@ -604,6 +871,7 @@ export async function estadoPersistencia(): Promise<{
         : "OJO: en Vercel esto es efímero. Lo de hoy se pierde al reiniciar.",
       pedidos: cat.pedidos.length,
       peso: `${peso} KB`,
+      ...(almacen ? { almacen } : {}),
     };
   } catch (e) {
     return {
@@ -612,14 +880,16 @@ export async function estadoPersistencia(): Promise<{
       durable,
       ok: false,
       detalle: `No se pudo leer: ${(e as Error)?.message ?? e}`,
+      // Justo cuando no se puede leer es cuando más importa saber a qué almacén se le preguntó.
+      ...(almacen ? { almacen } : {}),
     };
   }
 }
 if (persistenciaEnRiesgo()) {
   console.warn(
-    "[papaghetti] AVISO: corriendo en Vercel sin Supabase. El catálogo se guarda en /tmp " +
-      "(efímero y por instancia): los pedidos NO persisten. Define NEXT_PUBLIC_SUPABASE_URL " +
-      "y SUPABASE_SERVICE_ROLE.",
+    "[papaghetti] AVISO: corriendo en Vercel sin almacén. El catálogo se guarda en /tmp " +
+      "(efímero y por instancia): los pedidos NO persisten. Conecta el almacén de Vercel " +
+      "Blob al proyecto (Storage → Connect) y vuelve a desplegar.",
   );
 }
 
@@ -1498,7 +1768,6 @@ function asegurarConsecutivos(pedidos: Pedido[]): void {
 const insumosPorId = (cat: Catalog): Map<string, Insumo> =>
   new Map(cat.insumos.map((i) => [i.id, i]));
 
-/** ¿Alcanza la despensa para preparar una porción de este componente? */
 /**
  * ¿Manda la despensa sobre lo que se puede vender?
  *
@@ -1508,8 +1777,30 @@ const insumosPorId = (cat: Catalog): Map<string, Insumo> =>
  */
 export const controlaStock = (cat: Catalog): boolean => cat.ajustes.controlarStock !== false;
 
+/**
+ * Lo que gasta de un insumo UNA porción a factor `f` (1 = entera, 0.5 = la media de un
+ * "mitad y mitad"), a 3 decimales, que es como se guarda la despensa. Es el MISMO número
+ * al validar, al descontar y al devolver: si cada camino redondeara por su lado, cancelar
+ * un plato de dos bases dejaría milésimas de más o de menos, pedido tras pedido.
+ */
+const enPorcion = (cantidad: number, f: number): number => Number((cantidad * f).toFixed(3));
+
+/** Lo que una comanda pide de UN componente: unidades en porción entera y a media porción. */
+type Pide = { enteras: number; medias: number };
+/** Cuánto gasta de un insumo lo que se pide de un componente, sumado como lo descuenta la venta. */
+const gastoDe = (cantidad: number, n: Pide): number =>
+  Number((n.enteras * enPorcion(cantidad, 1) + n.medias * enPorcion(cantidad, 0.5)).toFixed(3));
+
+/**
+ * ¿Alcanza la despensa para preparar una porción ENTERA de este componente? Eso es lo que
+ * significa "agotado", también con dos bases: con media porción en la despensa, la base
+ * sale agotada hasta que se abastezca (se pierde menos de una porción, y la carta nunca
+ * ofrece lo que no puede servir entero).
+ */
 function puedePreparar(ing: Ingrediente, byId: Map<string, Insumo>): boolean {
-  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) > 0;
+  // Stock suelto (sin receta): una porción entera es 1. Con "> 0", la media que deja un
+  // "mitad y mitad" nunca agotaba el componente y las enteras fallaban al cobrar.
+  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) >= 1;
   return ing.receta.every((r) => {
     const ins = byId.get(r.insumoId);
     // FAIL-CLOSED: un insumo que la receta nombra y que ya no existe significa que no
@@ -1519,12 +1810,12 @@ function puedePreparar(ing: Ingrediente, byId: Map<string, Insumo>): boolean {
   });
 }
 
-/** ¿Alcanza para N porciones del mismo componente en un solo pedido? */
-function alcanzaPara(ing: Ingrediente, byId: Map<string, Insumo>, veces: number): boolean {
-  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) >= veces;
+/** ¿Alcanza para todo lo que la comanda pide de este componente, enteras y medias? */
+function alcanzaPara(ing: Ingrediente, byId: Map<string, Insumo>, n: Pide): boolean {
+  if (!ing.receta || ing.receta.length === 0) return (ing.stock ?? 0) >= n.enteras + n.medias / 2;
   return ing.receta.every((r) => {
     const ins = byId.get(r.insumoId);
-    return ins ? ins.stock >= r.cantidad * veces : false;
+    return ins ? ins.stock >= gastoDe(r.cantidad, n) : false;
   });
 }
 
@@ -1764,12 +2055,66 @@ export async function buscarPedido(id: string): Promise<Pedido | undefined> {
   return undefined;
 }
 
-/** Descuenta de la despensa los insumos de la receta de un componente. */
-function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>): void {
+/**
+ * Descuenta de la despensa los insumos de la receta de un componente: una porción entera
+ * (`f = 1`) o media (`f = 0.5`, cada base de un "mitad y mitad").
+ */
+function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>, f = 1): void {
   for (const r of ing.receta ?? []) {
     const ins = byId.get(r.insumoId);
-    if (ins) ins.stock = Math.max(0, Number((ins.stock - r.cantidad).toFixed(3)));
+    if (ins) ins.stock = Math.max(0, Number((ins.stock - enPorcion(r.cantidad, f)).toFixed(3)));
   }
+}
+
+/**
+ * Lo que ya no alcanza para una porción ENTERA sale de la carta al instante, se haya
+ * vendido o no: si las dos bases de un plato gastaron el último aceite, la cebolla crispy
+ * —que también lo lleva— tampoco se puede preparar, y la carta no puede seguir
+ * ofreciéndola hasta que el cobro la rechace. Solo AGOTA: devolver algo a la carta es
+ * cosa de `reactivarPreparables`.
+ */
+function agotarLoQueNoAlcanza(cat: Catalog, byId: Map<string, Insumo>, insumos: ReadonlySet<string>): void {
+  for (const g of GRUPOS_ING) {
+    for (const it of cat[g]) {
+      if (it.agotado || !it.receta?.some((r) => insumos.has(r.insumoId))) continue;
+      if (!puedePreparar(it, byId)) it.agotado = true;
+    }
+  }
+}
+
+/**
+ * Las bases que trae un renglón armado: `baseIds` si viene con algo, si no el `baseId` de
+ * siempre (los clientes viejos solo mandan ese). Lo que llega no tiene tipos —el QR es
+ * público—, así que solo cuentan los textos no vacíos.
+ */
+function basesPedidas(l: LineaComanda): string[] {
+  const crudas: unknown[] = Array.isArray(l.baseIds) && l.baseIds.length ? l.baseIds : [l.baseId];
+  return crudas.filter((x): x is string => typeof x === "string" && x !== "");
+}
+
+/**
+ * LAS BASES DE UN RENGLÓN, validadas contra lo GUARDADO (el tope sale de Ajustes, nunca
+ * del cliente). Devuelve las de la carta en el ORDEN DE LA CARTA, no en el de los toques:
+ * el mismo plato se llama igual lo pida quien lo pida.
+ */
+function resolverBases(cat: Catalog, ids: string[], max: 1 | 2): Ingrediente[] {
+  if (!ids.length) throw new Error("Falta la base del enredo.");
+  if (new Set(ids).size < ids.length) throw new Error("Elegiste la misma base dos veces.");
+  if (ids.length > max) {
+    throw new Error(max === 1 ? "Este plato lleva máximo una base." : "Este plato lleva máximo dos bases.");
+  }
+  for (const id of ids) {
+    if (cat.bases.some((b) => b.id === id)) continue;
+    /* La base se buscaba en los tres grupos, así que una proteína mandada como base
+       entraba: se cobraba a su precio y salía para la cocina como si lo fuera. */
+    const otro = [...cat.proteinas, ...cat.toppings].find((x) => x.id === id);
+    throw new Error(
+      otro
+        ? `"${otro.nombre}" no es una base. Elige la base entre las de la carta.`
+        : "Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.",
+    );
+  }
+  return basesElegidas(ids, cat.bases);
 }
 
 /**
@@ -1787,6 +2132,11 @@ function consumirReceta(ing: Ingrediente, byId: Map<string, Insumo>): void {
  * ORDEN SAGRADO, igual que antes: resolver TODO → VALIDAR TODO → recién entonces
  * consumir. Con varios renglones importa más: si el tercer plato no alcanza, los dos
  * primeros no pueden haber descontado ya la despensa.
+ *
+ * DOS BASES POR PLATO (Ajustes → Cobro y servicio). En "mitad y mitad" el plato se cobra
+ * a la base más cara y cada base gasta MEDIA porción (va a `mitades`); en "suma" se
+ * cobran las dos y cada una gasta su porción entera (va a `componentes`, como siempre).
+ * Con una sola base todo sale exactamente como antes.
  */
 export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   const cat = await read();
@@ -1819,23 +2169,40 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   };
 
   const impuestoPct = cat.ajustes.impuestoPct ?? 0;
+  /* DOS BASES: cuántas caben y cómo se cobran salen de lo GUARDADO, nunca de lo que
+     mande el cliente (`enviarPedido` es pública). */
+  const maxBases = basesMaxDe(cat.ajustes);
+  const modoBases = cobroBasesDe(cat.ajustes);
 
   /* — 2. RESOLVER cada renglón. Todavía no se toca nada: solo se averigua qué es
          cada uno, cuánto vale una unidad y qué componentes consume. */
   type Resuelto = {
     item: ItemPedido;
-    /** Ids a consumir por CADA unidad (vacío en los platos de cocina). */
-    consume: string[];
+    /** Ids que CADA unidad gasta en porción entera (vacío en los platos de cocina). */
+    enteras: string[];
+    /** Ids que CADA unidad gasta a MEDIA porción: las dos bases de un "mitad y mitad". */
+    medias: string[];
+    /** Lo resuelto, para el resumen de siempre (p.proteina / p.toppings). */
+    prots: Ingrediente[];
+    tops: Ingrediente[];
   };
   const resueltos: Resuelto[] = [];
 
   for (const l of lineas) {
-    const cantidad = Math.max(1, Math.min(MAX_POR_LINEA, Math.round(l.cantidad ?? 1)));
+    // `|| 1`: una cantidad que no es número (la caja manda los renglones en JSON) no
+    // puede volverse NaN y colarse en la cuenta y en la despensa.
+    const cantidad = Math.max(1, Math.min(MAX_POR_LINEA, Math.round(Number(l.cantidad ?? 1)) || 1));
 
     const insignia = l.enredoId ? cat.enredos.find((e) => e.id === l.enredoId) : undefined;
     if (l.enredoId && !insignia) throw new Error("Ese plato ya no está en la carta.");
     if (insignia && insignia.activo === false) {
       throw new Error(`Hoy no tenemos "${insignia.nombre}".`);
+    }
+    /* Un plato de la carta trae SU base y manda sobre lo armado. Con dos bases encima,
+       la segunda ni se cocinaba ni se cobraba: se dice, en vez de tragársela. */
+    const pedidas = basesPedidas(l);
+    if (insignia && pedidas.length > 1) {
+      throw new Error(`"${insignia.nombre}" ya trae su base. Para combinar dos bases, arma el plato por partes.`);
     }
 
     /* PLATO DE COCINA (ensaladas, a la carta, especiales): precio cerrado y SIN
@@ -1853,7 +2220,10 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
           enredoId: insignia.id,
           costo: 0,
         },
-        consume: [],
+        enteras: [],
+        medias: [],
+        prots: [],
+        tops: [],
       });
       continue;
     }
@@ -1875,16 +2245,16 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
        despensa real. */
     const topIdsCrudos = insignia ? insignia.toppingIds : l.toppingIds;
     const topIds = (Array.isArray(topIdsCrudos) ? topIdsCrudos : []).slice(0, MAX_TOPPINGS);
-    const baseId = (insignia ? insignia.baseId : l.baseId) ?? "";
 
-    /* Dos fallos distintos que el operario vive distinto: "no elegiste base" es un
-       formulario a medio llenar, y "la base ya no existe" es que el catálogo cambió
-       debajo mientras armaba. El mensaje tiene que decir cuál de los dos es. */
-    if (!baseId) throw new Error("Falta la base del enredo.");
-    const base = buscar(baseId);
-    if (!base) {
-      throw new Error("Uno de los ingredientes ya no existe. Recarga la carta y vuelve a armarlo.");
-    }
+    /* Fallos distintos que el operario vive distinto: "no elegiste base" es un
+       formulario a medio llenar, "la base ya no existe" es que el catálogo cambió
+       debajo mientras armaba, y el resto (dos veces la misma, más de las que permite
+       Ajustes, algo que no es una base) es un envío que la pantalla no debió dejar
+       salir. El mensaje tiene que decir cuál de todos es. */
+    const bases = resolverBases(cat, insignia ? (insignia.baseId ? [insignia.baseId] : []) : pedidas, maxBases);
+    // Dos bases en "mitad y mitad": cada una a media porción. En "suma", enteras.
+    const mitad = bases.length > 1 && modoBases === "mitad";
+    const fBase = mitad ? 0.5 : 1;
     const prots: Ingrediente[] = [];
     const tops: Ingrediente[] = [];
     for (const id of protIds) {
@@ -1903,7 +2273,9 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
        impuesto dentro. Las SALSAS valen $0: fuera del conteo de lo que se cobra. */
     const cobrables = tops.filter((t) => t.categoria !== "salsa");
     const armado =
-      base.precio +
+      // Una base: su precio. Dos: la más cara ("mitad") o las dos ("suma"). La MISMA
+      // función que usan las pantallas: no pueden decir un precio y cobrar otro.
+      precioBases(bases, modoBases) +
       prots.reduce((s, p) => s + p.precio, 0) + // todas las proteínas a precio completo
       /* MISMA función que usa el cliente (lib/precios.ts). Hoy TOPPINGS_INCLUIDOS es
          0, o sea que suma todos; sigue pasando por aquí para que, si alguna vez hay
@@ -1911,13 +2283,19 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
       cobroToppings(cobrables, TOPPINGS_INCLUIDOS);
     const precioFinal = insignia ? insignia.precio : armado;
 
-    const consume = [baseId, ...protIds, ...topIds];
+    const idsBases = bases.map((b) => b.id);
+    const enteras = [...(mitad ? [] : idsBases), ...protIds, ...topIds];
+    const medias = mitad ? idsBases : [];
     resueltos.push({
       item: {
-        nombre: insignia ? insignia.nombre : base.nombre,
+        /* Con dos, "Spaghetti / Papa criolla" y el modo AL FRENTE del detalle, que es lo
+           primero que la cocina tiene que saber. Nada de " · " en el nombre (Mesas une
+           los platos con ese separador) ni de "½" (el tiquete de texto lo borra). */
+        nombre: insignia ? insignia.nombre : nombreBases(bases),
         detalle: insignia
           ? insignia.gancho || undefined
           : [
+              bases.length > 1 ? modoBasesTexto(modoBases) : "",
               prots.length ? `con ${prots.map((p) => p.nombre).join(" + ")}` : "",
               tops.length ? `+ ${tops.map((t) => t.nombre).join(", ")}` : "",
             ]
@@ -1926,36 +2304,45 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
         cantidad,
         precio: sinImpuesto(precioFinal, impuestoPct),
         precioFinal,
-        componentes: consume,
+        componentes: enteras,
+        ...(medias.length ? { mitades: medias } : {}),
         enredoId: insignia?.id,
+        // Media receta de cada base en "mitad": cuesta lo que de verdad gasta.
         costo: Math.round(
-          costoReceta(base.receta, byId) +
+          bases.reduce((s, b) => s + costoReceta(b.receta, byId) * fBase, 0) +
             prots.reduce((s, p) => s + costoReceta(p.receta, byId), 0) +
             tops.reduce((s, t) => s + costoReceta(t.receta, byId), 0),
         ),
       },
-      consume,
+      enteras,
+      medias,
+      prots,
+      tops,
     });
   }
 
   /* — 2b. LOS ADICIONALES: conceptos que no son platos. No consumen despensa ni se
          validan contra la carta; solo se revisa que tengan nombre y valor de verdad. */
   for (const a of adicionales) {
-    resueltos.push({ item: itemAdicional(a, impuestoPct), consume: [] });
+    resueltos.push({ item: itemAdicional(a, impuestoPct), enteras: [], medias: [], prots: [], tops: [] });
   }
 
   /* — 3. DISPONIBILIDAD, sumando TODA la comanda. Aquí está la diferencia con el
          pedido de un plato: dos renglones que llevan aguacate piden dos aguacates, y
          hay que saberlo ANTES de descontar el primero. Si no, la mesa se quedaba a
-         medias con la despensa ya tocada. */
-  const necesarias = new Map<string, number>();
+         medias con la despensa ya tocada. Las medias porciones cuentan como medias:
+         dos "mitad y mitad" con la misma base piden UNA porción de ella, no dos. */
+  const pide = new Map<string, Pide>();
+  const sumar = (id: string, campo: keyof Pide, n: number) => {
+    const x = pide.get(id) ?? { enteras: 0, medias: 0 };
+    x[campo] += n;
+    pide.set(id, x);
+  };
   for (const r of resueltos) {
-    for (const id of r.consume) {
-      necesarias.set(id, (necesarias.get(id) ?? 0) + r.item.cantidad);
-    }
+    for (const id of r.enteras) sumar(id, "enteras", r.item.cantidad);
+    for (const id of r.medias) sumar(id, "medias", r.item.cantidad);
   }
-  const controla = controlaStock(cat);
-  for (const [id, veces] of necesarias) {
+  for (const id of pide.keys()) {
     const ing = buscar(id)!;
     /* Lo que se decidió A MANO bloquea SIEMPRE, se controle la despensa o no: sacar
        algo de la carta, o marcar "se acabó el pollo", es la acción más frecuente de
@@ -1963,13 +2350,37 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
        desactiva es la ARITMÉTICA de la despensa. */
     if (ing.activo === false) throw new Error(`"${ing.nombre}" ya no está en la carta.`);
     if (ing.agotado) throw new Error(`Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`);
-    if (!controla) continue; // sin control de inventario, la receta no bloquea
-    if (!alcanzaPara(ing, byId, veces)) {
+  }
+  const controla = controlaStock(cat);
+  if (controla) {
+    // Cada componente con lo suyo: el mensaje nombra lo que hay que quitar.
+    for (const [id, n] of pide) {
+      const ing = buscar(id)!;
+      if (alcanzaPara(ing, byId, n)) continue;
+      const veces = n.enteras + n.medias / 2;
+      // Nada de "para 1.5 de…": nadie pide porciones con decimales.
       throw new Error(
-        veces > 1
-          ? `No nos alcanza para ${veces} de "${ing.nombre}".`
-          : `Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`,
+        veces <= 1
+          ? `Se nos acabó "${ing.nombre}". Quítalo y vuelve a intentar.`
+          : Number.isInteger(veces)
+            ? `No nos alcanza para ${veces} de "${ing.nombre}".`
+            : `No nos alcanza "${ing.nombre}" para toda la comanda.`,
       );
+    }
+    /* Y cada INSUMO, sumando todo lo que lo usa. Las dos bases de un plato comparten el
+       aceite: mirando componente por componente cada una cabía sola, la comanda pasaba
+       y la segunda se descontaba de un aceite que ya no estaba. */
+    const total = new Map<string, number>();
+    for (const [id, n] of pide) {
+      for (const r of buscar(id)!.receta ?? []) {
+        total.set(r.insumoId, (total.get(r.insumoId) ?? 0) + gastoDe(r.cantidad, n));
+      }
+    }
+    for (const [insumoId, cuanto] of total) {
+      const ins = byId.get(insumoId);
+      if (!ins || ins.stock < Number(cuanto.toFixed(3))) {
+        throw new Error(`No nos alcanza "${ins?.nombre ?? insumoId}" para toda la comanda.`);
+      }
     }
   }
 
@@ -1995,26 +2406,35 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   }
 
   // — 6. Ya validado TODO: ahora sí se consume la despensa, unidad por unidad.
-  const consumir = (id: string) => {
+  const tocados = new Set<string>(); // los insumos que se movieron
+  const consumir = (id: string, f: number) => {
     const it = buscar(id)!;
     if (it.receta && it.receta.length > 0) {
-      consumirReceta(it, byId); // ← descuenta despensa real
-      // Solo se auto-agota si la despensa manda; si no, el inventario baja y ya.
-      if (controla) it.agotado = !puedePreparar(it, byId);
+      consumirReceta(it, byId, f); // ← descuenta despensa real
+      for (const r of it.receta) tocados.add(r.insumoId);
     } else if (typeof it.stock === "number") {
-      it.stock = Math.max(0, it.stock - 1); // legado: unidades abstractas
-      if (controla && it.stock === 0) it.agotado = true;
+      it.stock = Math.max(0, Number((it.stock - f).toFixed(3))); // legado: unidades abstractas
+      if (controla) it.agotado = !puedePreparar(it, byId);
     }
   };
+  /* Las mismas listas que se guardan, una entrada por unidad vendida: son lo que cancelar
+     y devolver ponen de vuelta en la despensa, ni más ni menos. */
   const componentes: string[] = [];
+  const mitades: string[] = [];
   for (const r of resueltos) {
     for (let n = 0; n < r.item.cantidad; n++) {
-      for (const id of r.consume) {
-        consumir(id);
+      for (const id of r.enteras) {
+        consumir(id, 1);
         componentes.push(id);
+      }
+      for (const id of r.medias) {
+        consumir(id, 0.5);
+        mitades.push(id);
       }
     }
   }
+  // Solo se auto-agota si la despensa manda; si no, el inventario baja y ya.
+  if (controla) agotarLoQueNoAlcanza(cat, byId, tocados);
 
   const items = resueltos.map((r) => r.item);
   const costo = Math.round(items.reduce((s, i) => s + (i.costo ?? 0) * i.cantidad, 0));
@@ -2023,7 +2443,8 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
      guardados desde antes de que existieran los renglones, y hay pantallas y textos
      de WhatsApp que leen estos campos. Con un solo renglón dicen exactamente lo de
      antes; con varios, dicen cuántos platos van. */
-  const uno = items.length === 1 && items[0].cantidad === 1 ? items[0] : null;
+  const unoR = resueltos.length === 1 && resueltos[0].item.cantidad === 1 ? resueltos[0] : null;
+  const uno = unoR?.item ?? null;
   const platos = items.filter((i) => !i.adicional).reduce((s, i) => s + i.cantidad, 0);
   /* Una cuenta hecha SOLO de adicionales que no se cocinan ("Almuerzos $50.000") no
      tiene nada que hacer en la pantalla de cocina: entra ya entregada y espera el cobro.
@@ -2052,9 +2473,13 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
     pago: "pendiente",
     items,
     base: uno ? uno.nombre : platos ? `${platos} platos` : items.map((i) => i.nombre).join(", ").slice(0, 60),
-    proteina: uno ? (uno.detalle?.match(/^con (.+?)(?: ·|$)/)?.[1] ?? "—") : "—",
-    toppings: uno ? (uno.detalle?.match(/\+ (.+)$/)?.[1]?.split(", ") ?? []) : [],
+    /* De lo resuelto, no releyendo el detalle con una expresión regular: con varias
+       proteínas la de los acompañantes se tragaba media frase ("Pollo · + Parmesano"),
+       y con dos bases el detalle ya no empieza por "con". */
+    proteina: unoR?.prots.length ? unoR.prots.map((p) => p.nombre).join(" + ") : "—",
+    toppings: unoR ? unoR.tops.map((t) => t.nombre) : [],
     componentes,
+    ...(mitades.length ? { mitades } : {}),
     subtotal: cuenta.subtotal,
     impuesto: cuenta.impuesto,
     impuestoPct,
@@ -2098,6 +2523,10 @@ export async function crearPedido(input: NuevoPedido): Promise<Pedido> {
       {
         enredoId: input.enredoId,
         baseId: input.baseId,
+        /* Sin esta línea la segunda base del QR y de la web se perdía aquí, en silencio:
+           el renglón se rearmaba solo con `baseId`. Se pasa tal cual llega; quien la
+           valida es crearComanda (cuántas, cuáles, que sean bases de verdad). */
+        baseIds: input.baseIds,
         proteinaIds,
         toppingIds: input.toppingIds,
         cantidad: 1,
@@ -2356,13 +2785,39 @@ export async function borrarAdicionalConfig(id: string): Promise<Catalog> {
 }
 
 /**
- * Cancela un pedido y DEVUELVE la despensa si todavía no se había cocinado.
+ * LO QUE GASTÓ UN PEDIDO QUE NUNCA SE COCINÓ, DE VUELTA A LA DESPENSA. Una sola función
+ * para cancelar y para devolver: cada porción entera de `componentes` y cada media de
+ * `mitades`, con el MISMO redondeo con que la venta las descontó. Antes cada una tenía
+ * su copia y las dos devolvían una receta ENTERA por id: con las medias porciones de un
+ * "mitad y mitad", cancelar habría fabricado despensa que nunca existió.
  *
- * Antes solo escribía `estado = "cancelado"`. Tres agujeros a la vez: se podía cancelar
- * un pedido ya cobrado (el ingreso salía de los reportes y el efectivo se quedaba en la
- * caja sin rastro), los insumos consumidos no volvían nunca (merma invisible que se
- * acumulaba día a día), y no quedaba constancia de por qué.
+ * Y vuelve a la carta solo lo que esta despensa devuelta deja preparar. Devolver
+ * des-agotaba a ciegas todo lo del pedido, también el "se acabó" que alguien marcó a mano.
  */
+function devolverDespensa(cat: Catalog, p: Pedido): void {
+  const byId = insumosPorId(cat);
+  const controla = controlaStock(cat);
+  const tocados = new Set<string>();
+  const mover = (id: string, f: number) => {
+    const it = findIn(cat, id);
+    if (!it) return; // se borró de la carta después: no hay a qué devolverle
+    if (it.receta?.length) {
+      for (const r of it.receta) {
+        const ins = byId.get(r.insumoId);
+        if (!ins) continue;
+        ins.stock = Number((ins.stock + enPorcion(r.cantidad, f)).toFixed(3));
+        tocados.add(ins.id);
+      }
+    } else if (typeof it.stock === "number") {
+      it.stock = Number((it.stock + f).toFixed(3));
+      if (controla && it.agotado && puedePreparar(it, byId)) it.agotado = false;
+    }
+  };
+  for (const id of p.componentes ?? []) mover(id, 1);
+  for (const id of p.mitades ?? []) mover(id, 0.5);
+  if (tocados.size) reactivarPreparables(cat, tocados);
+}
+
 /**
  * DEVOLVER EL DINERO DE UN PEDIDO YA COBRADO. La salida que no existía.
  *
@@ -2392,25 +2847,7 @@ export async function devolverPedido(id: string, motivo: string): Promise<Catalo
   if (!razon) throw new Error("Escribe por qué se devuelve el dinero.");
 
   const seCocino = p.estado !== "recibido";
-  if (!seCocino && p.componentes?.length) {
-    const byId = insumosPorId(cat);
-    for (const compId of p.componentes) {
-      for (const g of ["bases", "proteinas", "toppings"] as const) {
-        const it = cat[g].find((x) => x.id === compId);
-        if (!it) continue;
-        if (it.receta?.length) {
-          for (const r of it.receta) {
-            const ins = byId.get(r.insumoId);
-            if (ins) ins.stock = Number((ins.stock + r.cantidad).toFixed(3));
-          }
-        } else if (typeof it.stock === "number") {
-          it.stock += 1;
-        }
-        it.agotado = false;
-        break;
-      }
-    }
-  }
+  if (!seCocino) devolverDespensa(cat, p);
 
   p.devolucion = { monto: p.total, motivo: razon.slice(0, 200), fecha: new Date().toISOString() };
   p.pago = "devuelto";
@@ -2420,6 +2857,14 @@ export async function devolverPedido(id: string, motivo: string): Promise<Catalo
   return cat;
 }
 
+/**
+ * Cancela un pedido y DEVUELVE la despensa si todavía no se había cocinado.
+ *
+ * Antes solo escribía `estado = "cancelado"`. Tres agujeros a la vez: se podía cancelar
+ * un pedido ya cobrado (el ingreso salía de los reportes y el efectivo se quedaba en la
+ * caja sin rastro), los insumos consumidos no volvían nunca (merma invisible que se
+ * acumulaba día a día), y no quedaba constancia de por qué.
+ */
 export async function cancelarPedido(id: string, motivo?: string): Promise<Catalog> {
   const cat = await read();
   const p = cat.pedidos.find((x) => x.id === id);
@@ -2432,25 +2877,7 @@ export async function cancelarPedido(id: string, motivo?: string): Promise<Catal
     );
   }
   // Si aún no entró a cocina, la comida no se tocó: la despensa vuelve.
-  if (p.estado === "recibido" && p.componentes?.length) {
-    const byId = insumosPorId(cat);
-    for (const compId of p.componentes) {
-      for (const g of ["bases", "proteinas", "toppings"] as const) {
-        const it = cat[g].find((x) => x.id === compId);
-        if (!it) continue;
-        if (it.receta?.length) {
-          for (const r of it.receta) {
-            const ins = byId.get(r.insumoId);
-            if (ins) ins.stock = Number((ins.stock + r.cantidad).toFixed(3));
-          }
-        } else if (typeof it.stock === "number") {
-          it.stock += 1;
-        }
-        break;
-      }
-    }
-    reactivarPreparables(cat);
-  }
+  if (p.estado === "recibido") devolverDespensa(cat, p);
   p.estado = "cancelado";
   p.motivoCancelacion = motivo?.trim().slice(0, 140) || undefined;
   await commit(cat, `Canceló #${id}${motivo ? ` — ${motivo.trim().slice(0, 60)}` : ""}`, { transaccional: true });
@@ -2521,8 +2948,10 @@ export async function restock(id: string, cantidad: number): Promise<Catalog> {
   for (const grupo of ["bases", "proteinas", "toppings"] as const) {
     const it = cat[grupo].find((x) => x.id === id);
     if (it) {
-      it.stock = Math.max(0, (it.stock ?? 0) + cantidad);
-      if (it.stock > 0) it.agotado = false;
+      it.stock = Math.max(0, Number(((it.stock ?? 0) + cantidad).toFixed(3)));
+      // "Hay" es que alcance para una porción ENTERA (ver puedePreparar): con la media
+      // que deja un "mitad y mitad" no vuelve a la carta.
+      if (it.stock >= 1) it.agotado = false;
       break;
     }
   }
@@ -2534,13 +2963,24 @@ export async function restock(id: string, cantidad: number): Promise<Catalog> {
 /* INSUMOS + RECETAS (despensa real / ficha técnica)                  */
 /* ------------------------------------------------------------------ */
 
-/** Reactiva componentes cuya despensa volvió a alcanzar (tras abastecer). */
-function reactivarPreparables(cat: Catalog, insumoId?: string): void {
+/**
+ * Reactiva componentes cuya despensa volvió a alcanzar (tras abastecer, cancelar o
+ * devolver). Con `insumos`, solo los que usan alguno de ellos: lo demás no cambió.
+ *
+ * Con el control APAGADO no hace nada. Ahí nada se agota solo, así que todo `agotado`
+ * que haya lo marcó una persona ("se acabó el pollo") y tiene que sobrevivir a una
+ * compra o a una cancelación — es lo que promete `recalcularDisponibilidad`. Antes
+ * corría igual y lo borraba.
+ */
+function reactivarPreparables(cat: Catalog, insumos?: string | ReadonlySet<string>): void {
+  if (!controlaStock(cat)) return;
   const byId = insumosPorId(cat);
+  const usa = (insumoId: string) =>
+    insumos === undefined || (typeof insumos === "string" ? insumoId === insumos : insumos.has(insumoId));
   for (const g of ["bases", "proteinas", "toppings"] as const) {
     for (const it of cat[g]) {
       if (!it.receta || it.receta.length === 0) continue;
-      if (insumoId && !it.receta.some((r) => r.insumoId === insumoId)) continue;
+      if (!it.receta.some((r) => usa(r.insumoId))) continue;
       if (it.agotado && puedePreparar(it, byId)) it.agotado = false;
     }
   }
