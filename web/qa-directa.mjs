@@ -103,7 +103,7 @@ const analizarTexto = (nombre, bytes) => {
   check(`${nombre} · es pequeño (menos de 3 KB)`, bytes.length > 300 && bytes.length < 3000, `${bytes.length} bytes`);
   check(`${nombre} · solo ASCII`, bytes.every((v) => v < 0x80));
   check(`${nombre} · lleva el nombre del cliente`, /Cliente: DIRECTA/.test(t));
-  check(`${nombre} · lleva el TOTAL y el aviso de que no es factura`, /TOTAL\s+\$[\d.]+/.test(t) && /No\s+es\s+factura/.test(t));
+  check(`${nombre} · lleva el TOTAL y ya no la nota legal`, /TOTAL\s+\$[\d.]+/.test(t) && !/No\s+es\s+factura/.test(t));
   check(`${nombre} · sin raster GS v 0`, !bytes.some((v, k) => v === 0x1d && bytes[k + 1] === 0x76));
   check(`${nombre} · termina con avance y corte`, hex(bytes.slice(-4)) === "1d 56 42 00");
 };

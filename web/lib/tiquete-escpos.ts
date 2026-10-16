@@ -202,7 +202,6 @@ export function renglonesDePapel(papel: Papel, cols: number = COLUMNAS_80MM): Re
   if (papel.cuenta.nota) centro(papel.cuenta.nota);
   R.push({ texto: `Pago: ${papel.pago}`, negrita: true });
   sep();
-  centro(papel.pie.legal);
   for (const e of papel.pie.extra) centro(e);
   centro(papel.pie.cierre, { negrita: true });
   return R;

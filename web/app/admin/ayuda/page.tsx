@@ -174,7 +174,7 @@ export default async function AyudaPage() {
             final, hasta tres líneas como el Wi-Fi o el Instagram y qué datos del cliente
             salen) se cambia en{" "}
             <a href="/admin/ajustes#comprobante">Ajustes → Comprobante</a>, con una vista previa
-            del papel. El título y la nota legal son fijos. La dirección y el teléfono son los
+            del papel. El título es fijo. La dirección y el teléfono son los
             mismos del sitio web. Los emojis no se imprimen, y la clave del Wi-Fi va{" "}
             <b>sin tildes ni eñes</b>: la impresora de texto las cambia y el cliente teclearía
             otra clave.

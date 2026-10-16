@@ -3,14 +3,13 @@
 /**
  * EL COMPROBANTE QUE SE LE ENTREGA AL CLIENTE.
  *
- * OJO, y esto no es un detalle de estilo: Papaghetti **no emite factura electrónica
- * ni documento equivalente P.O.S.** de la DIAN. Un comprobante interno NO reemplaza
- * esa obligación. Por eso este papel se llama COMPROBANTE DE CONSUMO y tiene
- * prohibido llevar las palabras "Factura", "Documento equivalente", "CUFE", "CUDE"
- * o una resolución de numeración: imitar un documento fiscal sin serlo es peor que
- * no entregar nada. El consecutivo es interno y así lo dice. (El dueño personaliza
- * el papel en Ajustes → Comprobante, pero el título y la nota legal son fijos y esas
- * palabras se rechazan al guardar: ver lib/papel.ts.)
+ * OJO, y esto no es un detalle de estilo: este papel **no es factura electrónica ni
+ * documento equivalente P.O.S.** de la DIAN. Por eso se llama COMPROBANTE DE CONSUMO y
+ * tiene prohibido llevar las palabras "Factura", "Documento equivalente", "CUFE",
+ * "CUDE" o una resolución de numeración: imitar un documento fiscal sin serlo es peor
+ * que no entregar nada. El consecutivo es interno. (El dueño personaliza el papel en
+ * Ajustes → Comprobante; el título es fijo y esas palabras se rechazan al guardar. La
+ * nota legal del pie se quitó a pedido del dueño: ver lib/papel.ts.)
  *
  * IMPRIMIR SALÍA EN BLANCO, y por partida doble.
  *
@@ -480,7 +479,6 @@ export default function Comprobante({
         <Hebra />
 
         <footer className="cbte__pie">
-          <p className="cbte__aviso">{c.pie.legal}</p>
           {c.pie.extra.map((e, i) => (
             <p className="cbte__extra" key={i}>
               {e}

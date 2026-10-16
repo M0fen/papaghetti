@@ -26,7 +26,6 @@ import { useRollo } from "./useRollo";
 import { ROLLOS, type Rollo } from "@/lib/rollo";
 import { SITIO_DOMINIO } from "@/lib/sitio";
 import {
-  AVISO_LEGAL,
   CAMPOS_CLIENTE,
   CIERRE_POR_DEFECTO,
   claveCambiaEnTexto,
@@ -538,14 +537,9 @@ export default function EditorComprobante({
                 <span>Título</span>
                 {TITULO}
               </p>
-              <p>
-                <span>Nota legal</span>
-                {AVISO_LEGAL}
-              </p>
               <small className="field__nota">
-                Van fijos porque este papel es un comprobante interno de control, no un documento de la
-                DIAN, y la nota se lo deja claro al cliente. Por eso tampoco se aceptan, en ningún texto
-                de aquí, las palabras de esos documentos.
+                Va fijo porque este papel es un comprobante de consumo, no un documento de la DIAN. Por
+                eso tampoco se aceptan, en ningún texto de aquí, las palabras de esos documentos.
               </small>
             </div>
 

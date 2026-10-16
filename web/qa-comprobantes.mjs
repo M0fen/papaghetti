@@ -154,7 +154,7 @@ si("arranca con el negocio en negrita, y luego el título y el número", t.start
 si("lleva la línea del plato con su importe", t.includes("Nido Carbonara   $30.000"));
 si("impuesto con porcentaje y TOTAL en negrita", t.includes("Impuesto (8%): $2.400") && t.includes("*TOTAL: $32.400*"));
 si("pago con el método", t.includes("Pago: Efectivo"));
-si("y el aviso de que NO es factura", t.includes("No es factura electrónica de venta"));
+si("sin nota legal al pie (el dueño pidió quitarla)", !/No es factura|Documento interno/.test(t));
 si("un devuelto lo grita arriba, con su motivo, y el pago dice DEVUELTO como el papel", C.textoComprobante(P[3]).startsWith("*** DINERO DEVUELTO ***\nSe devolvieron $32.400 — se cayó. Este pedido ya no es un consumo.") && C.textoComprobante(P[3]).includes("Pago: DEVUELTO"));
 si("un anulado también", C.textoComprobante(P[4]).includes("*** PEDIDO ANULADO") && C.textoComprobante(P[4]).includes("Este pedido se canceló: cliente se fue."));
 si("sin ajustes: Papaghetti e 'Impuesto' a secas", C.textoComprobante(P[0]).includes("*Papaghetti*") && C.textoComprobante(P[0]).includes("Impuesto: $2.400"));
@@ -164,12 +164,15 @@ eq("y null sin teléfono", C.waComprobanteHref(P[1]), null);
 
 console.log("\n═══ F3 · EL PAPEL, UNA SOLA VEZ (lib/papel.ts) ═══");
 const Pa = await import("./lib/papel.ts");
+/* La nota que el dueño pidió quitar del pie (oct 2026): ya no puede salir en ninguna salida. */
 const LEGAL = "Documento interno de control. No es factura electrónica de venta ni documento equivalente P.O.S.";
 const m0 = Pa.papelDe(P[0]);
-eq("sin config: el papel de hoy (título, nota legal, cierre, sin extras, logo de la casa)",
-  [m0.titulo, m0.pie.legal, m0.pie.cierre, m0.pie.extra, m0.cabecera.logo, m0.cabecera.logoPropio, m0.cabecera.nombre],
-  ["COMPROBANTE DE CONSUMO", LEGAL, "¡Gracias por venir!", [], "/logo-papaghetti-bn.png", false, "Papaghetti"]);
-eq("las constantes son las de siempre (una sola redacción de la nota legal)", [Pa.TITULO, Pa.AVISO_LEGAL, Pa.CIERRE_POR_DEFECTO], ["COMPROBANTE DE CONSUMO", LEGAL, "¡Gracias por venir!"]);
+eq("sin config: el papel de hoy (título, cierre, sin extras, logo de la casa)",
+  [m0.titulo, m0.pie.cierre, m0.pie.extra, m0.cabecera.logo, m0.cabecera.logoPropio, m0.cabecera.nombre],
+  ["COMPROBANTE DE CONSUMO", "¡Gracias por venir!", [], "/logo-papaghetti-bn.png", false, "Papaghetti"]);
+eq("el pie ya no trae nota legal", Object.keys(m0.pie).sort(), ["cierre", "extra"]);
+eq("las constantes: título fijo y cierre de fábrica; la nota legal ya no existe", [Pa.TITULO, Pa.CIERRE_POR_DEFECTO, "AVISO_LEGAL" in Pa], ["COMPROBANTE DE CONSUMO", "¡Gracias por venir!", false]);
+si("ninguna pieza del papel es la nota legal", !Pa.piezasPapel(m0).some((s) => /No es factura|Documento interno/.test(s)));
 eq("datos del cliente de fábrica = el papel de hoy: cliente, ubicación y nota sí; teléfono y dirección no",
   Pa.comprobanteDe({}).datosCliente, { cliente: true, ubicacion: true, telefono: false, direccion: false, notas: true });
 eq("sin config, P[0] muestra el cliente y NO su teléfono", m0.cliente, [{ k: "Cliente", v: "Ñandú Pérez" }]);
@@ -197,7 +200,6 @@ const DORADO = [
   "*TOTAL: $32.400*",
   "Pago: Nequi",
   "",
-  LEGAL,
   "¡Gracias por venir!",
 ].join("\n");
 const AJ0 = { negocio: "Papaghetti", razonSocial: "Papaghetti S.A.S.", nit: "901.234.567-8", direccion: "Cra 7 # 20-15, Pereira", telefonoLocal: "6063334455", impuestoPct: 8 };
@@ -238,7 +240,7 @@ si("el WhatsApp de ejemplo tampoco sale en el texto de la caja", !C.textoComprob
 
 console.log("\n═══ F3 · LO FIJO NO SE CAMBIA DESDE EL JSON ═══");
 const tocado = Pa.papelDe(P[0], { comprobante: { titulo: "FACTURA DE VENTA", legal: "", aviso: "x", pie: { legal: "" } } });
-eq("título y aviso legal, intactos aunque el JSON traiga otros", [tocado.titulo, tocado.pie.legal], ["COMPROBANTE DE CONSUMO", LEGAL]);
+eq("título intacto aunque el JSON traiga otro, y sin nota legal aunque el JSON la traiga", [tocado.titulo, "legal" in tocado.pie], ["COMPROBANTE DE CONSUMO", false]);
 const roto = Pa.papelDe(P[0], { comprobante: { lineasPie: "no es una lista", datosCliente: null, mensajeCierre: 42, logo: "javascript:alert(1)" } });
 eq("un JSON tocado a mano no revienta: valores de fábrica donde no cuadra", [roto.pie.extra, roto.pie.cierre, roto.cabecera.logo, roto.cliente.length], [[], "42", "/logo-papaghetti-bn.png", 1]);
 eq("un logo que no es PNG en data URL no se dibuja", Pa.comprobanteDe({ comprobante: { logo: "https://otro.com/logo.png" } }).logoPropio, false);
@@ -253,12 +255,12 @@ for (const [nombre, p, a] of [["mesa sin config", P[1], {}], ["domicilio configu
 }
 const t5 = C.textoComprobante(P[5], A);
 si("el cierre propio reemplaza al de fábrica", t5.includes("¡Vuelve pronto, enredado!") && !t5.includes("¡Gracias por venir!"));
-si("las líneas extra, en orden, entre la nota legal y el cierre", t5.indexOf(LEGAL) < t5.indexOf("Wi-Fi:") && t5.indexOf("Wi-Fi:") < t5.indexOf("Síguenos") && t5.indexOf("Domicilios 300") < t5.indexOf("¡Vuelve pronto"));
+si("las líneas extra, en orden, después del pago y antes del cierre", t5.indexOf("Pago:") < t5.indexOf("Wi-Fi:") && t5.indexOf("Wi-Fi:") < t5.indexOf("Síguenos") && t5.indexOf("Domicilios 300") < t5.indexOf("¡Vuelve pronto"));
 si("la cuarta línea no sale", !t5.includes("una cuarta"));
 si("hay líneas en blanco de verdad, y nunca dos seguidas", t5.includes("\n\n") && !t5.includes("\n\n\n") && !t5.startsWith("\n") && !t5.endsWith("\n"));
 si("ninguna línea con espacios sueltos al final", t5.split("\n").every((l) => l === l.trimEnd()));
 eq("el enlace lleva exactamente ese texto", decodeURIComponent(C.waComprobanteHref(P[0], A).split("text=")[1]), C.textoComprobante(P[0], A));
-si("la caja sin ajustes arma el papel completo (título y nota legal)", C.textoComprobante(P[0]).includes("COMPROBANTE DE CONSUMO") && C.textoComprobante(P[0]).includes(LEGAL));
+si("la caja sin ajustes arma el papel completo (título y cierre, sin nota legal)", C.textoComprobante(P[0]).includes("COMPROBANTE DE CONSUMO") && C.textoComprobante(P[0]).includes("¡Gracias por venir!") && !C.textoComprobante(P[0]).includes(LEGAL));
 si("ajustesPapelDe deja el logo fuera de la caja y lo trae donde se dibuja", (() => {
   const aj = { ...AJ0, whatsapp: "", horarios: "", numMesas: 0, propinaSugeridaPct: 0, abierto: true, instagram: "", costoDomicilio: 0, pedidoMinimo: 0, promos: [], usuarios: ["Ana"], comprobante: { logo: "data:image/png;base64,AAAA", mensajeCierre: "Hola" } };
   const sin = Pa.ajustesPapelDe(aj), con = Pa.ajustesPapelDe(aj, true);

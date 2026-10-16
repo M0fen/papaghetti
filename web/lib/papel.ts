@@ -10,8 +10,8 @@
  * dibujan: lo que dice una lo dicen todas.
  *
  * Lo que el dueño personaliza (Ajustes → Comprobante) también vive aquí, con sus
- * valores de fábrica, y lo que NO se puede cambiar —el título y la nota legal— son
- * constantes: ningún dato guardado puede pisarlas.
+ * valores de fábrica, y lo que NO se puede cambiar —el título— es una constante:
+ * ningún dato guardado puede pisarlo.
  *
  * Módulo PURO (sin DOM, sin React, sin next/*): lo importan las cuatro salidas, el
  * editor de Ajustes y la acción que guarda, y lo prueban las suites de Node.
@@ -86,16 +86,17 @@ export function ajustesPapelDe(a: Ajustes, conLogo = false): AjustesPapel {
 /* ───────────────────────── Lo fijo ───────────────────────── */
 
 /**
- * EL TÍTULO Y LA NOTA LEGAL NO SE CONFIGURAN. Papaghetti no emite documentos de la
- * DIAN: este papel es un control interno, y así lo dice a quien lo recibe. Si el título
- * o la nota se pudieran editar, bastaría un cambio de texto para que el comprobante
- * pareciera lo que no es. Por eso son constantes y `papelDe` las pone siempre, venga lo
- * que venga en el cerebro.
+ * EL TÍTULO NO SE CONFIGURA. Si se pudiera editar, bastaría un cambio de texto para que
+ * el comprobante pareciera lo que no es; por eso es constante y `papelDe` lo pone
+ * siempre, venga lo que venga en el cerebro.
+ *
+ * SIN NOTA LEGAL AL PIE (octubre de 2026). El papel cerraba con "Documento interno de
+ * control. No es factura electrónica…" y el dueño pidió quitarla: el negocio no es
+ * responsable del impuesto al consumo y su trámite ante la DIAN está en curso. Lo que
+ * evita que el papel se haga pasar por factura sigue en pie: el título fijo y
+ * `pareceFiscal`, que rechaza en Ajustes las palabras de los documentos fiscales.
  */
 export const TITULO = "COMPROBANTE DE CONSUMO";
-/** La misma redacción en las cuatro salidas (el WhatsApp decía "Comprobante interno…"). */
-export const AVISO_LEGAL =
-  "Documento interno de control. No es factura electrónica de venta ni documento equivalente P.O.S.";
 export const CIERRE_POR_DEFECTO = "¡Gracias por venir!";
 /** El logo de la casa, ya en blanco y negro (lo genera qa-logo-bn.mjs). */
 export const LOGO_DE_LA_CASA = "/logo-papaghetti-bn.png";
@@ -353,8 +354,8 @@ export interface Papel {
   pago: string;
   anulado: boolean;
   devuelto: boolean;
-  /** La nota legal, las líneas extra y el cierre (el cierre siempre al final, donde estaba el "¡Gracias…"). */
-  pie: { legal: typeof AVISO_LEGAL; extra: string[]; cierre: string };
+  /** Las líneas extra y el cierre (el cierre siempre al final, donde estaba el "¡Gracias…"). */
+  pie: { extra: string[]; cierre: string };
 }
 
 /**
@@ -454,7 +455,7 @@ export function papelDe(p: Pedido, a: AjustesPapel = {}): Papel {
     pago: pagoPapel(p),
     anulado,
     devuelto,
-    pie: { legal: AVISO_LEGAL, extra: conf.lineasPie, cierre: conf.mensajeCierre },
+    pie: { extra: conf.lineasPie, cierre: conf.mensajeCierre },
   };
 }
 
@@ -481,7 +482,6 @@ export function piezasPapel(papel: Papel): string[] {
     formatCOP(c.total),
     ...(c.nota ? [c.nota] : []),
     papel.pago,
-    papel.pie.legal,
     ...papel.pie.extra,
     papel.pie.cierre,
   ];

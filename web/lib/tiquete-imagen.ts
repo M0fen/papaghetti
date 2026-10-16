@@ -341,11 +341,9 @@ export function dibujarTiquete({ papel, logo, rollo = ROLLO_POR_DEFECTO }: Entra
 
   y = hebra(ctx, g, y);
 
-  // ── Pie: la nota legal (fija), las líneas del dueño y el cierre ──
+  // ── Pie: las líneas del dueño y el cierre (sin nota legal: ver lib/papel.ts) ──
   y += 4;
-  centro(papel.pie.legal, `500 17px ${CUERPO}`, 22);
   if (papel.pie.extra.length) {
-    y += 8;
     for (const e of papel.pie.extra) centro(e, `500 19px ${CUERPO}`, 24);
   }
   y += 12;

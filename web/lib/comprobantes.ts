@@ -547,7 +547,7 @@ export function textoDePapel(papel: Papel): string {
   for (const [k, v] of papel.cuenta.sumas) L.push(`${k}: ${formatCOP(v)}`);
   L.push(`*TOTAL: ${formatCOP(papel.cuenta.total)}*`);
   if (papel.cuenta.nota) L.push(papel.cuenta.nota);
-  L.push(`Pago: ${papel.pago}`, "", papel.pie.legal, ...papel.pie.extra, papel.pie.cierre);
+  L.push(`Pago: ${papel.pago}`, "", ...papel.pie.extra, papel.pie.cierre);
   return L.join("\n");
 }
 

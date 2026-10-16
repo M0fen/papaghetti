@@ -103,7 +103,7 @@ eq("impuesto con su porcentaje", L.some((l) => /^Impuesto \(8%\)\s+\$5\.600$/.te
 eq("TOTAL en letra doble a 24 columnas: 70.000 + 5.600 = $75.600", L.find((l) => l.t.startsWith("TOTAL"))?.t, "TOTAL" + " ".repeat(24 - 5 - 7) + "$75.600");
 eq("pago con el método", L.some((l) => l.t === "Pago: Nequi"), true);
 eq("la nota", L.some((l) => l.t.startsWith("Nota: Sin cebolla")), true);
-eq("el aviso de que NO es factura, partido en líneas", L.map((l) => l.t).join(" ").includes("No es factura electronica de venta ni documento equivalente P.O.S."), true);
+eq("sin nota legal al pie (el dueño pidió quitarla)", /No es factura|Documento interno/.test(L.map((l) => l.t).join(" ")), false);
 eq("ni propina ni la palabra Factura a secas", L.some((l) => /propina|^Factura/i.test(l.t)), false);
 
 console.log("\n═══ EL TIQUETE EN TEXTO: casos ═══");
@@ -174,9 +174,6 @@ const DORADO_32 = [
   "TOTAL" + " ".repeat(16 - 5 - 7) + "$75.600",
   "Pago: Nequi",
   "-".repeat(32),
-  "Documento interno de control. No",
-  "es factura electronica de venta",
-  "ni documento equivalente P.O.S.",
   "Gracias por venir!",
 ];
 eq("dorado: línea por línea", t58.map((l) => l.t), DORADO_32);
@@ -206,7 +203,7 @@ for (const cols of [32, 48]) {
   eq(`${cols} col · como mucho 3`, /una cuarta/.test(tx), false);
   eq(`${cols} col · razón social sin eñe ni raya`, tx.includes("Pasta & Noquis S.A.S. - Pereira"), true);
   eq(`${cols} col · cliente oculto / ubicación y teléfono visibles`, [Lc.some((l) => /^Cliente:/.test(l.t)), Lc.some((l) => l.t === "Ubicacion: Mesa 4"), Lc.some((l) => l.t === "Telefono: 300 123 4567")], [false, true, true]);
-  eq(`${cols} col · título y nota legal intactos`, Lc.filter((l) => l.t === "COMPROBANTE DE CONSUMO").length === 1 && tx.includes("No es factura electronica de venta ni documento equivalente P.O.S."), true);
+  eq(`${cols} col · título intacto y sin nota legal`, Lc.filter((l) => l.t === "COMPROBANTE DE CONSUMO").length === 1 && !/No es factura|Documento interno/.test(tx), true);
   eq(`${cols} col · sin el número de ejemplo (sale el teléfono del local)`, [/3001112233|300 111 2233/.test(tx), tx.includes("Tel. 606 333 4455")], [false, true]);
   eq(`${cols} col · y sin teléfono del local, con el WhatsApp de ejemplo, no hay 'Tel.'`, /Tel\./.test(plano(leer(tiqueteEscPos(pF3, { negocio: "Papaghetti", whatsapp: "573001112233" }, { cols })))), false);
   eq(`${cols} col · TOTAL en doble llena ${cols / 2}`, Lc.find((l) => l.t.startsWith("TOTAL"))?.t.length, cols / 2);
