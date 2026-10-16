@@ -26,7 +26,7 @@
  */
 
 import { formatCOP, type Pedido } from "./menu";
-import { papelDe, type AjustesPapel, type Papel } from "./papel";
+import { palabrasDe, papelDe, trozosNombre, type AjustesPapel, type Papel } from "./papel";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -87,9 +87,12 @@ export const comoSaleEnTexto = (s: string): string =>
     .replace(/ {2,}/g, " ")
     .trim();
 
-/** Parte un texto en líneas de como mucho `cols` caracteres, por palabras. */
+/**
+ * Parte un texto en líneas de como mucho `cols` caracteres, por palabras (un "+" suelto
+ * va con la palabra que le sigue: ver `palabrasDe`).
+ */
 export function partir(s: string, cols: number): string[] {
-  const palabras = s.split(/\s+/).filter(Boolean);
+  const palabras = palabrasDe(s);
   const out: string[] = [];
   let act = "";
   for (const w of palabras) {
@@ -126,6 +129,19 @@ export function fila(izq: string, der: string, cols: number): string[] {
     lineas.push(" ".repeat(Math.max(0, cols - der.length)) + der);
   }
   return lineas;
+}
+
+/**
+ * La fila de un plato. Igual que `fila`, salvo un nombre de dos bases que no cabe con
+ * su precio: se parte en la barra (`trozosNombre`) y el precio va al final del último
+ * trozo, como en cualquier nombre largo. A 32 columnas "2x Spaghetti / Papa criolla"
+ * dejaba el precio solo en un renglón; partido por palabras habría dejado "criolla" sola.
+ */
+export function filaPlato(nombre: string, valor: string, cols: number): string[] {
+  const n = nombre.trimEnd();
+  const trozos = trozosNombre(n);
+  if (trozos.length < 2 || n.length + 1 + valor.trim().length <= cols) return fila(n, valor, cols);
+  return [...trozos.slice(0, -1).flatMap((t) => partir(t, cols)), ...fila(trozos[trozos.length - 1], valor, cols)];
 }
 
 /**
@@ -169,7 +185,7 @@ export function renglonesDePapel(papel: Papel, cols: number = COLUMNAS_80MM): Re
      relleno hasta la columna del precio se tiene que contar sobre lo que se imprime. */
   for (const l of papel.cuenta.lineas) {
     const nombre = `${l.cantidad > 1 ? `${l.cantidad}x ` : ""}${l.nombre}`;
-    for (const t of fila(ascii(nombre), formatCOP(l.importe), cols)) R.push({ texto: t });
+    for (const t of filaPlato(ascii(nombre), formatCOP(l.importe), cols)) R.push({ texto: t });
     if (l.detalle) for (const t of partir(ascii(l.detalle), cols - 3)) R.push({ texto: `   ${t}` });
   }
   if (papel.nota) {

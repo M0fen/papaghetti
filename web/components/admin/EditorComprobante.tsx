@@ -23,12 +23,13 @@ import {
 } from "@/app/admin/acciones-comprobante";
 import BotonGuardar from "./BotonGuardar";
 import { useRollo } from "./useRollo";
-import { ROLLOS } from "@/lib/rollo";
+import { ROLLOS, type Rollo } from "@/lib/rollo";
 import { SITIO_DOMINIO } from "@/lib/sitio";
 import {
   AVISO_LEGAL,
   CAMPOS_CLIENTE,
   CIERRE_POR_DEFECTO,
+  claveCambiaEnTexto,
   LARGO,
   LOGO_DE_LA_CASA,
   LOGO_MAX_CARACTERES,
@@ -59,10 +60,6 @@ const VISTAS: { id: Vista; label: string }[] = [
   { id: "texto", label: "Impresora de texto" },
   { id: "whatsapp", label: "WhatsApp" },
 ];
-
-/* Una línea al pie que parece una clave: ahí una tilde o una eñe que la impresora de
-   texto cambia sí importa (el cliente teclearía una clave equivocada). */
-const PARECE_CLAVE = /clave|contrase|wi-?fi|password/i;
 
 const PLACEHOLDER_PIE = ["Wi-Fi: Papaghetti · Clave: pasta2026", "Síguenos: @papaghetti.pereira", SITIO_DOMINIO];
 
@@ -131,6 +128,7 @@ export default function EditorComprobante({
     setTextos((t) => ({ ...t, datosCliente: { ...t.datosCliente, [k]: !t.datosCliente[k] } }));
 
   const validacion = useMemo(() => validarComprobante(textos), [textos]);
+  const sinGuardar = JSON.stringify(textos) !== firma;
 
   /* ── El logo propio: se prepara AQUÍ, en el navegador, antes de subir nada ── */
   const archivo = useRef<HTMLInputElement>(null);
@@ -145,26 +143,33 @@ export default function EditorComprobante({
     [],
   );
 
+  /* Nunca lanza: un error aquí (una imagen que el navegador no deja leer, como algunos
+     SVG) se vuelve un aviso, también al tocar "Más fino" o "Más grueso". */
   const preparar = (img: HTMLImageElement, t: Tinta) => {
     const umbral = TINTA.find((x) => x.id === t)?.umbral ?? 150;
-    /* Si un logo con mucho detalle pesa de más, se encoge hasta que quepa: el papel lo
-       dibuja a la mitad de este tamaño de todos modos. */
-    for (const f of [1, 0.75, 0.5]) {
-      const r = prepararLogo(img, img.naturalWidth, img.naturalHeight, umbral, {
-        ancho: Math.round(LOGO_GUARDADO.ancho * f),
-        alto: Math.round(LOGO_GUARDADO.alto * f),
-      });
-      if (!r) {
-        setErrorLogo("No encontramos un dibujo en esa imagen. Prueba con el logo sobre un fondo liso.");
-        return;
+    try {
+      /* Si un logo con mucho detalle pesa de más, se encoge hasta que quepa: el papel lo
+         dibuja a la mitad de este tamaño de todos modos. */
+      for (const f of [1, 0.75, 0.5]) {
+        const r = prepararLogo(img, img.naturalWidth, img.naturalHeight, umbral, {
+          ancho: Math.round(LOGO_GUARDADO.ancho * f),
+          alto: Math.round(LOGO_GUARDADO.alto * f),
+        });
+        if (!r) {
+          setErrorLogo("No encontramos un dibujo en esa imagen. Prueba con el logo sobre un fondo liso.");
+          return;
+        }
+        if (r.dataUrl.length <= LOGO_MAX_CARACTERES) {
+          setErrorLogo("");
+          setLogoNuevo(r.dataUrl);
+          return;
+        }
       }
-      if (r.dataUrl.length <= LOGO_MAX_CARACTERES) {
-        setErrorLogo("");
-        setLogoNuevo(r.dataUrl);
-        return;
-      }
+      setErrorLogo("Ese logo tiene demasiado detalle para el papel. Prueba con una versión más sencilla.");
+    } catch {
+      setLogoNuevo(null);
+      setErrorLogo("No se pudo preparar ese logo en este equipo. Prueba con un PNG o un JPG.");
     }
-    setErrorLogo("Ese logo tiene demasiado detalle para el papel. Prueba con una versión más sencilla.");
   };
 
   const onArchivo = async (file?: File) => {
@@ -179,6 +184,9 @@ export default function EditorComprobante({
       return;
     }
     setProcesando(true);
+    /* Un archivo nuevo reemplaza al que estaba pendiente: si este falla, no queda a la
+       vista (con su botón de guardar) el logo de antes como si fuera el nuevo. */
+    setLogoNuevo(null);
     const url = URL.createObjectURL(file);
     try {
       const img = await cargarImagen(url, 10000);
@@ -204,7 +212,12 @@ export default function EditorComprobante({
   };
 
   /* ── La vista previa: el mismo papel que sale de verdad, con un pedido de muestra ── */
-  const [rollo, setRollo] = useRollo();
+  /* Arranca en el rollo de ESTE equipo, pero cambiarlo aquí es solo para mirar: el rollo
+     del equipo lo usa la impresión de verdad, y un vistazo a 80 mm desde Ajustes no puede
+     dejar la caja imprimiendo a otra medida. */
+  const [rolloEquipo] = useRollo();
+  const [rolloVista, setRollo] = useState<Rollo | null>(null);
+  const rollo = rolloVista ?? rolloEquipo;
   const cols = ROLLOS[rollo].cols;
   const [vista, setVista] = useState<Vista>("imagen");
   const [muestra, setMuestra] = useState<"local" | "domicilio">("local");
@@ -226,7 +239,9 @@ export default function EditorComprobante({
     }),
     [textos, logoNuevo, logo, whatsapp, impuestoPct],
   );
-  const pedido = useMemo(() => pedidoDeMuestra(muestra, impuestoPct || 8), [muestra, impuestoPct]);
+  /* Con la tarifa de Ajustes tal cual: con 0 % la muestra no dice "Incluye impuesto…",
+     igual que los pedidos de verdad. */
+  const pedido = useMemo(() => pedidoDeMuestra(muestra, impuestoPct), [muestra, impuestoPct]);
   const papel = useMemo(() => papelDe(pedido, borrador), [pedido, borrador]);
   const lineasTexto = useMemo(() => lineasImpresas(renglonesDePapel(papel, cols), cols), [papel, cols]);
   const textoWa = useMemo(() => textoDePapel(papel), [papel]);
@@ -458,6 +473,9 @@ export default function EditorComprobante({
                 {textos.lineasPie.map((l, i) => {
                   const enTexto = comoSaleEnTexto(l);
                   const cambia = l.trim() !== "" && enTexto !== l.replace(/\s+/g, " ").trim();
+                  /* Una clave del Wi-Fi que la impresora de texto cambia sí importa: el
+                     cliente teclearía una clave equivocada. El resto solo se informa. */
+                  const clave = claveCambiaEnTexto(l);
                   return (
                     <label className="field" key={i}>
                       <span>Línea {i + 1} al pie (opcional)</span>
@@ -471,9 +489,9 @@ export default function EditorComprobante({
                       />
                       <AvisoEmoji texto={l} />
                       {cambia && (
-                        <small className={PARECE_CLAVE.test(l) ? "field__alerta" : "field__nota"}>
+                        <small className={clave ? "field__alerta" : "field__nota"}>
                           En la impresora de texto sale: «{enTexto}»
-                          {PARECE_CLAVE.test(l) ? ". Si es una clave, escríbela sin tildes, eñes ni signos." : "."}
+                          {clave ? ". La clave cambia: escríbela sin tildes, eñes ni signos." : "."}
                         </small>
                       )}
                     </label>
@@ -534,6 +552,13 @@ export default function EditorComprobante({
             {!validacion.ok && (
               <p className="field__alerta cbte-editor__error" role="alert">
                 {validacion.error}
+              </p>
+            )}
+            {/* La vista previa cambia con cada tecla, y por eso mismo parece guardado
+                cuando todavía no lo está. */}
+            {validacion.ok && sinGuardar && (
+              <p className="field__nota cbte-editor__pendiente">
+                Hay cambios sin guardar: la vista previa ya los muestra, el comprobante de verdad todavía no.
               </p>
             )}
             <BotonGuardar disabled={!validacion.ok}>Guardar comprobante</BotonGuardar>

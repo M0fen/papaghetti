@@ -21,7 +21,7 @@
  */
 
 import { formatCOP } from "./menu";
-import { CAJA_LOGO, type Papel } from "./papel";
+import { CAJA_LOGO, palabrasDe, trozosNombre, type Papel } from "./papel";
 import { ROLLO_POR_DEFECTO, ROLLOS, type Rollo } from "./rollo";
 
 /**
@@ -67,12 +67,13 @@ type Ctx = CanvasRenderingContext2D;
 /**
  * Parte un texto en líneas que quepan en `ancho` con la fuente ya puesta en `ctx`.
  * Una palabra que no cabe sola (una URL, la clave del Wi-Fi) se parte por letras: antes
- * quedaba entera en su línea y el papel la cortaba por los dos lados.
+ * quedaba entera en su línea y el papel la cortaba por los dos lados. Un "+" suelto va
+ * con la palabra que le sigue (`palabrasDe`), igual que en el texto ESC/POS.
  */
 function partir(ctx: Ctx, texto: string, ancho: number): string[] {
   const lineas: string[] = [];
   let actual = "";
-  for (const w of texto.split(/\s+/).filter(Boolean)) {
+  for (const w of palabrasDe(texto)) {
     const prueba = actual ? `${actual} ${w}` : w;
     if (ctx.measureText(prueba).width <= ancho) {
       actual = prueba;
@@ -90,6 +91,15 @@ function partir(ctx: Ctx, texto: string, ancho: number): string[] {
   }
   if (actual) lineas.push(actual);
   return lineas;
+}
+
+/**
+ * El nombre de un plato: entero si cabe; si no, por sus trozos (`trozosNombre`: un plato
+ * de dos bases se parte en la barra, no dentro de "Papa criolla") y cada trozo por palabras.
+ */
+function partirNombre(ctx: Ctx, nombre: string, ancho: number): string[] {
+  if (ctx.measureText(nombre).width <= ancho) return [nombre];
+  return trozosNombre(nombre).flatMap((t) => partir(ctx, t, ancho));
 }
 
 /** La hebra de la casa: el mismo fideo ondulado que separa el sitio, en un trazo. */
@@ -160,11 +170,11 @@ export function dibujarTiquete({ papel, logo, rollo = ROLLO_POR_DEFECTO }: Entra
      líneas del concepto: en el papel no se nota, pero así lo dibujado, leído en orden
      (como lo leen las pruebas para comparar las cuatro salidas), no corta un nombre
      largo con su precio en medio. */
-  const fila = (izq: string, der: string, fuenteI: string, fuenteD = fuenteI, salto = 30) => {
+  const fila = (izq: string, der: string, fuenteI: string, fuenteD = fuenteI, salto = 30, plato = false) => {
     ctx.font = fuenteD;
     const wDer = ctx.measureText(der).width;
     ctx.font = fuenteI;
-    const lineas = partir(ctx, izq, ANCHO_TEXTO - wDer - 16);
+    const lineas = (plato ? partirNombre : partir)(ctx, izq, ANCHO_TEXTO - wDer - 16);
     const y0 = y + salto;
     for (const l of lineas) {
       y += salto;
@@ -281,7 +291,7 @@ export function dibujarTiquete({ papel, logo, rollo = ROLLO_POR_DEFECTO }: Entra
   const cuenta = papel.cuenta;
   for (const l of cuenta.lineas) {
     const cant = l.cantidad > 1 ? `${l.cantidad}× ` : "";
-    fila(`${cant}${l.nombre}`, formatCOP(l.importe), `800 24px ${CUERPO}`, `800 24px ${CUERPO}`, 32);
+    fila(`${cant}${l.nombre}`, formatCOP(l.importe), `800 24px ${CUERPO}`, `800 24px ${CUERPO}`, 32, true);
     if (l.detalle) {
       ctx.font = `500 19px ${CUERPO}`;
       for (const s of partir(ctx, l.detalle, ANCHO_TEXTO - 24)) {

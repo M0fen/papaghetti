@@ -7170,6 +7170,8 @@ body.enreda-jugando .sticky-pedir {
 .cbte__logo { width: auto; max-width: 174px; max-height: 74px; }
 /* Las líneas del dueño al pie (Wi-Fi, Instagram, web), entre la nota legal y el cierre. */
 .cbte__pie .cbte__extra { margin-top: 5px; font-size: 9.5px; line-height: 1.4; }
+/* Cada base de un plato de dos bases es un bloque: el renglón se parte en la barra. */
+.cbte__trozo { display: inline-block; max-width: 100%; }
 /* Una dirección o una URL larga se parte en vez de salirse del papel. */
 .cbte__meta dd { min-width: 0; overflow-wrap: anywhere; }
 .cbte__nom, .cbte__nota, .cbte__datos span, .cbte__pie p { overflow-wrap: anywhere; }
@@ -7186,6 +7188,8 @@ body.enreda-jugando .sticky-pedir {
 .cbte-editor__col { display: grid; gap: 14px; min-width: 0; }
 /* `.settings` limita el ancho para las secciones sueltas; aquí manda la columna. */
 .cbte-editor__form { max-width: none; }
+/* La dirección ocupa la fila entera: es el dato más largo y a media fila se cortaba. */
+.cbte-editor .setgrid .field--full { grid-column: 1 / -1; }
 .cbte-editor__h { margin: 0; font-size: 0.95rem; font-weight: 800; }
 .cbte-editor__logo { display: grid; gap: 10px; }
 /* El logo a su tamaño en el papel de 58 mm (264 × 112 puntos), sobre blanco. */
@@ -7227,7 +7231,7 @@ body.enreda-jugando .sticky-pedir {
   text-transform: uppercase;
   opacity: 0.6;
 }
-.cbte-editor__error { margin: 0; font-size: 0.86rem; }
+.cbte-editor__error, .cbte-editor__pendiente { margin: 0; font-size: 0.86rem; }
 
 /* La vista previa: el papel, la impresora de texto y el WhatsApp. */
 .cbte-editor__vista {
@@ -7277,7 +7281,9 @@ body.enreda-jugando .sticky-pedir {
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
-.cbte-editor__wa > div { min-height: 1.4em; }
+/* Los espacios cuentan: WhatsApp respeta los de "Nido Carbonara   $32.000" y la sangría
+   del detalle, y la vista previa también. */
+.cbte-editor__wa > div { min-height: 1.4em; white-space: pre-wrap; }
 @media (min-width: 1180px) {
   .cbte-editor__cuerpo { grid-template-columns: minmax(0, 1fr) 360px; }
   .cbte-editor__vista { position: sticky; top: 16px; }

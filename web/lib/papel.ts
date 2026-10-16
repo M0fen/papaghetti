@@ -196,6 +196,51 @@ export function textoPapel(v: unknown, max = 200): string {
 /** El NIT sin un "NIT" delante: el papel ya lo escribe ("NIT NIT 901…" salía en datos viejos). */
 const nitSolo = (v: unknown): string => textoPapel(v, LARGO.nit).replace(/^nit\b[\s:.-]*/i, "");
 
+/**
+ * La clave del Wi-Fi escrita en una línea, si la trae ("Clave: Ñandú2026" → "Ñandú2026").
+ * Ahí una tilde o una eñe sí importan: la impresora de texto las cambia ("Nandu2026") y
+ * el cliente teclearía una clave equivocada. En el resto del texto da igual: se lee.
+ */
+export function claveDe(s: string): string {
+  const m = /(?:clave|contrase(?:ñ|n)a|password)\s*[:=]?\s*(\S+)/i.exec(s);
+  return m ? m[1] : "";
+}
+/** ¿La clave de esta línea sale distinta en la impresora de texto (tildes, eñes, signos)? */
+export const claveCambiaEnTexto = (s: string): boolean => /[^\x20-\x7E]/.test(claveDe(textoPapel(s)));
+
+/* ───────────────────────── Cómo se parte un renglón ───────────────────────── */
+
+/**
+ * Las palabras de un renglón, para partirlo. Un "+" suelto va pegado a la palabra que
+ * le sigue: "con Pollo + Carne molida · + Parmesano" se partía dejando el "+" colgado al
+ * final de un renglón y lo agregado, sin su signo, en el siguiente. La imagen y el texto
+ * ESC/POS parten con esto.
+ */
+export function palabrasDe(s: string): string[] {
+  const out: string[] = [];
+  let pegar = false;
+  for (const w of s.split(/\s+/).filter(Boolean)) {
+    if (pegar) out[out.length - 1] += ` ${w}`;
+    else out.push(w);
+    pegar = w === "+";
+  }
+  return out;
+}
+
+/**
+ * Los trozos de un nombre que no conviene partir por dentro. Un plato de dos bases se
+ * llama "Spaghetti / Papa criolla": si no cabe en un renglón con su precio, se parte en
+ * la barra ("Spaghetti /" arriba, "Papa criolla" abajo) y no en "Spaghetti / Papa" +
+ * "criolla", que en el papel parecía otra cosa. Un nombre sin barra es un solo trozo.
+ */
+export function trozosNombre(nombre: string): string[] {
+  const t = nombre
+    .split(" / ")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return t.length < 2 ? [nombre] : t.map((x, i) => (i < t.length - 1 ? `${x} /` : x));
+}
+
 /* ───────────────────────── Teléfonos ───────────────────────── */
 
 /** El número de ejemplo de la semilla, con o sin el 57 delante. */
@@ -571,6 +616,15 @@ export function validarComprobante(f: FormularioComprobante): ResultadoComproban
   }
   const avisos: string[] = [];
   if (textos.some(([, t]) => tieneEmoji(t))) avisos.push("Los emojis no se imprimen: el comprobante sale sin ellos.");
+  /* Un solo aviso para todas las claves: el aviso del panel tiene un tope de largo y
+     tres frases casi iguales lo partirían a la mitad. */
+  const claves = pieCrudo.flatMap((l, i) => (claveCambiaEnTexto(l) ? [i + 1] : []));
+  if (claves.length === 1) {
+    avisos.push(`La clave de la línea ${claves[0]} sale distinta en la impresora de texto: escríbela sin tildes, eñes ni signos.`);
+  } else if (claves.length > 1) {
+    const cuales = `${claves.slice(0, -1).join(", ")} y ${claves[claves.length - 1]}`;
+    avisos.push(`Las claves de las líneas ${cuales} salen distintas en la impresora de texto: escríbelas sin tildes, eñes ni signos.`);
+  }
   return {
     ok: true,
     datos: { negocio, razonSocial, nit, direccion, telefonoLocal },

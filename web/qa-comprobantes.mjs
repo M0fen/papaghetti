@@ -313,6 +313,32 @@ const rechLogo = [
 ];
 for (const [n, v] of rechLogo) { const r = Pa.logoPngValido(v); si(`rechaza el logo: ${n}`, !r.ok, r.ok ? "lo aceptó" : r.error); }
 
+console.log("\n═══ F3 · LA CLAVE DEL WI-FI ═══");
+eq("claveDe saca la clave de la línea", [Pa.claveDe("Wi-Fi: Papaghetti · Clave: Ñandú2026"), Pa.claveDe("Contraseña=abc"), Pa.claveDe("IG @papaghetti")], ["Ñandú2026", "abc", ""]);
+eq("solo avisa si la CLAVE cambia en la impresora de texto (no por el «·» de antes)", [Pa.claveCambiaEnTexto("Wi-Fi: Papaghetti · Clave: pasta2026"), Pa.claveCambiaEnTexto("Wi-Fi: Papaghetti · Clave: Ñandú2026"), Pa.claveCambiaEnTexto("Clave: ¡hola!")], [false, true, true]);
+const conClave = F({ lineaPie: ["", "Wi-Fi · Clave: Ñandú2026", ""] });
+si("se guarda, con un aviso que nombra SU línea", conClave.ok && conClave.avisos.some((x) => /clave de la línea 2/.test(x)), JSON.stringify(conClave.avisos));
+si("y una clave sin tildes no da aviso", F({ lineaPie: ["Wi-Fi · Clave: pasta2026", "", ""] }).avisos.length === 0);
+const variasClaves = F({ mensajeCierre: "¡Vuelve pronto! 🍝", lineaPie: ["Clave: Ñandú", "Clave: pasta", "Contraseña: ¡año!"] });
+si("varias claves: UN aviso con sus líneas, y todo cabe en el aviso del panel (300)", variasClaves.ok && variasClaves.avisos.filter((x) => /clave/i.test(x)).length === 1 && variasClaves.avisos.some((x) => x.includes("líneas 1 y 3")) && `Comprobante guardado. ${variasClaves.avisos.join(" ")}`.length <= 300, JSON.stringify(variasClaves.avisos));
+
+console.log("\n═══ F3 · DOS BASES EN EL PAPEL (nombre «A / B» y el modo al frente del detalle) ═══");
+eq("palabrasDe: un «+» suelto va con la palabra que le sigue", Pa.palabrasDe("con Pollo + Carne molida · + Parmesano"), ["con", "Pollo", "+ Carne", "molida", "·", "+ Parmesano"]);
+eq("trozosNombre: dos bases se parten en la barra; un nombre sin barra es uno solo", [Pa.trozosNombre("Spaghetti / Papa criolla"), Pa.trozosNombre("Nido Carbonara")], [["Spaghetti /", "Papa criolla"], ["Nido Carbonara"]]);
+const P2 = {
+  ...base, id: "HHHH8888", consecutivo: 21, creadoEn: "2026-09-12T19:03:00.000Z", impuestoIncluido: true, impuestoPct: 8,
+  items: [
+    { nombre: "Spaghetti / Papa criolla", detalle: "mitad y mitad · con Carne molida · + Parmesano", cantidad: 2, precio: 24907, precioFinal: 26900 },
+    { nombre: "Fettuccine / Papa francesa", detalle: "dos bases completas · con Pollo + Tocineta", cantidad: 1, precio: 30000, precioFinal: 32400 },
+  ],
+  bruto: 86200, total: 86200,
+};
+const m2 = Pa.papelDe(P2, AJ0);
+eq("el renglón conserva el nombre de las dos bases y el detalle con el modo", m2.cuenta.lineas.map((l) => [l.nombre, l.detalle, l.importe]), [["Spaghetti / Papa criolla", "mitad y mitad · con Carne molida · + Parmesano", 53800], ["Fettuccine / Papa francesa", "dos bases completas · con Pollo + Tocineta", 32400]]);
+const t2 = C.textoComprobante(P2, AJ0);
+si("el WhatsApp: «2× A / B   $…» y el detalle en cursiva debajo", t2.includes("2× Spaghetti / Papa criolla   $53.800\n   _mitad y mitad · con Carne molida · + Parmesano_") && t2.includes("Fettuccine / Papa francesa   $32.400\n   _dos bases completas · con Pollo + Tocineta_"));
+eq("WhatsApp = papel · dos bases", Pa.piezasPapel(m2).filter((s) => !t2.includes(s)), []);
+
 console.log("\n═══ F3 · EL PEDIDO DE MUESTRA (vista previa de Ajustes) ═══");
 const mu = Pa.pedidoDeMuestra("domicilio", 8);
 const cMu = Pa.papelDe(mu, { comprobante: { datosCliente: { telefono: true, direccion: true } } });

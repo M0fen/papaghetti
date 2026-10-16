@@ -291,5 +291,44 @@ eq("el naranja también es tinta (por distancia al fondo, no por luminancia)", g
 eq("la caja de tinta recorta los bordes vacíos", cajaDeTinta(gris, W10, H6), { x: 2, y: 1, w: 6, h: 4 });
 eq("una imagen sin dibujo no tiene tinta (no se vuelve un manchón)", cajaDeTinta(tintaDeLogo(new Uint8ClampedArray(W10 * H6 * 4).fill(250), W10, H6), W10, H6), null);
 
+console.log("\n═══ F3 · DOS BASES EN EL PAPEL, a 32 y 48 columnas ═══");
+/* Así llegan del servidor (fase 1): nombre "A / B" y el modo al frente del detalle,
+   con las proteínas unidas por " + ". */
+const p2 = {
+  ...pedido, consecutivo: 21, impuestoIncluido: true, impuestoPct: 8, notas: undefined,
+  items: [
+    { nombre: "Spaghetti / Papa criolla", detalle: "mitad y mitad · con Carne molida · + Parmesano", precio: 24907, precioFinal: 26900, cantidad: 2 },
+    { nombre: "Fettuccine / Papa francesa", detalle: "dos bases completas · con Pollo + Tocineta · + Queso extra, Maduro", precio: 30000, precioFinal: 32400, cantidad: 1 },
+    { nombre: "Spaghetti / Papa criolla", detalle: "mitad y mitad", precio: 15648, precioFinal: 16900, cantidad: 1 },
+  ],
+  subtotal: 0, descuento: 0, impuesto: 0, bruto: 103100, total: 103100,
+};
+const a48 = (izq, der) => izq + " ".repeat(48 - izq.length - der.length) + der;
+const sub = (Lx, trozo) => { const t = Lx.map((l) => l.t); const i = t.indexOf(trozo[0]); return i >= 0 && trozo.every((x, j) => t[i + j] === x); };
+const L32 = leer(tiqueteEscPos(p2, ajustes, { cols: 32 }));
+eq("32 · un nombre de dos bases que no cabe con su precio se parte en la barra, y el precio cierra el plato",
+  sub(L32, ["2x Spaghetti /", a32("Papa criolla", "$53.800"), "   mitad y mitad - con Carne", "   molida - + Parmesano"]), true, L32.map((l) => l.t));
+eq("32 · igual con una sola unidad", sub(L32, ["Fettuccine /", a32("Papa francesa", "$32.400")]), true);
+eq("32 · y si cabe, en una sola línea como siempre", L32.some((l) => l.t === a32("Spaghetti / Papa criolla", "$16.900")), true);
+eq("32 · el «+» nunca queda colgado al final de un renglón", L32.filter((l) => /\+$/.test(l.t.trimEnd())).map((l) => l.t), []);
+eq("32 · las proteínas unidas por «+» se parten bien", sub(L32, ["   dos bases completas - con", "   Pollo + Tocineta - + Queso", "   extra, Maduro"]), true, L32.map((l) => l.t));
+const L48 = leer(tiqueteEscPos(p2, ajustes, { cols: 48 }));
+eq("48 · a lo ancho caben enteros, con su precio", [a48("2x Spaghetti / Papa criolla", "$53.800"), a48("Fettuccine / Papa francesa", "$32.400")].every((x) => L48.some((l) => l.t === x)), true, L48.map((l) => l.t));
+eq("48 · el «+» tampoco queda colgado", L48.filter((l) => /\+$/.test(l.t.trimEnd())).map((l) => l.t), []);
+for (const [cols, Lx] of [[32, L32], [48, L48]]) {
+  eq(`${cols} · nada pasa del ancho`, Lx.every((l) => l.t.length <= (l.tam === 2 ? cols / 2 : cols)), true);
+  eq(`${cols} · ESC/POS = papel (las dos bases y su modo, en ASCII)`, piezasPapel(papelDe(p2, ajustes)).filter((s) => !sb(plano(Lx)).includes(sb(ascii(s)))), []);
+  eq(`${cols} · TOTAL de los tres platos`, Lx.find((l) => l.t.startsWith("TOTAL"))?.t.endsWith("$103.100"), true);
+}
+eq("solo ASCII, y sin «½» (el modo va escrito)", [...tiqueteEscPos(p2, ajustes, { cols: 32 })].every((b) => b < 0x80) && !plano(L32).includes("1/2"), true);
+/* La imagen, con nombres más largos: el lienzo de mentira mide 11 por letra. */
+const p2l = { ...p2, items: [{ nombre: "Spaghetti integral / Papa criolla salteada", detalle: "mitad y mitad · con Pollo + Carne molida + Tocineta · + Parmesano, Maduro, Queso extra", precio: 24907, precioFinal: 26900, cantidad: 12 }] };
+for (const rollo of [58, 80]) {
+  pintar(p2l, ajustes, rollo);
+  eq(`imagen ${rollo} · se parte en la barra, no dentro de una base`, [trazos.includes("12× Spaghetti integral /"), trazos.includes("Papa criolla salteada"), trazos.some((t) => /^(salteada|criolla salteada)$/.test(t))], [true, true, false], trazos);
+  eq(`imagen ${rollo} · el «+» nunca cierra un renglón del detalle`, trazos.filter((t) => /\+$/.test(t.trim())), []);
+  eq(`imagen ${rollo} · nada se pasa del ancho`, trazos.filter((t) => [...t].length * 11 > ANCHO[rollo]), []);
+}
+
 console.log(`\n═══ ${ok} ✅  ·  ${mal} ❌ ═══`);
 process.exit(mal ? 1 : 0);

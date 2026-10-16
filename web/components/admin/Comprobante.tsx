@@ -37,9 +37,9 @@
  * decían lo mismo.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { formatCOP, whatsappValido, type Pedido } from "@/lib/menu";
-import { papelDe, type AjustesPapel } from "@/lib/papel";
+import { papelDe, trozosNombre, type AjustesPapel } from "@/lib/papel";
 import { dibujarTiquete, cargarImagen, binarizar, dibujarCalibracion } from "@/lib/tiquete-imagen";
 import { textoDePapel, waHref as enlaceWa } from "@/lib/comprobantes";
 import { imprimirImagen } from "@/lib/imprimir-imagen";
@@ -437,7 +437,16 @@ export default function Comprobante({
             <li key={i}>
               <span className="cbte__cant">{l.cantidad > 1 ? `${l.cantidad}×` : ""}</span>
               <span className="cbte__nom">
-                {l.nombre}
+                {/* Un plato de dos bases se parte en la barra, no dentro de una base
+                    (como en la imagen y en el texto ESC/POS). */}
+                <span>
+                  {trozosNombre(l.nombre).map((t, j) => (
+                    <Fragment key={j}>
+                      {j > 0 && " "}
+                      <span className="cbte__trozo">{t}</span>
+                    </Fragment>
+                  ))}
+                </span>
                 {l.detalle && <em>{l.detalle}</em>}
               </span>
               <span className="cbte__val">{formatCOP(l.importe)}</span>
