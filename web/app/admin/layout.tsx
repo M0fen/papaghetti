@@ -46,15 +46,18 @@ export default async function AdminLayout({
     <div className="adminx">
       <Sidebar />
       <div className="adminx__main">
-        {/* Sin Supabase en producción el cerebro escribe en /tmp: efímero y distinto
-            por instancia. Es la clase de fallo que no se nota hasta que se perdió el
-            turno entero, así que se avisa donde el dueño no pueda no verlo. */}
+        {/* Sin el almacén conectado, en producción el cerebro escribe en /tmp: efímero y
+            distinto por instancia. Es la clase de fallo que no se nota hasta que se perdió
+            el turno entero, así que se avisa donde el dueño no pueda no verlo. Decía que
+            faltaba Supabase, que nunca fue lo que estaba en uso: lo que falta, cuando
+            pasa (un traslado de cuenta, una variable borrada), es el almacén de Vercel. */}
         {persistenciaEnRiesgo() && (
           <div className="adminx__alarma" role="alert">
-            ⚠️ <b>Los pedidos NO se están guardando.</b> Falta conectar Supabase
-            (variables <code>NEXT_PUBLIC_SUPABASE_URL</code> y{" "}
-            <code>SUPABASE_SERVICE_ROLE</code> en Vercel). Todo lo que pase hoy se
-            perderá al reiniciar el servidor.
+            ⚠️ <b>Los pedidos NO se están guardando.</b> Este despliegue no tiene conectado el
+            almacén de Vercel donde vive el negocio. En Vercel: Storage → el almacén del
+            cerebro (<code>papaghetti-cerebro</code>) → <i>Connect Project</i> con este
+            proyecto (o la variable <code>BLOB_READ_WRITE_TOKEN</code>), y volver a
+            desplegar. Mientras tanto, todo lo de hoy se pierde al reiniciar el servidor.
           </div>
         )}
         {avisoTexto && (

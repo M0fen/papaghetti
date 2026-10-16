@@ -30,7 +30,8 @@ npm run build && npm run start   # producción
 **Un solo lugar** define el catálogo y la web lo consume en vivo.
 
 ```bash
-# 1) define la clave del panel (o usa la de por defecto: "papaghetti")
+# 1) en desarrollo (next dev) la clave del panel es "papaghetti-dev";
+#    para otra, o para `next start`, define ADMIN_PASSWORD:
 cp .env.example .env.local     # y edita ADMIN_PASSWORD
 npm run dev
 # 2) abre el panel
@@ -132,7 +133,9 @@ esbozados y comentados en `supabase/schema.sql` para la Fase 4.
   Resumen): **Apertura** (reposición actual vs. estándar), **Cierre de caja** (ventas del día,
   caja por método, impuesto, propinas), **Jornada** (snapshot). Cada uno imprimible.
 - **Env vars** (`.env.local` local; en Vercel: Settings → Environment Variables):
-  - `ADMIN_PASSWORD` — clave del panel (default `papaghetti` si no se define).
+  - `ADMIN_PASSWORD` — clave del panel. En producción es **obligatoria**: sin ella nadie
+    entra (el panel falla cerrado). En `next dev`, si falta, vale `papaghetti-dev`.
+  - La tabla completa de variables, y quién debe ser su dueño, está en `../ENTREGA.md`.
   - `DEEPSEEK_API_KEY` — key del asistente. **No commitear.** Rotar si se filtra.
 - Todas las **server actions del panel están gateadas** por la cookie de sesión.
 
