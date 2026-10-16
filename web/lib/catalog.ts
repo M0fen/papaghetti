@@ -10,6 +10,7 @@ import {
   faltaParaMinimo,
   totalDe,
   diaNegocio,
+  ZONA_NEGOCIO,
   cobroToppings,
   cuentaIncluida,
   brutoDe,
@@ -19,6 +20,7 @@ import {
   nombreBases,
   modoBasesTexto,
 } from "./precios";
+import { CARPETA_FOTOS, direccionFoto, formatoFoto, rutaFoto } from "./fotos";
 import {
   SEED_CATALOG,
   SEED_INSUMOS,
@@ -177,10 +179,53 @@ function migrate(cat: Catalog): Catalog {
  * sin esta condición `next dev` escribiría sobre los datos REALES del restaurante
  * mientras se programa. En local manda siempre el archivo.
  * (`PG_BLOB=1` fuerza el backend para poder probarlo a mano.)
+ *
+ * Y vale con CUALQUIERA de las dos credenciales (ver `almacenBlob`). Antes solo contaba
+ * el token: al conectar el almacén a un proyecto, o al trasladarlo a otra cuenta, Vercel
+ * pone `BLOB_STORE_ID` y puede no dejar token, y entonces el sitio caía EN SILENCIO al
+ * disco temporal (/tmp), donde cada reinicio se lleva el turno.
  */
 const blobEnabled = (): boolean =>
-  Boolean(process.env.BLOB_READ_WRITE_TOKEN) &&
-  Boolean(process.env.VERCEL || process.env.PG_BLOB);
+  almacenBlob() !== null && Boolean(process.env.VERCEL || process.env.PG_BLOB);
+
+/** Con qué almacén habla la app y cómo entra (lo muestra Ajustes → Dónde se guarda todo). */
+export interface AlmacenBlob {
+  /**
+   * "store_…", como lo muestra Vercel en Storage → el almacén → Settings. NO es secreto:
+   * es el subdominio de las direcciones del almacén. El token sí lo es, y no sale de aquí.
+   */
+  id: string;
+  /** La conexión del proyecto (`BLOB_STORE_ID` + OIDC, la renueva Vercel) o el token fijo. */
+  credencial: "oidc" | "token";
+  /** Si la conexión y el token apuntan a almacenes DISTINTOS: el del token. */
+  otro?: string;
+}
+
+/**
+ * LAS CREDENCIALES DEL ALMACÉN, LEÍDAS COMO LAS LEE EL SDK (@vercel/blob 2.x): una variable
+ * vacía o con solo espacios es como si no estuviera, el almacén del token es el cuarto
+ * pedazo de `vercel_blob_rw_<almacén>_<secreto>`, y si están las dos gana la conexión
+ * (el SDK la prefiere siempre que Vercel le entregue su credencial). Recibe el entorno por
+ * parámetro para poder probarla sin tocar el de verdad.
+ *
+ * La conexión solo cuenta DENTRO de Vercel, que es donde existe su credencial. En un
+ * computador el SDK iría a pedirla con la sesión de la herramienta de Vercel del
+ * desarrollador y entraría al almacén REAL del restaurante; además, el seguro que impide
+ * correr las pruebas contra producción (qa-ts.mjs) reconoce el token, no la conexión.
+ */
+export function almacenBlob(env: Record<string, string | undefined> = process.env): AlmacenBlob | null {
+  const leer = (k: string) => (env[k] ?? "").trim();
+  const conPrefijo = (s: string) => (s ? `store_${s.replace(/^store_/, "")}` : "");
+  const token = leer("BLOB_READ_WRITE_TOKEN");
+  const delToken = conPrefijo(token.split("_")[3] ?? "");
+  const conexion = env.VERCEL ? conPrefijo(leer("BLOB_STORE_ID")) : "";
+  if (conexion) {
+    // Mayúsculas o minúsculas da igual: el almacén es un subdominio.
+    const otro = delToken && delToken.toLowerCase() !== conexion.toLowerCase() ? delToken : "";
+    return otro ? { id: conexion, credencial: "oidc", otro } : { id: conexion, credencial: "oidc" };
+  }
+  return token ? { id: delToken, credencial: "token" } : null;
+}
 /**
  * CADA ENTORNO, SU CEREBRO. `blobEnabled` solo exige estar en Vercel, y eso es cierto
  * también en los despliegues de PRUEBA de una rama: con una sola ruta constante,
@@ -507,6 +552,14 @@ async function escribirDoc<T>(clave: string, doc: T): Promise<void> {
  * subiría megabytes.
  *
  * Así que la imagen se sube como ARCHIVO aparte y en el documento queda su dirección.
+ *
+ * EN PRIVADO, como el cerebro. El almacén se creó privado (ahí están los pedidos y la
+ * caja) y se le pedía una foto "pública": eso no se puede, así que TODA subida fallaba,
+ * la foto se quedaba como texto sin que nadie se enterara y la portada pública cargaba
+ * varias fotos incrustadas en su HTML. Lo que se guarda ahora es la dirección de la
+ * puerta propia del sitio (`/foto/fotos/…`, ver lib/fotos.ts y app/foto): no lleva el
+ * nombre del almacén ni el dominio, así que sigue sirviendo tras un traslado de cuenta.
+ *
  * En local no hay almacén: ahí se queda el texto, que es inofensivo porque el archivo de
  * desarrollo no lo lee nadie más. Lo que ya esté guardado como texto sigue funcionando:
  * solo se convierte al volver a subirlo.
@@ -516,17 +569,28 @@ export async function guardarFoto(valor: string | undefined, id: string): Promis
   if (!blobEnabled()) return valor; // desarrollo: sin almacén, se queda como está
   const m = valor.match(/^data:image\/([a-z+]+);base64,(.+)$/i);
   if (!m) return undefined;
-  const ext = m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase();
+  // Solo lo que la puerta sabe servir: un SVG, por ejemplo, puede llevar código.
+  const formato = formatoFoto(m[1]);
+  if (!formato) return undefined;
   const bytes = Buffer.from(m[2], "base64");
   try {
     const { put } = await import("@vercel/blob");
-    const r = await put(`fotos/${entornoBlob()}${slugify(id)}.${ext}`, bytes, {
-      access: "public",
-      contentType: `image/${m[1].toLowerCase()}`,
-      addRandomSuffix: true, // nombre nuevo por subida: el CDN no sirve la foto vieja
-      cacheControlMaxAge: 31_536_000,
-    });
-    return r.url;
+    // Igual que writeBlob (privado, con reintento), salvo el nombre: aquí uno nuevo por subida.
+    const r = await conReintento(() =>
+      put(`${CARPETA_FOTOS}${entornoBlob()}${slugify(id)}.${formato.ext}`, bytes, {
+        access: "private",
+        contentType: formato.tipo,
+        addRandomSuffix: true, // nombre nuevo por subida: ninguna caché sirve la foto vieja
+        cacheControlMaxAge: 31_536_000,
+      }),
+    );
+    // Lo guardado tiene que pasar por la puerta. Un nombre que no esperábamos sería una
+    // foto rota para siempre: mejor quedarse con el texto, como si la subida fallara.
+    if (!rutaFoto(r.pathname)) {
+      console.warn("[papaghetti] el almacén devolvió un nombre de foto inesperado:", r.pathname);
+      return valor;
+    }
+    return direccionFoto(r.pathname);
   } catch (e) {
     // Si el almacén falla, mejor guardar el texto que perder la foto del operario.
     console.warn("[papaghetti] no se pudo subir la foto:", (e as Error)?.message ?? e);
@@ -558,6 +622,174 @@ async function borrarDoc(clave: string): Promise<void> {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   LO QUE SALE DEL ALMACÉN SIN TOCARLO
+
+   Dos lecturas que no escriben nada: la foto que el sitio pide por su puerta propia
+   (/foto/…, sin sesión) y la copia completa del negocio que el dueño descarga desde
+   Ajustes (con sesión).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Una foto del almacén para la puerta /foto/…: su contenido, o `null` si no hay (no
+ * existe, o no hay almacén: en local las fotos viven como texto dentro del cerebro).
+ * LANZA si el almacén no responde, para que la puerta no lo confunda con "no existe".
+ *
+ * Vuelve a validar la ruta aunque la puerta ya lo haya hecho: es la única lectura del
+ * almacén que pide alguien SIN sesión, y por ningún camino puede llegar a cerebro/. Con
+ * la caché del almacén encendida (al revés que el cerebro): cada foto tiene nombre
+ * único y no cambia nunca.
+ */
+export async function leerFoto(pathname: string): Promise<ReadableStream<Uint8Array> | null> {
+  if (!rutaFoto(pathname)) return null;
+  if (!blobEnabled()) return null;
+  const { get } = await import("@vercel/blob");
+  try {
+    const b = await conReintento(() => get(pathname, { access: "private" }));
+    return b && b.statusCode === 200 && b.stream ? b.stream : null;
+  } catch (e) {
+    if ((e as Error)?.name === "BlobNotFoundError") return null;
+    throw e;
+  }
+}
+
+/** Una foto que vive FUERA del documento: dónde se usa y su dirección. */
+export interface FotoEnlazada {
+  /** "bases/pollo", "enredos/la-clasica", "ajustes/sitio/portada/foto"… */
+  donde: string;
+  url: string;
+}
+
+/** El archivo de Ajustes → Descargar copia completa. */
+export interface CopiaCompleta {
+  formato: "papaghetti/copia-completa";
+  version: 1;
+  generadoEn: string;
+  /** El día en Pereira ("AAAA-MM-DD"). */
+  diaNegocio: string;
+  origen: { backend: "supabase" | "blob" | "archivo"; entorno: string; almacen?: string };
+  conteos: {
+    pedidos: number;
+    pedidosArchivados: number;
+    /** Pedidos de cada mes archivado. */
+    porMes: Record<string, number>;
+    /** Meses que el índice apunta pero cuyo documento no apareció: no van en `archivo`. */
+    mesesSinDocumento: string[];
+    movimientos: number;
+    leads: number;
+    arqueos: number;
+    historial: number;
+    /** Fotos que viven como archivo aparte (van en `fotos`, como dirección). */
+    fotosEnlazadas: number;
+    /** Fotos guardadas como texto: ya van dentro de `cerebro`. */
+    fotosDentro: number;
+  };
+  /** El documento principal tal cual, salvo las pilas de deshacer y rehacer. */
+  cerebro: Catalog;
+  /** Cada mes archivado, exactamente como está guardado ("AAAA-MM" → su documento). */
+  archivo: Record<string, ArchivoMes>;
+  fotos: FotoEnlazada[];
+  /** SIEMPRE la última clave: si el archivo llegó cortado, no está. */
+  completo: true;
+}
+
+/** Las fotos del documento: las que son un archivo aparte se listan; las de texto se cuentan. */
+function fotosDe(cat: Catalog): { enlazadas: FotoEnlazada[]; dentro: number } {
+  const enlazadas: FotoEnlazada[] = [];
+  let dentro = 0;
+  const anotar = (donde: string, v: unknown) => {
+    // Las de la carta son texto; las del sitio, { url, ancho, alto }.
+    const url =
+      typeof v === "string" ? v : typeof (v as { url?: unknown } | null)?.url === "string" ? (v as { url: string }).url : "";
+    if (!url) return;
+    if (url.startsWith("data:")) dentro++;
+    else enlazadas.push({ donde, url });
+  };
+  for (const g of ["bases", "proteinas", "toppings", "enredos"] as const) {
+    for (const x of cat[g] ?? []) anotar(`${g}/${x.id}`, x.foto);
+  }
+  for (const r of RUTAS_IMAGEN_AJUSTES) anotar(`ajustes/${r.join("/")}`, leerRuta(cat.ajustes, r));
+  return { enlazadas, dentro };
+}
+
+/**
+ * LA COPIA COMPLETA DEL DUEÑO: todo el negocio, listo para guardar fuera de Vercel.
+ *
+ * El respaldo diario vive en el MISMO almacén que los datos y solo lleva el documento
+ * principal; si se pierde el almacén (un traslado de cuenta mal hecho, una variable
+ * equivocada), se pierde con él. Esta copia la descarga el dueño y la guarda donde quiera.
+ *
+ * · El documento principal se lee FRESCO (sin el memo de 2 s) y ya migrado. Sin las pilas
+ *   de deshacer y rehacer: son copias viejas de la carta, no registros del negocio, y al
+ *   restaurar dejarían que un "Deshacer" saltara hacia atrás por encima de la restauración.
+ *   El historial sí va: dice quién hizo qué.
+ * · DESPUÉS, cada mes archivado, uno por uno y tal como está guardado. El orden importa:
+ *   archivar muda pedidos del principal a su mes, así que leyendo primero el principal un
+ *   pedido puede salir repetido (inofensivo: se une por id), pero nunca perdido. Al revés
+ *   sí podría perderse.
+ * · Las fotos que son archivo aparte van como lista de direcciones (copiar los archivos
+ *   es tarea del desarrollador); las guardadas como texto ya van dentro del documento.
+ *
+ * NO ESCRIBE NADA: ni historial, ni pila de deshacer, ni respaldo. (La única escritura
+ * posible es la de siempre al leer: si el almacén está VACÍO, `read` siembra la carta de
+ * fábrica, igual que lo haría cualquier pantalla.) Si una lectura falla, lanza y no hay
+ * copia a medias: la ruta lo convierte en un error limpio.
+ */
+export async function copiaCompleta(ahora: Date = new Date()): Promise<CopiaCompleta> {
+  const backend = supabaseEnabled() ? "supabase" : blobEnabled() ? "blob" : "archivo";
+  olvidar();
+  const cat = await read();
+  const archivo: Record<string, ArchivoMes> = {};
+  const porMes: Record<string, number> = {};
+  const mesesSinDocumento: string[] = [];
+  for (const mes of [...new Set(cat.archivoMeses ?? [])].sort()) {
+    // El índice lo escribe la app, pero se valida igual: con él se arma el nombre del documento.
+    const doc = /^\d{4}-\d{2}$/.test(mes) ? await leerDoc<ArchivoMes>(claveMes(mes)) : null;
+    if (!doc) {
+      mesesSinDocumento.push(mes);
+      continue;
+    }
+    archivo[mes] = doc;
+    porMes[mes] = Array.isArray(doc.pedidos) ? doc.pedidos.length : 0;
+  }
+  const { enlazadas, dentro } = fotosDe(cat);
+  const almacen = backend === "blob" ? almacenBlob()?.id : undefined;
+  return {
+    formato: "papaghetti/copia-completa",
+    version: 1,
+    generadoEn: ahora.toISOString(),
+    diaNegocio: diaNegocio(ahora),
+    origen: { backend, entorno: process.env.VERCEL_ENV || "local", ...(almacen ? { almacen } : {}) },
+    conteos: {
+      pedidos: cat.pedidos.length,
+      pedidosArchivados: Object.values(porMes).reduce((s, n) => s + n, 0),
+      porMes,
+      mesesSinDocumento,
+      movimientos: cat.movimientos.length,
+      leads: cat.leads.length,
+      arqueos: (cat.arqueos ?? []).length,
+      historial: (cat.historial ?? []).length,
+      fotosEnlazadas: enlazadas.length,
+      fotosDentro: dentro,
+    },
+    cerebro: { ...cat, undo: [], redo: [] },
+    archivo,
+    fotos: enlazadas,
+    completo: true,
+  };
+}
+
+const fmtHoraMinuto = new Intl.DateTimeFormat("en-GB", {
+  timeZone: ZONA_NEGOCIO,
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23", // "00:05", nunca "24:05"
+});
+/** "papaghetti-copia-AAAA-MM-DD-HHMM.json", con el día y la hora de Pereira (no los del servidor). */
+export function nombreCopia(fecha: Date = new Date()): string {
+  return `papaghetti-copia-${diaNegocio(fecha)}-${fmtHoraMinuto.format(fecha).replace(":", "")}.json`;
+}
+
 /**
  * ¿Estamos en Vercel SIN Supabase? Entonces el cerebro escribe en /tmp, que es
  * efímero y distinto por instancia de lambda: el pedido que entra por QR puede no
@@ -575,6 +807,11 @@ export function persistenciaEnRiesgo(): boolean {
  * adivinar: si el POS pierde el turno, se entera al día siguiente y ya es tarde.
  * Esto hace una lectura REAL y reporta el backend, el peso del documento y cuántos
  * pedidos hay dentro.
+ *
+ * Con el almacén de Vercel dice además CUÁL almacén y cómo entra. Después de un traslado
+ * de cuenta, la prueba de que el negocio sigue siendo el mismo es que el identificador
+ * no cambió: con la variable de OTRO almacén, el sitio arranca con la carta de fábrica y
+ * cero pedidos, y eso se ve igual que "se borró todo".
  */
 export async function estadoPersistencia(): Promise<{
   backend: "supabase" | "blob" | "archivo";
@@ -584,6 +821,15 @@ export async function estadoPersistencia(): Promise<{
   detalle: string;
   pedidos?: number;
   peso?: string;
+  /** Solo con el almacén de Vercel. */
+  almacen?: {
+    id: string;
+    credencial: AlmacenBlob["credencial"];
+    /** La credencial, dicha para el dueño. */
+    como: string;
+    /** Hay dos almacenes configurados: cuál sobra y qué hacer. */
+    aviso?: string;
+  };
 }> {
   const backend = supabaseEnabled() ? "supabase" : blobEnabled() ? "blob" : "archivo";
   const nombre =
@@ -595,6 +841,22 @@ export async function estadoPersistencia(): Promise<{
           ? "Disco temporal (/tmp)"
           : "Archivo local";
   const durable = backend !== "archivo" || !process.env.VERCEL;
+  const a = backend === "blob" ? almacenBlob() : null;
+  const almacen = a
+    ? {
+        id: a.id,
+        credencial: a.credencial,
+        como: a.credencial === "oidc" ? "la conexión del proyecto (OIDC)" : "el token del almacén",
+        ...(a.otro
+          ? {
+              aviso:
+                `También hay un token de OTRO almacén (${a.otro}). Hoy se usa ${a.id}, el de la ` +
+                "conexión; si la conexión fallara, el sistema pasaría al otro sin avisar. Deja una " +
+                "sola: en Vercel, borra la variable que sobre y vuelve a desplegar.",
+            }
+          : {}),
+      }
+    : undefined;
   try {
     olvidar();
     const cat = await read();
@@ -609,6 +871,7 @@ export async function estadoPersistencia(): Promise<{
         : "OJO: en Vercel esto es efímero. Lo de hoy se pierde al reiniciar.",
       pedidos: cat.pedidos.length,
       peso: `${peso} KB`,
+      ...(almacen ? { almacen } : {}),
     };
   } catch (e) {
     return {
@@ -617,6 +880,8 @@ export async function estadoPersistencia(): Promise<{
       durable,
       ok: false,
       detalle: `No se pudo leer: ${(e as Error)?.message ?? e}`,
+      // Justo cuando no se puede leer es cuando más importa saber a qué almacén se le preguntó.
+      ...(almacen ? { almacen } : {}),
     };
   }
 }
