@@ -44,6 +44,10 @@ function faltante(e: EnredoInsignia, ix: Map<string, Ingrediente>): Ingrediente 
 
 export default function FeaturedMenu({ catalog }: { catalog: CatalogoPublico }) {
   const ix = indice(catalog);
+  /* SOLO LO QUE HOY SE VENDE. Un plato apagado en el panel (activo === false) seguía en la
+     portada con su botón de pedir, y el servidor lo rechazaba al recibirlo: la portada
+     vendía lo que no hay. El QR (/pedir) ya filtraba así. */
+  const platos = catalog.enredos.filter((e) => e.activo !== false);
   const [sel, setSel] = useState<EnredoInsignia | null>(null);
   const juego = useJuegoOpcional();
   // "Enredarlo a mi gusto" abre el MISMO juego con este plato ya servido en la caja,
@@ -72,8 +76,13 @@ export default function FeaturedMenu({ catalog }: { catalog: CatalogoPublico }) 
           </p>
         </Reveal>
 
+        {platos.length === 0 && (
+          <p className="lead" style={{ marginTop: 18 }}>
+            Hoy no tenemos platos listos: arma tu enredo a tu gusto.
+          </p>
+        )}
         <div className="menu-grid">
-          {catalog.enredos.map((e, i) => {
+          {platos.map((e, i) => {
             const base = ix.get(e.baseId);
             const proteina = ix.get(e.proteinaId);
             const toppings = e.toppingIds.map((id) => ix.get(id)).filter(Boolean) as Ingrediente[];

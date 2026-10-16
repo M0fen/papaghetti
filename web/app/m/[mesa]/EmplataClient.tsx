@@ -11,10 +11,19 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { formatCOP, estadoLabel, type CobroBases, type EnredoInsignia, type EstadoPedido, type Ingrediente } from "@/lib/menu";
+import {
+  formatCOP,
+  estadoLabel,
+  basesMaxDe,
+  cobroBasesDe,
+  type CobroBases,
+  type EnredoInsignia,
+  type EstadoPedido,
+  type Ingrediente,
+} from "@/lib/menu";
 import PlatosCarta from "@/components/PlatosCarta";
 import Salsas from "@/components/Salsas";
-import { calcularTotales, soloCobrables } from "@/lib/precios";
+import { alternarBase, basesElegidas, calcularTotales, soloCobrables } from "@/lib/precios";
 import { enviarPedido, estadoPedido } from "@/app/pedido-actions";
 import { nuevaClave } from "@/lib/idem";
 import { useSonido } from "./sonido";
@@ -99,6 +108,8 @@ export default function EmplataClient({
   proteinas,
   toppings,
   platos = [],
+  basesMax,
+  cobroBases,
 }: {
   mesa: number;
   negocio: string;
@@ -115,7 +126,11 @@ export default function EmplataClient({
 }) {
   const disponibles = (l: Ingrediente[]) => l.filter((i) => !i.agotado);
   const [modo, setModo] = useState<Modo>("emplata");
-  const [baseId, setBaseId] = useState<string>(() => disponibles(bases)[0]?.id ?? "");
+  /* DOS BASES (Ajustes → Cobro y servicio), con los mismos lectores que el servidor. */
+  const maxBases = basesMaxDe({ basesMax });
+  const modoBases = cobroBasesDe({ cobroBases });
+  /** En el orden en que se tocaron: con dos, la última tocada es la que cede su sitio. */
+  const [baseIds, setBaseIds] = useState<string[]>(() => disponibles(bases).slice(0, 1).map((b) => b.id));
   /* PROTEÍNAS: las que quiera, o ninguna (lo pidió el dueño). Arranca con la primera
      disponible para que la caja no salga vacía, pero se puede quitar. */
   const [proteinaIds, setProteinaIds] = useState<string[]>(() =>
@@ -152,7 +167,9 @@ export default function EmplataClient({
   );
   const find = useCallback((id: string) => all.find((i) => i.id === id), [all]);
 
-  const base = find(baseId);
+  /** Las elegidas en el ORDEN DE LA CARTA: así se cobran, se dibujan y se mandan. */
+  const basesSel = useMemo(() => basesElegidas(baseIds, bases), [baseIds, bases]);
+  const base = basesSel[0];
   const prots = useMemo(() => proteinaIds.map(find).filter(Boolean) as Ingrediente[], [proteinaIds, find]);
   const tops = useMemo(() => toppingIds.map(find).filter(Boolean) as Ingrediente[], [toppingIds, find]);
 
@@ -161,7 +178,8 @@ export default function EmplataClient({
      como si costaran, así que la pantalla podía mostrar hasta $11.000 de más que lo
      que cobraba la caja. */
   const { subtotal, impuesto, total } = calcularTotales({
-    base,
+    bases: basesSel,
+    cobroBases: modoBases,
     proteinas: prots,
     toppings: tops,
     impuestoPct,
@@ -185,10 +203,18 @@ export default function EmplataClient({
     [s, reduce],
   );
 
+  /* Con tope 1, exactamente como siempre: reemplaza y la caja la vuelve a recibir. Con 2,
+     prende y apaga como en todas las pantallas (lib/precios: alternarBase); solo cae a la
+     caja la que entra, y la única elegida no se suelta. */
   const elegirBase = (i: Ingrediente) => {
     if (i.agotado) return;
-    setBaseId(i.id);
-    soltar(i);
+    if (maxBases === 1) {
+      setBaseIds([i.id]);
+      soltar(i);
+      return;
+    }
+    if (!baseIds.includes(i.id)) soltar(i);
+    setBaseIds((prev) => alternarBase(prev, i.id, maxBases));
   };
   /** Prende y apaga, como los acompañantes: varias sin tope, o ninguna. */
   const elegirProteina = (i: Ingrediente) => {
@@ -210,7 +236,7 @@ export default function EmplataClient({
 
   // ---- confirmar → cierre origami → enviarPedido (flujo existente, canal "qr") ----
   const confirmar = useCallback(async () => {
-    if (!abierto || enviando || !baseId) return;
+    if (!abierto || enviando || !basesSel.length) return;
     setEnviando(true);
     s.confirmar();
     if (navigator.vibrate) navigator.vibrate([18, 40, 24]);
@@ -220,8 +246,10 @@ export default function EmplataClient({
     }
     if (!idem.current) idem.current = nuevaClave();
     try {
+      const ids = basesSel.map((b) => b.id);
       const r = await enviarPedido({
-        baseId,
+        baseId: ids[0], // el campo de siempre (quien solo lo lee, recibe la primera)
+        baseIds: ids, // una o dos: si viene, manda sobre baseId
         proteinaIds,
         toppingIds,
         canal: "qr",
@@ -250,7 +278,7 @@ export default function EmplataClient({
       setError("No pudimos enviar el pedido. Intenta otra vez.");
     }
     setEnviando(false);
-  }, [abierto, enviando, baseId, proteinaIds, toppingIds, mesa, reduce, s]);
+  }, [abierto, enviando, basesSel, proteinaIds, toppingIds, mesa, reduce, s]);
 
   // ---- estado en vivo (polling suave del pedido existente) ----
   useEffect(() => {
@@ -384,11 +412,11 @@ export default function EmplataClient({
               <div className="emp-caja__cuerpo">
                 <span className="emp-caja__marca">PAPAGHETTI</span>
                 <div className="emp-caja__contenido">
-                  {base && (
-                    <span className="emp-ing emp-ing--base" title={base.nombre}>
-                      {base.foto ? <img src={base.foto} alt="" /> : base.emoji}
+                  {basesSel.map((b) => (
+                    <span key={b.id} className="emp-ing emp-ing--base" title={b.nombre}>
+                      {b.foto ? <img src={b.foto} alt="" /> : b.emoji}
                     </span>
-                  )}
+                  ))}
                   {prots.map((pr) => (
                     <span key={pr.id} className="emp-ing emp-ing--prot" title={pr.nombre}>
                       {pr.foto ? <img src={pr.foto} alt="" /> : pr.emoji}
@@ -418,10 +446,10 @@ export default function EmplataClient({
           <main className={`emp-main ${modo === "rapido" ? "emp-main--rapido" : ""}`}>
             <section className="emp-paso">
               <h2>
-                <b>1</b> LA BASE
+                <b>1</b> LA BASE {maxBases > 1 && <small>elige 1 o 2</small>}
               </h2>
               <div className="emp-fila">
-                {bases.map((i) => chip(i, baseId === i.id, elegirBase))}
+                {bases.map((i) => chip(i, baseIds.includes(i.id), elegirBase))}
               </div>
             </section>
             <section className="emp-paso">

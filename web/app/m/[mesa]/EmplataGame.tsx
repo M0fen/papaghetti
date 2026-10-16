@@ -23,6 +23,8 @@ import {
   estadoLabel,
   TIPOS,
   tipoLabel,
+  basesMaxDe,
+  cobroBasesDe,
   type CobroBases,
   type EstadoPedido,
   type EnredoInsignia,
@@ -30,7 +32,16 @@ import {
   type TipoServicio,
 } from "@/lib/menu";
 import { SITIO_DOMINIO } from "@/lib/sitio";
-import { calcularTotales, faltaParaMinimo, idsGratis, soloCobrables } from "@/lib/precios";
+import {
+  alternarBase,
+  basesElegidas,
+  calcularTotales,
+  faltaParaMinimo,
+  idsGratis,
+  precioBases,
+  renglonesBases,
+  soloCobrables,
+} from "@/lib/precios";
 import PlatosCarta from "@/components/PlatosCarta";
 import Salsas from "@/components/Salsas";
 import { creaPostFx } from "./postfx";
@@ -1055,7 +1066,11 @@ type Fideo = {
 };
 /** Item asentado en la caja. fx/fy = posición FÍSICA (fracción de boxW/boxH, coords locales de la
  *  caja); ty = y de reposo objetivo (el item se asienta hacia ella con lerp); r = radio de colisión. */
-type PilaItem = { id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number; cook?: number };
+type PilaItem = {
+  id: string; fx: number; fxT: number; fy: number; ty: number; rot: number; s: number; r: number; land: number; depth: number; cook?: number;
+  /** Escala objetivo de una CAMA: `s` fluye hacia ella en el dibujo (al llegar la segunda base, la primera se encoge, no salta). */
+  sT?: number;
+};
 type Puff = { x: number; y: number; life: number; max: number; r: number; tipo: "vapor" | "polvo" };
 type Pop = { x: number; y: number; life: number; texto: string; gratis: boolean };
 type Chispa = { x: number; y: number; vx: number; vy: number; rot: number; vr: number; life: number };
@@ -1204,6 +1219,10 @@ export default function EmplataGame(props: {
 }) {
   const { mesa, negocio, abierto, impuestoPct, incluidos, bases, proteinas, toppings } = props;
   const platos = props.platos ?? [];
+  /* DOS BASES (Ajustes → Cobro y servicio), con los mismos lectores que el servidor. El
+     lazo del canvas no las lee de aquí sino del espejo `sel` (sus closures son viejos). */
+  const basesMax = basesMaxDe(props);
+  const modoBases = cobroBasesDe(props);
   const canal = props.canal ?? "qr";
   const esWeb = canal === "web";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1217,8 +1236,14 @@ export default function EmplataGame(props: {
    * salía con glow y palomita, y la pestaña con su punto de completado. Se corta la raíz.
    * Todo el camino ya está blindado para "" (precios.ts usa `base?.precio ?? 0`, el CTA
    * sale disabled, el aviso pide `baseId &&`, el ticket cae a "").
+   *
+   * DOS BASES: `baseIds` guarda una o dos en el orden de los toques (con dos, la última
+   * tocada cede su sitio); `basesSel`, en el de la carta, es lo que se cobra, se nombra y
+   * se manda. `baseId` (la primera) sigue siendo la llave de todas las guardas de arriba.
    */
-  const [baseId, setBaseId] = useState<string>("");
+  const [baseIds, setBaseIds] = useState<string[]>([]);
+  const basesSel = basesElegidas(baseIds, bases);
+  const baseId = basesSel[0]?.id ?? "";
   const [proteinaIds, setProteinaIds] = useState<string[]>([]); // N proteínas, sin tope
   const [toppingIds, setToppingIds] = useState<string[]>([]);
   const [tab, setTab] = useState<0 | 1 | 2>(0);
@@ -1254,7 +1279,16 @@ export default function EmplataGame(props: {
      (idsGratis). Hoy siempre viene vacío —en Papaghetti nada va por cuenta de la casa—
      pero el canvas lo sigue leyendo de aquí y no de su propia cuenta: si algún día hay
      promoción, la etiqueta no podrá contradecir al total que tiene al lado. */
-  const sel = useRef({ baseId: "", proteinaIds: [] as string[], toppingIds: [] as string[], tab: 0 as 0 | 1 | 2, gratis: new Set<string>() });
+  const sel = useRef({
+    baseId: "",
+    baseIds: [] as string[],
+    basesMax: 2 as 1 | 2,
+    cobroBases: "mitad" as CobroBases,
+    proteinaIds: [] as string[],
+    toppingIds: [] as string[],
+    tab: 0 as 0 | 1 | 2,
+    gratis: new Set<string>(),
+  });
 
   // W4: la escena NO se desmonta al pedir. faseRef gobierna el loop; estadoRef lo lee sin re-render.
   const faseRef = useRef<"arma" | "espera">("arma");
@@ -1295,8 +1329,10 @@ export default function EmplataGame(props: {
   /** La comanda renglón a renglón, en el orden en que la lee la cocina. */
   const lineasCaja: { nombre: string; precio: number; incluida?: boolean }[] = [];
   {
-    const b = find(baseId);
-    if (b) lineasCaja.push({ nombre: b.nombre, precio: b.precio });
+    /* Dos bases en "mitad y mitad" van en UN renglón a precio de la más cara (lib/precios):
+       cada una a precio completo, los renglones no sumaban el total y la hoja escondía
+       todos los precios (`preciosCuadran`). */
+    lineasCaja.push(...renglonesBases(basesSel, modoBases));
     for (const pid of proteinaIds) {
       const it = find(pid);
       if (it) lineasCaja.push({ nombre: it.nombre, precio: it.precio });
@@ -1309,13 +1345,23 @@ export default function EmplataGame(props: {
   /* El espejo de la selección que lee el canvas. Va DESPUÉS de `tops` porque
      necesita los ingredientes ya resueltos. */
   useEffect(() => {
-    sel.current = { baseId, proteinaIds, toppingIds, tab, gratis: idsGratis(tops, incluidos) };
+    sel.current = {
+      baseId,
+      baseIds, // en el orden de los toques: el lazo decide con él quién cede su sitio
+      basesMax,
+      cobroBases: modoBases,
+      proteinaIds,
+      toppingIds,
+      tab,
+      gratis: idsGratis(tops, incluidos),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseId, proteinaIds, toppingIds, tab, incluidos]);
+  }, [baseIds, basesMax, modoBases, proteinaIds, toppingIds, tab, incluidos]);
   // En QR el servicio es siempre "mesa" (sin domicilio); en web depende de la hoja final.
   const tipoActual: TipoServicio = esWeb ? tipoSel : "mesa";
   const { subtotal, impuesto, domicilio, total } = calcularTotales({
-    base: find(baseId),
+    bases: basesSel,
+    cobroBases: modoBases,
     proteinas: proteinaIds.map(find),
     toppings: tops,
     impuestoPct,
@@ -1349,6 +1395,8 @@ export default function EmplataGame(props: {
     pila: [] as PilaItem[],
     puffs: [] as Puff[],
     pops: [] as Pop[],
+    // lo que canta cada base en camino al caer: se decide al tocarla (ver tapIngrediente)
+    popBase: new Map<string, string>(),
     chispas: [] as Chispa[],
     parts: [] as Part[], // partículas del color de la comida al aterrizar (Fruit Ninja)
     hojas: [] as Hoja[], // ESPOLVOREAR: hojitas/virutas con flip fake-3D (confetti de Segijn)
@@ -1560,15 +1608,40 @@ export default function EmplataGame(props: {
       }
       const cat = ing.categoria;
       if (cat === "base") {
-        if (sel.current.baseId === ing.id) {
-          s.tone(560, 0.05, "sine", 0.04); // ya elegida: acuse suave, no silencio
+        /* DOS BASES: el mismo gesto de todas las pantallas (lib/precios). Con tope 1
+           reemplaza, como siempre; con 2 prende y apaga, y si ya hay dos la última tocada
+           cede su sitio. Lee el ESPEJO, no el estado: este closure lo captura el lazo. */
+        const elegidas = sel.current.baseIds;
+        const max = sel.current.basesMax;
+        if (elegidas.includes(ing.id)) {
+          if (max === 1 || elegidas.length === 1) {
+            s.tone(560, 0.05, "sine", 0.04); // ya elegida (y es la única): acuse suave, no silencio
+            return;
+          }
+          const quedan = alternarBase(elegidas, ing.id, max);
+          sel.current.baseIds = quedan; // el lazo lo ve ya, sin esperar al render
+          setBaseIds(quedan);
+          sacarDeCaja(ing, cx, cy); // como una proteína: el fideo la saca y el nido se recompone
           return;
         }
-        setBaseId(ing.id);
-        world.current.pila = world.current.pila.filter((p) => {
-          const it = find(p.id);
-          return it?.categoria !== "base";
-        });
+        const nuevas = alternarBase(elegidas, ing.id, max);
+        if (max > 1) {
+          /* EL POP NO MIENTE: en "mitad y mitad" la segunda base no suma su precio entero
+             (se cobra la más cara). Al caer canta lo que de verdad se mueve el total, y se
+             decide aquí, donde se conoce el antes y el después. Con tope 1, el de siempre. */
+          const modo = sel.current.cobroBases;
+          const d = precioBases(nuevas.map(find), modo) - precioBases(elegidas.map(find), modo);
+          world.current.popBase.set(
+            ing.id,
+            d > 0 ? `+${formatCOP(d)}` : modo === "mitad" && nuevas.length > 1 ? "MITAD Y MITAD" : ing.nombre,
+          );
+        }
+        sel.current.baseIds = nuevas;
+        setBaseIds(nuevas);
+        // sale de la caja la base que ya no va (con tope 1, la anterior: como siempre)
+        world.current.pila = world.current.pila.filter(
+          (p) => find(p.id)?.categoria !== "base" || nuevas.includes(p.id),
+        );
         despachar(ing, cx, cy);
       } else if (cat === "proteina") {
         // multi-select SIN límite: las proteínas que quieras
@@ -1603,12 +1676,13 @@ export default function EmplataGame(props: {
     if (!p?.enredoId) return "";
     const igual = (a: string[], b: string[]) =>
       a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
-    return baseId === p.baseId &&
+    // Una segunda base también lo cambia: el insignia es de UNA base.
+    return igual(baseIds, p.baseId ? [p.baseId] : []) &&
       igual(proteinaIds, p.proteinaId ? [p.proteinaId] : []) &&
       igual(toppingIds, p.toppingIds ?? [])
       ? p.enredoId
       : "";
-  }, [props.precargar, baseId, proteinaIds, toppingIds]);
+  }, [props.precargar, baseIds, proteinaIds, toppingIds]);
 
   /**
    * Clave de idempotencia: una por caja armada. Se genera al ENVIAR, no durante el
@@ -1639,7 +1713,8 @@ export default function EmplataGame(props: {
     await new Promise((r) => setTimeout(r, 950)); // la caja se pliega en el canvas
     try {
       const r = await enviarPedido({
-        baseId,
+        baseId, // el campo de siempre: la primera de la carta
+        baseIds: basesSel.map((b) => b.id), // una o dos: si viene, manda sobre baseId
         proteinaId: proteinaIds[0] ?? "", // retro-compat; el array manda
         proteinaIds, // N proteínas, sin límite
         toppingIds,
@@ -1698,7 +1773,7 @@ export default function EmplataGame(props: {
       setPidiendoDatos(true);
     }
     setEnviando(false);
-  }, [enviando, baseId, proteinaIds, toppingIds, canal, esWeb, tipoSel, referencia, cliente, telefono, direccion, notas, enredoIntacto, mesa, s, lineasCaja]);
+  }, [enviando, baseId, basesSel, proteinaIds, toppingIds, canal, esWeb, tipoSel, referencia, cliente, telefono, direccion, notas, enredoIntacto, mesa, s, lineasCaja]);
 
   /**
    * PRIMER SERVICIO. Dos casos, un mismo gesto: el fideo trae la comida a la caja.
@@ -1714,13 +1789,13 @@ export default function EmplataGame(props: {
     const p = props.precargar;
     const ids = p
       ? [p.baseId, p.proteinaId, ...(p.toppingIds ?? [])]
-      : baseId
-        ? [baseId]
-        : [];
+      : baseIds;
     const ings = ids.map(find).filter(Boolean) as Ingrediente[];
     if (!ings.length) return;
     if (p) {
-      setBaseId(p.baseId);
+      /* Solo si esa base sigue en la carta: un id que no está no se cobra ni se dibuja,
+         y contaría como una de las dos al elegir la siguiente. */
+      setBaseIds(bases.some((b) => b.id === p.baseId) ? [p.baseId] : []);
       setProteinaIds(p.proteinaId ? [p.proteinaId] : []);
       setToppingIds(p.toppingIds ?? []);
     }
@@ -2737,6 +2812,9 @@ export default function EmplataGame(props: {
     /** Radio de colisión (px) según categoría — la comida ocupa ~0.35 del sprite. Escala con la
      *  caja (ver BOXW_REF) para que el solape y la relajación sean los mismos en toda pantalla. */
     const radioDe = (cat: string, sc: number) => SPR * sc * 0.35 * (geo().boxW / BOXW_REF);
+    /** Escala de reposo de una cama: sola, la grande de siempre; de a dos, cada una más chica
+     *  para que quepan las dos sin pasar del muro (ver recomputeSlots). */
+    const escalaBase = (dos: boolean) => (dos ? 1.1 : 1.58);
 
     /**
      * EL NIDO SERVIBLE — coloca cada ingrediente en un SLOT determinista (rol + índice) formando
@@ -2751,7 +2829,11 @@ export default function EmplataGame(props: {
       const base = wd.pila.filter((p) => find(p.id)?.categoria === "base");
       const prot = wd.pila.filter((p) => find(p.id)?.categoria === "proteina");
       const tops = wd.pila.filter((p) => find(p.id)?.categoria === "topping");
-      const seed = hash01((base[0]?.id ?? "b") + prot.map((p) => p.id).join("_"));
+      // DOS BASES por IDENTIDAD (orden de la carta), como las proteínas: misma receta, misma foto
+      const RANKb = (id: string) => bases.findIndex((x) => x.id === id);
+      const baseOrd = [...base].sort((a, b) => RANKb(a.id) - RANKb(b.id));
+      // con una base, la semilla de siempre (la foto de un plato de una base no cambia)
+      const seed = hash01((baseOrd.map((p) => p.id).join("+") || "b") + prot.map((p) => p.id).join("_"));
       const side = seed < 0.5 ? -1 : 1;
       const setR = (p: PilaItem, sc: number) => {
         p.s = sc;
@@ -2761,13 +2843,22 @@ export default function EmplataGame(props: {
       // papas), grande y apoyado al frente como lecho. El relleno de la caja lo hace un COJÍN
       // cálido del color de la base bajo la comida (ver el bucle de dibujo), no copias
       // repetidas del sprite —eso se veía a repetición—.
-      for (const p of base) {
-        p.fxT = 0;
+      // MITAD Y MITAD: dos camas, una por base (cada una su único sprite), lado a lado y
+      // solapadas al centro. 1.1×1.34 = 70.7px de semiancho + 0.12×257.4 = 30.9px de
+      // corrimiento → 101.6px: el MISMO borde exterior de la cama sola (< muro ~103).
+      const dos = baseOrd.length > 1;
+      baseOrd.forEach((p, i) => {
+        p.fxT = dos ? (i === 0 ? -0.12 : 0.12) : 0;
         p.ty = -0.085; // sube el nido al VOLUMEN MEDIO-ALTO: corona visible, caja colmada
-        p.depth = 0.55;
+        p.depth = dos ? (i === 0 ? 0.6 : 0.5) : 0.55; // el orden (depth desc) pone la 1ª detrás
         p.rot = 0;
-        setR(p, 1.58); // CAMA al límite del muro: 1.58×1.34 → semiancho ~101.6 < muro ~103
-      }
+        // CAMA al límite del muro: 1.58×1.34 → semiancho ~101.6 < muro ~103. La escala no se
+        // fija aquí sino que FLUYE en el dibujo (sT): la cama que ya estaba se encoge al
+        // hacer sitio a la segunda, y crece al quedar sola, en vez de saltar.
+        const sc = escalaBase(dos);
+        p.sT = sc;
+        p.r = radioDe("base", sc) / boxW;
+      });
       // RANK por IDENTIDAD: la posición dependía del orden de PULSACIÓN (quitar un topping
       // movía a otro hasta 123 px). Anclando todo al índice del catálogo, "misma receta,
       // misma foto" vuelve a ser cierto.
@@ -2930,7 +3021,7 @@ export default function EmplataGame(props: {
       for (const p of wd.pila) {
         const spr = wd.sprites.get(p.id);
         if (!spr) continue;
-        const sz = SPR * (boxW / BOXW_REF) * p.s * 0.9;
+        const sz = SPR * (boxW / BOXW_REF) * (p.sT ?? p.s) * 0.9; // la composición a la que va, no el paso intermedio
         const sx = ((p.fxT * boxW + boxW * 0.5) / boxW) * SW;
         const sy = ((p.ty * boxH + boxH * 0.42) / (boxH * 0.52)) * SH;
         const sw = (sz / boxW) * SW;
@@ -2948,8 +3039,20 @@ export default function EmplataGame(props: {
       const wd = world.current;
       const { boxW, boxH, boxX, boxY } = geo();
       const cat = ing.categoria;
-      if (cat === "base") wd.pila = wd.pila.filter((p) => find(p.id)?.categoria !== "base"); // solo la base reemplaza a la base
-      const sc = cat === "base" ? 1.58 : cat === "proteina" ? 0.73 : 0.53; // sincronizado con recomputeSlots
+      /* Con dos bases, una que se quitó EN EL AIRE ya no aterriza: la caja no puede mostrar
+         una base que no se cobra. (Con tope 1 se conserva el aterrizaje de siempre.) */
+      if (cat === "base" && sel.current.basesMax > 1 && !sel.current.baseIds.includes(ing.id)) {
+        wd.popBase.delete(ing.id);
+        return;
+      }
+      /* Al caer una base salen las que ya no están elegidas (con tope 1, todas las demás:
+         como siempre). Con dos, la otra elegida se queda y el nido las reparte. */
+      if (cat === "base")
+        wd.pila = wd.pila.filter(
+          (p) => p.id !== ing.id && (find(p.id)?.categoria !== "base" || sel.current.baseIds.includes(p.id)),
+        );
+      // sincronizado con recomputeSlots (una base que llega a hacer pareja ya viene a su tamaño)
+      const sc = cat === "base" ? escalaBase(sel.current.baseIds.length > 1) : cat === "proteina" ? 0.73 : 0.53;
       const fxDrop = clamp((xScreen - boxX) / boxW, -FXLIM, FXLIM); // desde donde cayó → FLUYE a su slot
       wd.pila.push({ id: ing.id, fx: fxDrop, fxT: fxDrop, fy: YB - 0.05, ty: YB, rot: 0, s: sc, r: radioDe(cat, sc) / boxW, land: 1, depth: 0.5 });
       recomputeSlots(); // EL NIDO decide el lugar determinista por rol + índice
@@ -3007,13 +3110,17 @@ export default function EmplataGame(props: {
       const idxT = sel.current.toppingIds.indexOf(ing.id);
       // La salsa va con el plato (vale $0 en la carta); lo demás canta su precio.
       const sinCosto = ing.categoria === "salsa";
+      // una base de dos canta lo que mueve el total, decidido al tocarla (ver tapIngrediente)
+      const textoBase = cat === "base" ? wd.popBase.get(ing.id) : undefined;
+      if (textoBase !== undefined) wd.popBase.delete(ing.id);
       // los pops vivos suben para dejar sitio (nunca ilegibles apilados); el nuevo nace en el borde
       if (!reduce) for (const pv of wd.pops) pv.y -= 22;
       wd.pops.push({
         x: clamp(xScreen, boxX - boxW * 0.34, boxX + boxW * 0.34),
         y: boxY - boxH * 0.5,
         life: 1,
-        texto: sinCosto ? "VA CON EL PLATO" : ing.precio > 0 ? `+${formatCOP(ing.precio)}` : ing.nombre,
+        texto:
+          textoBase ?? (sinCosto ? "VA CON EL PLATO" : ing.precio > 0 ? `+${formatCOP(ing.precio)}` : ing.nombre),
         gratis: sinCosto,
       });
       // seguidilla: emplatar rápido sube el tono (pequeña celebración musical)
@@ -4863,6 +4970,8 @@ export default function EmplataGame(props: {
           if (!spr) continue;
           p.fy += (p.ty - p.fy) * (1 - Math.pow(0.75, df)); // asentamiento vertical (dt-normalizado)
           p.fx += (p.fxT - p.fx) * (1 - Math.pow(0.75, df)); // FLUYE a su slot (la composición se recompone viva)
+          // la CAMA cambia de tamaño al ritmo del slot (con movimiento reducido, de una vez)
+          if (p.sT !== undefined) p.s = reduce ? p.sT : p.s + (p.sT - p.s) * (1 - Math.pow(0.75, df));
           const cp = capa(p.id);
           const lx = p.fx * boxW;
           const ly = p.fy * boxH; // la CAMA también se asienta en la envolvente → es el corazón del montón
@@ -5608,7 +5717,7 @@ export default function EmplataGame(props: {
         const cx = x0 + k * step + cardW / 2;
         if (cx < -cardW || cx > W + cardW) continue;
         const selr =
-          ing.id === sel.current.baseId ||
+          sel.current.baseIds.includes(ing.id) || // las dos bases se marcan, no solo la primera
           sel.current.proteinaIds.includes(ing.id) ||
           sel.current.toppingIds.includes(ing.id);
         // entrada escalonada al cambiar de pestaña
@@ -5872,7 +5981,7 @@ export default function EmplataGame(props: {
       // (H*0.11) y TAPABA el escenario del chef; ahora vive en la banda de piso libre entre la
       // caja y las pestañas, y se dibuja ANTES de los fideos → el chef pasa POR DELANTE. =====
       if (faseRef.current === "arma") {
-        const idsA = [sel.current.baseId, ...sel.current.proteinaIds, ...sel.current.toppingIds].filter(Boolean);
+        const idsA = [...sel.current.baseIds, ...sel.current.proteinaIds, ...sel.current.toppingIds].filter(Boolean);
         const nA = idsA.length;
         if (nA > 0) {
           const agg: Sabor = { cro: 0, cre: 0, fre: 0, dul: 0 };
@@ -6037,7 +6146,8 @@ export default function EmplataGame(props: {
               vr: vb === "enroscar" ? 0.16 : (Math.random() - 0.5) * 0.1,
               bounces: vb === "espolvorear" || vb === "verter" ? 1 : 0, // sin rebote: caen y se asientan
               sc: 0.68, // sale del rizo del fideo (≈ su tamaño colgando)
-              scT: catR === "base" ? 1.58 : catR === "proteina" ? 0.73 : 0.53, // → reposo, sin salto
+              // → reposo, sin salto (la segunda base vuela ya al tamaño de su media cama)
+              scT: catR === "base" ? escalaBase(sel.current.baseIds.length > 1) : catR === "proteina" ? 0.73 : 0.53,
               verbo: vb,
               x0: dropX,
               y0: mouthYBase - 4,
@@ -6272,6 +6382,7 @@ export default function EmplataGame(props: {
     wd.chispas = [];
     wd.ondas = [];
     wd.pops = [];
+    wd.popBase.clear();
     wd.parts = [];
     wd.manchas = [];
     wd.trail = [];
@@ -6284,7 +6395,7 @@ export default function EmplataGame(props: {
     wd.lastAct = wd.t;
     faseRef.current = "arma";
     setPedido(null);
-    setBaseId(""); // sin esto, "otra caja" deja caja vacía COBRANDO $20.412
+    setBaseIds([]); // sin esto, "otra caja" deja caja vacía COBRANDO $20.412
     setToppingIds([]);
     setProteinaIds([]);
     setEstado("recibido");
@@ -6431,8 +6542,15 @@ export default function EmplataGame(props: {
       // lo que lleva
       if (primera && !unPlato) {
         g.fillStyle = "#1E1611";
-        g.font = `800 46px ${FONT_DISPLAY}`;
-        g.fillText(primera.nombre.toUpperCase(), 540, y);
+        // con dos bases el primer renglón es largo ("A / B · MITAD Y MITAD"): se encoge hasta caber
+        const linea1 = primera.nombre.toUpperCase();
+        let t1 = 46;
+        g.font = `800 ${t1}px ${FONT_DISPLAY}`;
+        while (g.measureText(linea1).width > 960 && t1 > 26) {
+          t1 -= 2;
+          g.font = `800 ${t1}px ${FONT_DISPLAY}`;
+        }
+        g.fillText(linea1, 540, y);
         y += 62;
         g.font = `600 34px ${FONT_BODY}`;
         g.fillStyle = "rgba(74,46,20,0.78)";

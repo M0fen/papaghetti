@@ -11,17 +11,19 @@
  * termómetro del antojo del juego.
  */
 
-import { formatCOP, type Ingrediente } from "@/lib/menu";
+import { basesMaxDe, formatCOP, type Ingrediente } from "@/lib/menu";
 import { notaDe } from "@/lib/copy";
 import { EJES, saborDe } from "@/lib/sabor";
 import Reveal from "./Reveal";
 import IngImg from "./IngImg";
 import { useJuegoOpcional } from "./JuegoProvider";
 
-/* Código de COLOR por grupo — el mismo que los pasos del hero y el juego */
+/* Código de COLOR por grupo — el mismo que los pasos del hero y el juego. La nota de las
+   bases sale de Ajustes (ver `notaBases`); la de las proteínas dice lo mismo que el armador
+   porque el servidor no les pone tope: decía "hasta 2" y se podían pedir todas. */
 const GRUPOS = [
   { k: "base" as const, titulo: "Las bases", nota: "elige 1", tono: "oro" },
-  { k: "proteina" as const, titulo: "Las proteínas", nota: "hasta 2", tono: "pomodoro" },
+  { k: "proteina" as const, titulo: "Las proteínas", nota: "las que quieras, o ninguna", tono: "pomodoro" },
   {
     k: "salsa" as const,
     titulo: "Las salsas",
@@ -59,7 +61,9 @@ export default function CartaCompleta({
   /** Cuántas bases admite un plato (Ajustes): la nota de la carta lo tiene que decir. */
   basesMax?: 1 | 2;
 }) {
-  void basesMax; // (lo usa la nota de "La base"; ver la fase de dos bases)
+  /* Con el lector de Ajustes (sin el dato, el de fábrica): la carta promete lo mismo que
+     cobran el armador, el juego y la caja. */
+  const notaBases = basesMaxDe({ basesMax }) > 1 ? "elige 1 o 2" : "elige 1";
   const juego = useJuegoOpcional();
   /* Las salsas viven dentro del array `toppings` del catálogo, pero en la carta son
      su propio bloque: valen $0 y se leen mejor lejos de lo que sí se cobra. */
@@ -96,7 +100,7 @@ export default function CartaCompleta({
                     {g.titulo}
                     <HiloTitulo />
                   </span>
-                  <span className="badge badge--nota">{g.nota}</span>
+                  <span className="badge badge--nota">{g.k === "base" ? notaBases : g.nota}</span>
                 </h3>
                 {g.k === "salsa" ? (
                   /* LAS SALSAS SE LEEN, NO SE MIRAN. Siete charcos de color casi
