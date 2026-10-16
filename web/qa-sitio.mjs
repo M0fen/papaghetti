@@ -116,7 +116,7 @@ try {
       domicilios: { didi: "javascript:alert(1)" },
       redes: { mostrar: "sí", tiktok: "https://www.tiktok.com/@papa", facebook: "//facebook.com/x" },
       seo: { fotoCompartir: { url: "//evil.com/x.jpg" }, horarioGoogle: "esto no es un horario" },
-      resenas: { mostrar: true, lista: [{ nombre: "Ana", texto: "Rico", estrellas: 9, fuente: "google" }, "basura"] },
+      resenas: { mostrar: true, lista: [{ nombre: "QA", texto: "TEXTO-QA", estrellas: 9, fuente: "google" }, "basura"] },
     },
   });
   eq("en blanco o raro: vuelve el de fábrica", [raro.portada.antetitulo, raro.portada.frase, raro.historia.titulo], [
@@ -177,13 +177,13 @@ try {
   ]);
   si("contacto: mostrar el teléfono sin teléfono avisa", (contacto.aviso ?? "").includes("teléfono"));
   si("contacto: horario y dirección son obligatorios", "error" in sitio.leerContacto(campos({ whatsapp: "", horarios: "", direccion: "" })));
-  si("reseña sin la casilla de «real» se rechaza", "error" in sitio.leerResena(campos({ nombre: "Ana", texto: "Rico", estrellas: "5", fuente: "google" })));
+  si("reseña sin la casilla de «real» se rechaza", "error" in sitio.leerResena(campos({ nombre: "QA", texto: "TEXTO-QA", estrellas: "5", fuente: "google" })));
   eq(
     "reseña real completa",
-    sitio.leerResena(campos({ nombre: " Ana  M. ", texto: "Muy rico", estrellas: "4", fuente: "google", enlace: "maps.app.goo.gl/x", real: "on" })).valor,
-    { nombre: "Ana M.", texto: "Muy rico", estrellas: 4, fuente: "google", enlace: "https://maps.app.goo.gl/x" },
+    sitio.leerResena(campos({ nombre: " QA  Uno ", texto: "TEXTO-QA", estrellas: "4", fuente: "google", enlace: "maps.app.goo.gl/x", real: "on" })).valor,
+    { nombre: "QA Uno", texto: "TEXTO-QA", estrellas: 4, fuente: "google", enlace: "https://maps.app.goo.gl/x" },
   );
-  si("reseña de más de 280 letras se rechaza (no se recorta: cambiaría lo que dice)", "error" in sitio.leerResena(campos({ nombre: "Ana", texto: "x".repeat(281), estrellas: "5", fuente: "google", real: "on" })));
+  si("reseña de más de 280 letras se rechaza (no se recorta: cambiaría lo que dice)", "error" in sitio.leerResena(campos({ nombre: "QA", texto: "x".repeat(281), estrellas: "5", fuente: "google", real: "on" })));
 
   console.log("\n═══ MEZCLAS: UN BLOQUE NO PISA A OTRO ═══");
   const FOTO = { url: "/foto/portada.jpg", ancho: 960, alto: 1200, alt: "Caja" };
@@ -360,7 +360,7 @@ try {
   await cat.guardarSitio(
     (a) => ({
       telefonoLocal: "606 333 4455",
-      sitio: sitio.conCampos(a.sitio, "resenas", { mostrar: false, lista: [{ nombre: "Ana", texto: "BORRADOR-QA", estrellas: 5, fuente: "google" }] }),
+      sitio: sitio.conCampos(a.sitio, "resenas", { mostrar: false, lista: [{ nombre: "QA", texto: "BORRADOR-QA", estrellas: 5, fuente: "google" }] }),
     }),
     "QA reseñas",
   );
