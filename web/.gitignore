@@ -49,4 +49,6 @@ next-env.d.ts
 
 .vercel
 .env*
+# La plantilla SÍ va al repositorio: dice qué variables existen, sin ningún secreto.
+!.env.example
 qa-*.sh

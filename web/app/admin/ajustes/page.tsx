@@ -171,6 +171,26 @@ export default async function AjustesPage() {
             {persistencia.backend === "blob" && " · copia de seguridad diaria automática"}
           </p>
         )}
+        {/* CUÁL almacén. Tras un traslado de cuenta, la prueba de que el negocio es el
+            mismo es este identificador: otro almacén arranca con la carta de fábrica y
+            cero pedidos, y eso se ve igual que "se borró todo". */}
+        {persistencia.almacen && (
+          <>
+            <p className="persis__txt">
+              Almacén <code>{persistencia.almacen.id || "sin identificar"}</code> · entra con{" "}
+              {persistencia.almacen.como}
+            </p>
+            <p className="persis__meta">
+              Anota ese identificador. Si algún día se traslada la cuenta de Vercel, aquí tiene
+              que salir el mismo; si sale otro, no operes y avisa a quien te instaló el sistema.
+            </p>
+            {persistencia.almacen.aviso && (
+              <p className="persis__txt field__alerta" role="alert">
+                ⚠️ {persistencia.almacen.aviso}
+              </p>
+            )}
+          </>
+        )}
         {/* LA COPIA DEL DUEÑO. Un enlace normal (no <Link>): es una descarga, nadie debe
             "precargarla". La ruta exige sesión. */}
         <div className="persis__copia">
