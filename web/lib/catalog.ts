@@ -849,13 +849,123 @@ function unir<T extends { id: string }>(base: T[], mio: T[]): T[] {
   return [...m.values()];
 }
 
+/* ── LA FUSIÓN A TRES VÍAS (la usa `fusionar`, justo abajo) ───────────────────── */
+
+/**
+ * ¿Lo mismo? Igualdad profunda de lo que viaja en el cerebro (JSON): sin importar el
+ * orden de las claves, y un campo en `undefined` cuenta como ausente, que es como queda
+ * al guardarse.
+ */
+function igual(x: unknown, y: unknown): boolean {
+  if (x === y) return true;
+  if (typeof x !== "object" || typeof y !== "object" || x === null || y === null) return false;
+  if (Array.isArray(x) || Array.isArray(y)) {
+    return Array.isArray(x) && Array.isArray(y) && x.length === y.length && x.every((v, i) => igual(v, y[i]));
+  }
+  const a = x as Record<string, unknown>;
+  const b = y as Record<string, unknown>;
+  const ka = Object.keys(a).filter((k) => a[k] !== undefined);
+  const kb = Object.keys(b).filter((k) => b[k] !== undefined);
+  return ka.length === kb.length && ka.every((k) => igual(a[k], b[k]));
+}
+
+const esPlano = (v: unknown): v is Record<string, unknown> =>
+  Boolean(v) && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * LA REGLA, para un valor cualquiera, con lo que había cuando LEÍ (`base`), lo MÍO y lo
+ * que hay AHORA:
+ *  · si yo no lo cambié, manda lo de ahora (aunque sea el cambio de otro);
+ *  · si el otro no lo cambió, manda lo mío;
+ *  · si los dos lo cambiamos y es un objeto, se decide clave por clave; si no, lo mío.
+ * Una lista sin ids (una receta, los toppings de un plato) cuenta como UN valor.
+ */
+function mezclar3(base: unknown, mio: unknown, actual: unknown): unknown {
+  if (igual(mio, base)) return actual;
+  if (igual(actual, base)) return mio;
+  if (esPlano(base) && esPlano(mio) && esPlano(actual)) {
+    const out: Record<string, unknown> = {};
+    for (const k of new Set([...Object.keys(mio), ...Object.keys(actual), ...Object.keys(base)])) {
+      const v = mezclar3(base[k], mio[k], actual[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    return out;
+  }
+  return mio;
+}
+
+/**
+ * Una lista con ids (la carta, la despensa, las promos, los adicionales), a tres vías:
+ *  · lo que yo agregué se queda, y lo que yo borré se va;
+ *  · lo que otro agregó mientras tanto se queda (al final: el orden es el mío);
+ *  · lo que otro borró se va, salvo que yo lo haya cambiado: entonces vuelve con lo mío,
+ *    la misma regla que con los pedidos;
+ *  · lo que está en las tres se mezcla campo por campo.
+ */
+function unir3<T extends { id: string }>(
+  base: readonly T[],
+  mio: readonly T[],
+  actual: readonly T[],
+  mezclar: (b: T, m: T, a: T) => T = (b, m, a) => mezclar3(b, m, a) as T,
+): T[] {
+  if (igual(mio, base)) return [...actual]; // no toqué la lista: como está ahora
+  if (igual(actual, base)) return [...mio]; // nadie más la tocó: la mía
+  const enBase = new Map(base.map((x) => [x.id, x]));
+  const enActual = new Map(actual.map((x) => [x.id, x]));
+  const mios = new Set(mio.map((x) => x.id));
+  const out: T[] = [];
+  for (const m of mio) {
+    const b = enBase.get(m.id);
+    const a = enActual.get(m.id);
+    if (!b) out.push(m);
+    else if (!a) {
+      if (!igual(m, b)) out.push(m);
+    } else out.push(mezclar(b, m, a));
+  }
+  for (const a of actual) if (!mios.has(a.id) && !enBase.has(a.id)) out.push(a);
+  return out;
+}
+
+/**
+ * EL STOCK ES UN CONTADOR, no un dato que alguien elige: lo mueven los pedidos (el de
+ * los insumos, y el suelto de un producto sin receta). Si otra instancia vendió un plato
+ * mientras yo cambiaba un precio, tomar mi número devolvía su descuento al inventario: el
+ * pedido quedaba registrado y la materia prima no. Se aplica MI cambio (mío − base)
+ * sobre lo que hay AHORA y los dos movimientos sobreviven. El resto de campos, a tres vías.
+ */
+function conStockPorDelta<T extends { stock?: number }>(b: T, m: T, a: T): T {
+  const r = mezclar3(b, m, a) as T;
+  if (typeof b.stock !== "number" || typeof m.stock !== "number" || typeof a.stock !== "number") return r;
+  return { ...r, stock: Math.max(0, Number((a.stock + (m.stock - b.stock)).toFixed(3))) };
+}
+
+/**
+ * Los ajustes, clave por clave (y dentro de comprobante y sitio, también). Las promos y
+ * los adicionales son listas con id, como la carta: dos creados a la vez se quedan los dos.
+ */
+function mezclarAjustes(base: Ajustes | undefined, mio: Ajustes, actual: Ajustes | undefined): Ajustes {
+  if (!base || !actual) return mio;
+  const r = { ...(mezclar3(base, mio, actual) as Ajustes) };
+  r.promos = unir3(base.promos ?? [], mio.promos ?? [], actual.promos ?? []);
+  r.adicionales = unir3(base.adicionales ?? [], mio.adicionales ?? [], actual.adicionales ?? []);
+  return r;
+}
+
 /**
  * Une lo que YO cambié con lo que otra instancia escribió mientras tanto.
  *
- * Las tres colecciones transaccionales (pedidos, movimientos, leads) son
+ * Las colecciones transaccionales (pedidos, movimientos, leads, arqueos) son
  * append-only en la práctica: si el cajero cobra el #A1 mientras entra el #B2 por
- * QR desde otra lambda, ninguno de los dos puede desaparecer. Para el resto del
- * catálogo (precios, recetas, ajustes) manda mi versión: lo edita una sola persona.
+ * QR desde otra lambda, ninguno de los dos puede desaparecer.
+ *
+ * LA CARTA, LA DESPENSA Y LOS AJUSTES, A TRES VÍAS. Antes mandaba mi copia entera ("lo
+ * edita una sola persona"), pero la copia de un pedido por QR o de un toque de la cocina
+ * puede tener dos segundos (el memo) y trae la carta entera dentro: el dueño subía los
+ * precios y el pedido siguiente, leído un instante antes, los devolvía a los viejos sin
+ * que nadie se enterara. Igual se deshacían un "Cerrar el negocio" o un "se acabó" de la
+ * cocina. Ahora, con lo que leí (`base`) a la vista, lo que yo no cambié queda como esté
+ * AHORA y lo que cambié manda (ver `mezclar3` y `unir3`). Sin esa foto (una copia armada
+ * a mano, como la de restaurar la carta) manda lo mío, como siempre.
  */
 function fusionar(actual: Catalog, mio: Catalog): Catalog {
   // Las tres listas se guardan MÁS NUEVO PRIMERO y las pantallas confían en ese
@@ -864,21 +974,17 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
   // registrar no salía arriba en Finanzas.
   const recientes = <T>(xs: T[], fecha: (x: T) => string) =>
     [...xs].sort((a, b) => fecha(b).localeCompare(fecha(a)));
-  /* LA DESPENSA SE FUSIONA POR DELTA, no por "gana el último".
-     Si otra instancia vendió un plato mientras yo cambiaba un precio, tomar mi copia
-     entera devolvía su descuento al inventario: el pedido quedaba registrado y la
-     materia prima no. Aplicando MI cambio (mio - base) sobre lo que hay AHORA, los
-     dos movimientos sobreviven. */
   const base = origen.get(mio);
-  const insumos = base
-    ? (mio.insumos ?? []).map((m) => {
-        const b = base.insumos?.find((x) => x.id === m.id);
-        const a = actual.insumos?.find((x) => x.id === m.id);
-        if (!b || !a) return m; // insumo nuevo o borrado: manda mi versión
-        const delta = m.stock - b.stock;
-        return delta === 0 ? { ...m, stock: a.stock } : { ...m, stock: Math.max(0, Number((a.stock + delta).toFixed(3))) };
-      })
-    : mio.insumos;
+  const carta: Partial<Catalog> = base
+    ? {
+        bases: unir3(base.bases ?? [], mio.bases ?? [], actual.bases ?? [], conStockPorDelta),
+        proteinas: unir3(base.proteinas ?? [], mio.proteinas ?? [], actual.proteinas ?? [], conStockPorDelta),
+        toppings: unir3(base.toppings ?? [], mio.toppings ?? [], actual.toppings ?? [], conStockPorDelta),
+        enredos: unir3(base.enredos ?? [], mio.enredos ?? [], actual.enredos ?? []),
+        insumos: unir3(base.insumos ?? [], mio.insumos ?? [], actual.insumos ?? [], conStockPorDelta),
+        ajustes: mezclarAjustes(base.ajustes, mio.ajustes, actual.ajustes),
+      }
+    : {};
   /* SOLO LO QUE YO CAMBIÉ. De mi copia viajan los pedidos NUEVOS y los que YO toqué;
      los que traigo igual que como los leí se dejan como estén AHORA.
      Son dos fallos en uno:
@@ -903,7 +1009,7 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
   const misMeses = (mio.archivoMeses ?? []).filter((m) => !base || !(base.archivoMeses ?? []).includes(m));
   return {
     ...mio,
-    insumos,
+    ...carta,
     pedidos: recientes(unir(actual.pedidos ?? [], misPedidos), (p) => p.creadoEn),
     movimientos: recientes(unir(actual.movimientos ?? [], mio.movimientos ?? []), (m) => m.fecha),
     leads: recientes(unir(actual.leads ?? [], mio.leads ?? []), (l) => l.creadoEn),
@@ -2931,3 +3037,59 @@ export async function updateLead(
 }
 
 export type { EstadoLead };
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SUBIR O BAJAR LOS PRECIOS DE UNA VEZ (Precios → Subir o bajar precios)
+
+   El plan lo arma lib/precios.ts (`planAjuste`): el MISMO que pinta la vista previa.
+   Aquí solo se comprueba que lo que el dueño vio sigue siendo verdad, y se guarda:
+    · UN commit normal. Deshacer lo revierte entero (platos y adicionales incluidos) y,
+      como los pedidos ya no ocupan la pila, sigue ahí aunque entren pedidos después.
+    · Solo cambian los PRECIOS. Nombres, fotos, disponibilidad y recetas viajan como
+      estaban, y la fusión a tres vías (ver `fusionar`) deja pasar lo que otra pantalla
+      cambie de ellos mientras tanto.
+    · La FIRMA es la huella de la vista previa (cada "antes → después"). Si no coincide,
+      algo cambió desde que se miró —otro precio, un producto nuevo, o este mismo ajuste
+      que ya entró con un doble toque— y no se toca nada.
+   El import vive con su bloque y no arriba con los demás: así el bloque se lee (y se
+   fusiona entre ramas) de una pieza.
+   ══════════════════════════════════════════════════════════════════════════ */
+import { planAjuste, listasAjusteDe, textoAjuste, PCT_MAX_AJUSTE, type GrupoAjuste } from "./precios";
+
+export async function ajustarPrecios(input: {
+  pct: number;
+  grupos: readonly GrupoAjuste[];
+  firma: string;
+}): Promise<{ n: number; texto: string }> {
+  const pct = Math.round(Number(input?.pct) * 10) / 10;
+  if (!Number.isFinite(pct) || pct === 0 || Math.abs(pct) > PCT_MAX_AJUSTE) {
+    throw new Error(`El porcentaje tiene que estar entre 0,1 y ${PCT_MAX_AJUSTE} %.`);
+  }
+  /* Lectura FRESCA, no la copia de hasta 2 s del memo: la firma se compara contra lo que
+     hay de verdad ahora, no contra lo que esta instancia vio hace un momento. */
+  const cat = await readFresco();
+  const plan = planAjuste(listasAjusteDe(cat), pct, Array.isArray(input?.grupos) ? input.grupos : []);
+  if (plan.firma !== String(input?.firma ?? "")) {
+    throw new Error("Los precios cambiaron mientras mirabas la vista previa: revísala de nuevo.");
+  }
+  if (!plan.cambios.length) {
+    throw new Error("Con ese porcentaje no cambia ningún precio. Prueba otro, o elige otros grupos.");
+  }
+  const donde: Record<GrupoAjuste, { id: string; precio: number }[]> = {
+    bases: cat.bases,
+    proteinas: cat.proteinas,
+    acompanantes: cat.toppings,
+    platos: cat.enredos,
+    adicionales: cat.ajustes.adicionales ?? [],
+  };
+  for (const c of plan.cambios) {
+    const it = donde[c.grupo].find((x) => x.id === c.id);
+    if (!it) throw new Error("Los precios cambiaron mientras mirabas la vista previa: revísala de nuevo.");
+    // Un adicional pasa por las mismas reglas que en la caja: mayor que cero y con tope.
+    if (c.grupo === "adicionales") itemAdicional({ nombre: c.nombre, precio: c.despues }, 0);
+    it.precio = c.despues;
+  }
+  const texto = textoAjuste(plan, pct);
+  await commit(cat, texto);
+  return { n: plan.cambios.length, texto };
+}
