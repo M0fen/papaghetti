@@ -373,6 +373,36 @@ try {
       "papaghetti-copia-2026-10-16-2330.json",
     );
     eq("pasada la medianoche: 0005, nunca 2405", c.nombreCopia(new Date("2026-10-17T05:05:00.000Z")), "papaghetti-copia-2026-10-17-0005.json");
+
+    console.log("\n═══ RESTAURAR LA COPIA (herramienta del desarrollador) ═══");
+    const plan = await c.restaurarCopia(copia);
+    eq("sin --de-verdad solo simula y dice qué haría", [plan.pedidos, plan.meses, plan.pedidosArchivados, plan.destino, plan.respaldo], [2, ["2026-06"], 1, { backend: "archivo", entorno: "local" }, undefined]);
+    eq("y no escribió nada", huella(), antes);
+    const rechaza = async (n, valor, frag) => {
+      try {
+        await c.restaurarCopia(valor);
+        si(n, false, "no lanzó");
+      } catch (e) {
+        si(n, String(e?.message ?? e).includes(frag), e?.message);
+      }
+    };
+    await rechaza("una copia cortada (sin completo) no se restaura", { ...copia, completo: undefined }, "incompleta");
+    await rechaza("algo que no es una copia, tampoco", { hola: 1 }, "no es una copia");
+    await rechaza("un mes dañado, tampoco", { ...copia, archivo: { "2026-06": { mes: "2026-06" } } }, "dañado");
+    // Lo que hay AHORA es otra cosa: sin pedidos, otro nombre y sin el mes archivado.
+    const otro = { ...sembrado, pedidos: [], undo: [snap], ajustes: { ...sembrado.ajustes, negocio: "OTRO" } };
+    fs.writeFileSync(FILE, JSON.stringify(otro), "utf8");
+    fs.unlinkSync(archivoDe("2026-06"));
+    const hecho = await c.restaurarCopia(copia, { deVerdad: true, ahora });
+    const restaurado = JSON.parse(fs.readFileSync(FILE, "utf8"));
+    eq("vuelven los pedidos y el nombre de la copia", [restaurado.pedidos.map((p) => p.id), restaurado.ajustes.negocio], [[hoy.id, ayer.id], sembrado.ajustes.negocio]);
+    eq("sin pilas de deshacer (no se puede saltar por encima)", [restaurado.undo, restaurado.redo], [[], []]);
+    eq("con el índice de meses de la copia", restaurado.archivoMeses, ["2026-06"]);
+    eq("y el mes archivado, escrito de nuevo", JSON.parse(fs.readFileSync(archivoDe("2026-06"), "utf8")), { mes: "2026-06", pedidos: [archivado] });
+    si("el historial lo dice", restaurado.historial[0].texto.startsWith("Restauró la copia del 2026-10-16"), restaurado.historial[0].texto);
+    const respaldoAntes = path.join(DATA, `${hecho.respaldo}.json`);
+    si("y lo de ANTES quedó guardado aparte, por si era la copia equivocada", fs.existsSync(respaldoAntes) && JSON.parse(fs.readFileSync(respaldoAntes, "utf8")).ajustes.negocio === "OTRO", hecho.respaldo);
+    if (fs.existsSync(respaldoAntes)) fs.unlinkSync(respaldoAntes);
     fs.unlinkSync(archivoDe("2026-06"));
   }
 } catch (e) {
