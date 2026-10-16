@@ -18,12 +18,15 @@
  * distinto en el byte de la "ñ". Antes que apostar, se quitan tildes y eñes
  * ("Nandu", "Gracias por venir!"): se lee igual y nunca sale basura.
  *
+ * EL CONTENIDO NO SE DECIDE AQUÍ: sale de `papelDe` (lib/papel.ts), el mismo que
+ * dibujan la imagen, la pantalla y el WhatsApp. Aquí solo se compone en columnas.
+ *
  * Es un módulo PURO: recibe el pedido, devuelve bytes. Nada de DOM, nada de React:
  * se prueba en Node con un pedido de mentira.
  */
 
-import { formatCOP, metodoLabel, tipoLabel, type Ajustes, type Pedido } from "./menu";
-import { cuentaImpresa } from "./precios";
+import { formatCOP, type Pedido } from "./menu";
+import { papelDe, type AjustesPapel, type Papel } from "./papel";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -41,31 +44,24 @@ export interface Renglon {
   tamano?: 1 | 2 | "alto";
 }
 
-const PARTES = new Intl.DateTimeFormat("es-CO", {
-  timeZone: "America/Bogota",
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-function fechaCorta(iso: string): string {
-  const p: Record<string, string> = {};
-  for (const x of PARTES.formatToParts(new Date(iso))) p[x.type] = x.value;
-  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
-}
-
 /**
  * A ASCII puro. Primero los símbolos que tienen traducción sensata, luego se
  * descomponen las letras acentuadas (NFD) y se tira el acento, y lo que aún no
  * quepa en 0x20–0x7E se elimina en vez de convertirse en un byte que la impresora
  * pintaría como cualquier cosa.
+ *
+ * Los ordinales van antes que nada: "Cra 7 Nº 20-15, 2º piso" salía "Cra 7 N 20-15, 2
+ * piso" (solo se traducía el signo de grado, no el ordinal, que es el que se teclea en
+ * una dirección). Y un tabulador es un espacio: borrarlo pegaba las palabras.
+ *
+ * Los espacios de DENTRO no se tocan: el relleno de las columnas (`fila`) ya viene
+ * calculado y colapsarlo descuadraría los precios.
  */
 export function ascii(s: string): string {
   return s
-    .replace(/N°/g, "No.")
-    .replace(/°/g, "o")
+    .replace(/([Nn])\.?[°º]/g, "$1o.")
+    .replace(/[°º]/g, "o")
+    .replace(/ª/g, "a")
     .replace(/×/g, "x")
     .replace(/[·•]/g, "-")
     .replace(/[—–]/g, "-")
@@ -74,12 +70,22 @@ export function ascii(s: string): string {
     .replace(/…/g, "...")
     .replace(/¡/g, "")
     .replace(/¿/g, "")
-    .replace(/[   ]/g, " ")
+    .replace(/[\t\u{A0}\u{2007}\u{202F}]/gu, " ")
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u{300}-\u{36F}]/gu, "")
     .replace(/[^\x20-\x7e\n]/g, "")
     .replace(/\s+$/g, "");
 }
+
+/**
+ * Cómo sale en la impresora de texto un renglón centrado: en ASCII, sin espacios de
+ * más y sin espacio al principio. Quitar un emoji dejaba "  Hecho con amor" y la
+ * impresora centraba también ese espacio, así que la línea se veía corrida.
+ */
+export const comoSaleEnTexto = (s: string): string =>
+  ascii(s)
+    .replace(/ {2,}/g, " ")
+    .trim();
 
 /** Parte un texto en líneas de como mucho `cols` caracteres, por palabras. */
 export function partir(s: string, cols: number): string[] {
@@ -122,89 +128,112 @@ export function fila(izq: string, der: string, cols: number): string[] {
   return lineas;
 }
 
-function pagoTexto(p: Pedido): string {
-  if (p.pago === "devuelto") return "DEVUELTO";
-  if (p.pago === "pagado") return p.metodoPago ? metodoLabel[p.metodoPago] : "Pagado";
-  return "PENDIENTE";
-}
-
 /**
- * El tiquete, renglón a renglón, con la misma información y el mismo orden que la
- * versión en imagen: cabecera, número, datos del servicio, líneas, sumas, total,
- * pago y el aviso de que NO es factura. Sin propina, como en todo el sistema.
+ * El comprobante, renglón a renglón, con la misma información y el mismo orden que
+ * la imagen y la pantalla: el sello de anulado (si lo hay) antes que nada, cabecera,
+ * título y número, datos del servicio, líneas, sumas, total, pago y el pie con el
+ * aviso de que este papel no es un documento fiscal. Sin propina, como en todo el
+ * sistema.
  */
-export function armarTiquete(p: Pedido, a: Ajustes, cols: number = COLUMNAS_80MM): Renglon[] {
+export function renglonesDePapel(papel: Papel, cols: number = COLUMNAS_80MM): Renglon[] {
   const R: Renglon[] = [];
   const sep = () => R.push({ texto: "-".repeat(cols) });
-  const anulado = p.estado === "cancelado";
-  const devuelto = p.pago === "devuelto";
-  const total = cuentaImpresa(p, a.impuestoPct).total;
-
-  R.push({ texto: (a.negocio || "Papaghetti").toUpperCase(), alinear: "centro", negrita: true, tamano: 2 });
-  const datos = [
-    a.razonSocial,
-    a.nit ? `NIT ${a.nit}` : "",
-    a.direccion,
-    a.telefonoLocal || a.whatsapp ? `Tel. ${a.telefonoLocal || a.whatsapp}` : "",
-  ];
-  for (const d of datos) if (d) R.push({ texto: d, alinear: "centro" });
+  const centro = (texto: string, estilo: Omit<Renglon, "texto" | "alinear"> = {}) =>
+    R.push({ texto, alinear: "centro", ...estilo });
 
   /* UN PEDIDO CANCELADO NO PUEDE SALIR COMO UN CONSUMO VÁLIDO: el aviso va arriba,
-     en letra doble, antes que cualquier número. */
-  if (anulado) {
+     en letra doble, antes que cualquier número (y antes que el nombre, como en la
+     imagen y en la pantalla). */
+  if (papel.sello) {
+    /* Con los asteriscos no cabe en las 16 columnas de letra doble de la TP586 y se
+       partía en "*** PEDIDO" / "ANULADO ***": ahí va sin ellos, en una sola línea. */
+    const marcado = `*** ${papel.sello.titulo} ***`;
+    centro(marcado.length <= Math.floor(cols / 2) ? marcado : papel.sello.titulo, { negrita: true, tamano: 2 });
+    centro(papel.sello.detalle);
     R.push({ texto: "" });
-    R.push({ texto: devuelto ? "*** DINERO DEVUELTO ***" : "*** PEDIDO ANULADO ***", alinear: "centro", negrita: true, tamano: 2 });
-    R.push({
-      texto: devuelto
-        ? `Se devolvieron ${formatCOP(p.devolucion?.monto ?? p.total)}${p.devolucion?.motivo ? ` - ${p.devolucion.motivo}` : ""}. Este pedido ya no es un consumo.`
-        : `Este pedido se cancelo${p.motivoCancelacion ? `: ${p.motivoCancelacion}` : ""}. No corresponde a un consumo y no debe cobrarse.`,
-      alinear: "centro",
-    });
   }
 
+  centro(papel.cabecera.nombre.toUpperCase(), { negrita: true, tamano: 2 });
+  for (const d of papel.cabecera.datos) centro(d);
+
   sep();
-  R.push({ texto: "COMPROBANTE DE CONSUMO", alinear: "centro", negrita: true });
-  R.push({ texto: `N° ${p.consecutivo ?? p.id}`, alinear: "centro", negrita: true, tamano: "alto" });
+  centro(papel.titulo, { negrita: true });
+  centro(papel.numero, { negrita: true, tamano: "alto" });
   sep();
-  R.push({ texto: `Fecha: ${fechaCorta(p.creadoEn)}` });
-  R.push({ texto: `Servicio: ${tipoLabel[p.tipo]}` });
-  if (p.referencia) R.push({ texto: `Ubicacion: ${p.referencia}` });
-  if (p.cliente) R.push({ texto: `Cliente: ${p.cliente}` });
+  R.push({ texto: `Fecha: ${papel.fecha}` });
+  R.push({ texto: `Servicio: ${papel.servicio}` });
+  for (const d of papel.cliente) R.push({ texto: `${d.k}: ${d.v}` });
   sep();
 
-  const cuenta = cuentaImpresa(p, a.impuestoPct);
-  for (const l of cuenta.lineas) {
+  /* Las filas con precio se componen YA en ASCII: "…" pasa a "..." y "×" a "x", y el
+     relleno hasta la columna del precio se tiene que contar sobre lo que se imprime. */
+  for (const l of papel.cuenta.lineas) {
     const nombre = `${l.cantidad > 1 ? `${l.cantidad}x ` : ""}${l.nombre}`;
     for (const t of fila(ascii(nombre), formatCOP(l.importe), cols)) R.push({ texto: t });
     if (l.detalle) for (const t of partir(ascii(l.detalle), cols - 3)) R.push({ texto: `   ${t}` });
   }
-  if (p.notas) {
+  if (papel.nota) {
     R.push({ texto: "" });
-    for (const t of partir(ascii(`Nota: ${p.notas}`), cols)) R.push({ texto: t });
+    for (const t of partir(ascii(`Nota: ${papel.nota}`), cols)) R.push({ texto: t });
   }
   sep();
 
-  for (const [k, v] of cuenta.sumas) for (const t of fila(k, formatCOP(v), cols)) R.push({ texto: t });
+  for (const [k, v] of papel.cuenta.sumas) for (const t of fila(ascii(k), formatCOP(v), cols)) R.push({ texto: t });
   /* El total en letra doble ocupa el doble: se compone a la mitad de columnas. */
-  for (const t of fila("TOTAL", formatCOP(total), Math.floor(cols / 2))) R.push({ texto: t, negrita: true, tamano: 2 });
-  if (cuenta.nota) R.push({ texto: ascii(cuenta.nota), alinear: "centro" });
-  R.push({ texto: `Pago: ${pagoTexto(p)}`, negrita: true });
+  for (const t of fila("TOTAL", formatCOP(papel.cuenta.total), Math.floor(cols / 2))) {
+    R.push({ texto: t, negrita: true, tamano: 2 });
+  }
+  if (papel.cuenta.nota) centro(papel.cuenta.nota);
+  R.push({ texto: `Pago: ${papel.pago}`, negrita: true });
   sep();
-  R.push({
-    texto: "Documento interno de control. No es factura electronica de venta ni documento equivalente P.O.S.",
-    alinear: "centro",
-  });
-  R.push({ texto: "Gracias por venir!", alinear: "centro", negrita: true });
+  centro(papel.pie.legal);
+  for (const e of papel.pie.extra) centro(e);
+  centro(papel.pie.cierre, { negrita: true });
   return R;
+}
+
+/** El tiquete de un pedido, renglón a renglón (ver `renglonesDePapel`). */
+export function armarTiquete(p: Pedido, a: AjustesPapel = {}, cols: number = COLUMNAS_80MM): Renglon[] {
+  return renglonesDePapel(papelDe(p, a), cols);
+}
+
+/** Una línea tal como la recibe la impresora: ya en ASCII y a lo ancho que cabe. */
+export interface LineaImpresa {
+  texto: string;
+  alinear: NonNullable<Renglon["alinear"]>;
+  negrita: boolean;
+  tamano: NonNullable<Renglon["tamano"]>;
+}
+
+/**
+ * De renglones a las líneas que de verdad salen: en ASCII, partidas al ancho
+ * efectivo de su tamaño (la mitad de columnas en letra doble). Los renglones que ya
+ * vienen compuestos a medida pasan intactos (partir() los reharía y se comería el
+ * relleno de las columnas). Lo usan los bytes y la vista previa de Ajustes, así que lo
+ * que se ve allá es exactamente lo que imprime la impresora.
+ */
+export function lineasImpresas(renglones: Renglon[], cols: number = COLUMNAS_80MM): LineaImpresa[] {
+  const out: LineaImpresa[] = [];
+  for (const r of renglones) {
+    const alinear = r.alinear ?? "izq";
+    const tamano = r.tamano ?? 1;
+    const efectivas = tamano === 2 ? Math.floor(cols / 2) : cols;
+    /* Un salto de línea suelto no se manda crudo: la impresora lo obedecería, pero el
+       ancho de la línea ya se habría medido sin él. Cada trozo es su propia línea. */
+    for (const trozo of ascii(r.texto).split("\n")) {
+      const texto = alinear === "centro" ? comoSaleEnTexto(trozo) : trozo;
+      const lineas = texto.length > efectivas ? partir(texto, efectivas) : [texto];
+      for (const l of lineas) out.push({ texto: l, alinear, negrita: Boolean(r.negrita), tamano });
+    }
+  }
+  return out;
 }
 
 /**
  * De renglones a bytes. Solo se emite un comando cuando el estilo CAMBIA respecto
- * al renglón anterior (menos bytes, menos que pueda malinterpretar un firmware), y
+ * a la línea anterior (menos bytes, menos que pueda malinterpretar un firmware), y
  * al final se deja la impresora como estaba: alineación izquierda, sin negrita,
- * tamaño normal. Los renglones que no quepan se parten aquí, con el ancho efectivo
- * de su tamaño; los que ya vienen compuestos a medida pasan intactos (partir()
- * los reharía y se comería el relleno de las columnas).
+ * tamaño normal.
  *
  *  · `ESC a n`  alineación (0 izq, 1 centro, 2 der)
  *  · `ESC E n`  negrita
@@ -218,32 +247,24 @@ export function codificarRenglones(
   opts: { cortar?: boolean; avance?: number } = {},
 ): Uint8Array {
   const out: number[] = [ESC, 0x40];
-  let alinear: NonNullable<Renglon["alinear"]> = "izq";
+  let alinear: LineaImpresa["alinear"] = "izq";
   let negrita = false;
-  let tamano: NonNullable<Renglon["tamano"]> = 1;
-  for (const r of renglones) {
-    const al = r.alinear ?? "izq";
-    if (al !== alinear) {
-      out.push(ESC, 0x61, al === "izq" ? 0 : al === "centro" ? 1 : 2);
-      alinear = al;
+  let tamano: LineaImpresa["tamano"] = 1;
+  for (const l of lineasImpresas(renglones, cols)) {
+    if (l.alinear !== alinear) {
+      out.push(ESC, 0x61, l.alinear === "izq" ? 0 : l.alinear === "centro" ? 1 : 2);
+      alinear = l.alinear;
     }
-    const ng = Boolean(r.negrita);
-    if (ng !== negrita) {
-      out.push(ESC, 0x45, ng ? 1 : 0);
-      negrita = ng;
+    if (l.negrita !== negrita) {
+      out.push(ESC, 0x45, l.negrita ? 1 : 0);
+      negrita = l.negrita;
     }
-    const tm = r.tamano ?? 1;
-    if (tm !== tamano) {
-      out.push(GS, 0x21, tm === 2 ? 0x11 : tm === "alto" ? 0x01 : 0x00);
-      tamano = tm;
+    if (l.tamano !== tamano) {
+      out.push(GS, 0x21, l.tamano === 2 ? 0x11 : l.tamano === "alto" ? 0x01 : 0x00);
+      tamano = l.tamano;
     }
-    const efectivas = tm === 2 ? Math.floor(cols / 2) : cols;
-    const texto = ascii(r.texto);
-    const lineas = texto.length > efectivas ? partir(texto, efectivas) : [texto];
-    for (const l of lineas) {
-      for (let i = 0; i < l.length; i++) out.push(l.charCodeAt(i));
-      out.push(LF);
-    }
+    for (let i = 0; i < l.texto.length; i++) out.push(l.texto.charCodeAt(i));
+    out.push(LF);
   }
   out.push(ESC, 0x61, 0, ESC, 0x45, 0, GS, 0x21, 0);
   out.push(ESC, 0x64, Math.max(0, Math.min(20, opts.avance ?? 4)));
@@ -251,10 +272,13 @@ export function codificarRenglones(
   return Uint8Array.from(out);
 }
 
-/** El tiquete de un pedido, listo para mandar. */
+/**
+ * El tiquete de un pedido, listo para mandar. Las 48 columnas por defecto son las de
+ * siempre (quien lo llama con el rollo del equipo pasa `cols`: 32 en la TP586).
+ */
 export function tiqueteEscPos(
   p: Pedido,
-  a: Ajustes,
+  a: AjustesPapel = {},
   opts: { cols?: number; cortar?: boolean; avance?: number } = {},
 ): Uint8Array {
   const cols = opts.cols ?? COLUMNAS_80MM;

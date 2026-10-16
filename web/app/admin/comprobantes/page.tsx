@@ -29,6 +29,7 @@ import {
 } from "@/lib/comprobantes";
 import { esVenta, formatCOP, METODOS, metodoLabel, metodoEmoji, TIPOS, tipoLabel, tipoIcon, type Pedido } from "@/lib/menu";
 import { diaNegocio } from "@/lib/precios";
+import { ajustesPapelDe } from "@/lib/papel";
 import { cobrarAction } from "@/app/pedido-actions";
 import { haySesion } from "@/lib/sesion";
 
@@ -138,6 +139,9 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
   const sinMetodo = filtrados.filter((p) => p.pago === "pagado" && esVenta(p) && !p.metodoPago).length;
   const csvHref = queryDe(f, {}, "/admin/comprobantes/csv");
   const url = (cambios: Partial<Filtros>) => queryDe(f, cambios);
+  /* El WhatsApp de cada fila dice lo mismo que el papel. Sin el logo: el texto no lo
+     usa, y con 100 filas por página no tiene por qué viajar en ningún lado. */
+  const ajustesPapel = ajustesPapelDe(cat.ajustes);
   const conArchivo = (u: string) => `${u}${u.includes("?") ? "&" : "?"}archivo=1`;
   const etiquetaMes = (mes: string) => meses.find((m) => m.valor === mes)?.etiqueta ?? mes;
   const etiquetaRango =
@@ -501,7 +505,7 @@ export default async function ComprobantesPage({ searchParams }: { searchParams:
           <ul className="cbtes__lista">
             {d.pedidos.map((p) => {
               const sit = situacionDe(p);
-              const wa = waComprobanteHref(p, cat.ajustes);
+              const wa = waComprobanteHref(p, ajustesPapel);
               const quien = p.cliente || p.referencia || p.direccion || tipoLabel[p.tipo];
               const devueltoOtroDia = p.devolucion?.fecha && diaNegocio(p.devolucion.fecha) !== d.dia;
               return (

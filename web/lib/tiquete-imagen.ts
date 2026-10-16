@@ -15,12 +15,13 @@
  * interpretar. Y la misma imagen sirve para descargar, para WhatsApp y para verla
  * en pantalla, así que lo que se ve es exactamente lo que sale.
  *
- * Solo corre en el navegador (usa <canvas>). Es un módulo puro: recibe el pedido, los
- * ajustes y el logo ya cargado, y devuelve el canvas. Nada de React aquí dentro.
+ * Solo corre en el navegador (usa <canvas>). Es un módulo puro: recibe el papel ya
+ * decidido (lib/papel.ts, el mismo de las otras tres salidas) y el logo ya cargado, y
+ * devuelve el canvas. Nada de React aquí dentro.
  */
 
-import { formatCOP, metodoLabel, tipoLabel, type Ajustes, type Pedido } from "./menu";
-import { cuentaImpresa } from "./precios";
+import { formatCOP } from "./menu";
+import { CAJA_LOGO, type Papel } from "./papel";
 import { ROLLO_POR_DEFECTO, ROLLOS, type Rollo } from "./rollo";
 
 /**
@@ -54,40 +55,38 @@ function geometria(rollo: Rollo): Geo {
 /** Puntos del cabezal del rollo (576 en 80 mm, 384 en 58 mm). */
 export const puntosDe = (rollo: Rollo) => ROLLOS[rollo].puntos;
 
-const PARTES = new Intl.DateTimeFormat("es-CO", {
-  timeZone: "America/Bogota",
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-export function fechaTiquete(iso: string): string {
-  const p: Record<string, string> = {};
-  for (const x of PARTES.formatToParts(new Date(iso))) p[x.type] = x.value;
-  return `${p.day}/${p.month}/${p.year} · ${p.hour}:${p.minute}`;
-}
-
 /* Las fuentes del sitio si están cargadas; si no, las del sistema. Un cabezal térmico
-   no sabe de Fraunces, pero la imagen se hace en el navegador, donde sí existen. */
+   no sabe de Fraunces, pero la imagen se hace en el navegador, donde sí existen. Los
+   nombres de familia son los LITERALES que declara el CSS: cambiarlos haría que la
+   imagen cayera en silencio a Segoe UI o Georgia. */
 const CUERPO = '"Manrope", "Segoe UI", system-ui, -apple-system, Arial, sans-serif';
-const TITULO = '"Fraunces", "Georgia", "Times New Roman", serif';
+const DISPLAY = '"Fraunces", "Georgia", "Times New Roman", serif';
 
 type Ctx = CanvasRenderingContext2D;
 
-/** Parte un texto en líneas que quepan en `ancho` con la fuente ya puesta en `ctx`. */
+/**
+ * Parte un texto en líneas que quepan en `ancho` con la fuente ya puesta en `ctx`.
+ * Una palabra que no cabe sola (una URL, la clave del Wi-Fi) se parte por letras: antes
+ * quedaba entera en su línea y el papel la cortaba por los dos lados.
+ */
 function partir(ctx: Ctx, texto: string, ancho: number): string[] {
-  const palabras = texto.split(/\s+/).filter(Boolean);
   const lineas: string[] = [];
   let actual = "";
-  for (const w of palabras) {
+  for (const w of texto.split(/\s+/).filter(Boolean)) {
     const prueba = actual ? `${actual} ${w}` : w;
-    if (ctx.measureText(prueba).width <= ancho || !actual) actual = prueba;
-    else {
-      lineas.push(actual);
-      actual = w;
+    if (ctx.measureText(prueba).width <= ancho) {
+      actual = prueba;
+      continue;
     }
+    if (actual) lineas.push(actual);
+    let resto = Array.from(w);
+    while (resto.length > 1 && ctx.measureText(resto.join("")).width > ancho) {
+      let n = resto.length - 1;
+      while (n > 1 && ctx.measureText(resto.slice(0, n).join("")).width > ancho) n--;
+      lineas.push(resto.slice(0, n).join(""));
+      resto = resto.slice(n);
+    }
+    actual = resto.join("");
   }
   if (actual) lineas.push(actual);
   return lineas;
@@ -114,11 +113,17 @@ function hebra(ctx: Ctx, g: Geo, y: number, corta = false): number {
   return y + 22;
 }
 
+/** Las medidas de lo que se pueda dibujar como logo (una <img> o un lienzo). */
+export interface LogoCargado {
+  naturalWidth: number;
+  naturalHeight: number;
+}
+
 export interface EntradaTiquete {
-  pedido: Pedido;
-  ajustes: Ajustes;
+  /** El comprobante ya decidido (`papelDe`). */
+  papel: Papel;
   /** El logo ya cargado (o null si no pudo cargarse: se escribe el nombre). */
-  logo: HTMLImageElement | null;
+  logo: (CanvasImageSource & LogoCargado) | null;
   /** El rollo de la térmica. Por defecto, el del local. */
   rollo?: Rollo;
 }
@@ -128,7 +133,7 @@ export interface EntradaTiquete {
  * primero en un canvas muy alto y al final se recorta a lo que se usó, más un
  * colchón abajo para la cuchilla, que se come los últimos milímetros.
  */
-export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_DEFECTO }: EntradaTiquete): HTMLCanvasElement {
+export function dibujarTiquete({ papel, logo, rollo = ROLLO_POR_DEFECTO }: EntradaTiquete): HTMLCanvasElement {
   const g = geometria(rollo);
   const { W: ANCHO_TIQUETE, M: MARGEN, T: ANCHO_TEXTO } = g;
   const lienzo = document.createElement("canvas");
@@ -151,50 +156,72 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
     }
     ctx.textAlign = "left";
   };
+  /* "Concepto ........ valor", el valor en la primera línea. Se dibuja DESPUÉS de las
+     líneas del concepto: en el papel no se nota, pero así lo dibujado, leído en orden
+     (como lo leen las pruebas para comparar las cuatro salidas), no corta un nombre
+     largo con su precio en medio. */
   const fila = (izq: string, der: string, fuenteI: string, fuenteD = fuenteI, salto = 30) => {
     ctx.font = fuenteD;
     const wDer = ctx.measureText(der).width;
     ctx.font = fuenteI;
     const lineas = partir(ctx, izq, ANCHO_TEXTO - wDer - 16);
-    lineas.forEach((l, i) => {
+    const y0 = y + salto;
+    for (const l of lineas) {
       y += salto;
       ctx.textAlign = "left";
       ctx.font = fuenteI;
       ctx.fillText(l, MARGEN, y);
-      if (i === 0) {
-        ctx.textAlign = "right";
-        ctx.font = fuenteD;
-        ctx.fillText(der, ANCHO_TIQUETE - MARGEN, y);
-        ctx.textAlign = "left";
-      }
-    });
+    }
+    if (!lineas.length) y += salto;
+    ctx.textAlign = "right";
+    ctx.font = fuenteD;
+    ctx.fillText(der, ANCHO_TIQUETE - MARGEN, y0);
+    ctx.textAlign = "left";
+  };
+  /* RÓTULO Y VALOR ("CLIENTE ····· Ana"). Antes solo se partía el rótulo: una
+     ubicación o un nombre largos se montaban encima del rótulo y se salían por la
+     izquierda, y una dirección de domicilio era ilegible. Si no caben en una línea, el
+     rótulo va arriba y el valor debajo, partido, con sangría. */
+  const rotulo = (k: string, v: string, fuenteK: string, fuenteV: string, salto: number) => {
+    ctx.font = fuenteK;
+    const wK = ctx.measureText(k).width;
+    ctx.font = fuenteV;
+    const wV = ctx.measureText(v).width;
+    y += salto;
+    ctx.textAlign = "left";
+    ctx.font = fuenteK;
+    ctx.fillText(k, MARGEN, y);
+    if (wK + 16 + wV <= ANCHO_TEXTO) {
+      ctx.textAlign = "right";
+      ctx.font = fuenteV;
+      ctx.fillText(v, ANCHO_TIQUETE - MARGEN, y);
+      ctx.textAlign = "left";
+      return;
+    }
+    ctx.font = fuenteV;
+    for (const l of partir(ctx, v, ANCHO_TEXTO - 16)) {
+      y += salto - 4;
+      ctx.fillText(l, MARGEN + 16, y);
+    }
   };
 
-  const anulado = p.estado === "cancelado";
-  const devuelto = p.pago === "devuelto";
-
   // ── Sello de anulado: negro sobre blanco, imposible de no ver ──
-  if (anulado) {
-    const titulo = devuelto ? "DINERO DEVUELTO" : "PEDIDO ANULADO";
-    const detalle = devuelto
-      ? `Se devolvieron ${formatCOP(p.devolucion?.monto ?? p.total)}${p.devolucion?.motivo ? ` — ${p.devolucion.motivo}` : ""}. Este pedido ya no es un consumo.`
-      : `Este pedido se canceló${p.motivoCancelacion ? `: ${p.motivoCancelacion}` : ""}. No corresponde a un consumo y no debe cobrarse.`;
+  if (papel.sello) {
     const y0 = y;
+    ctx.font = `500 21px ${CUERPO}`;
+    const lineasDet = partir(ctx, papel.sello.detalle, ANCHO_TEXTO - 32);
     ctx.font = `800 30px ${CUERPO}`;
-    const lineasDet = (() => {
-      ctx.font = `500 21px ${CUERPO}`;
-      return partir(ctx, detalle, ANCHO_TEXTO - 32);
-    })();
-    const alto = 20 + 36 + lineasDet.length * 26 + 18;
+    const lineasTit = partir(ctx, papel.sello.titulo, ANCHO_TEXTO - 16);
+    const alto = 20 + lineasTit.length * 36 + lineasDet.length * 26 + 18;
     ctx.lineWidth = 4;
     ctx.strokeStyle = "#000";
     ctx.strokeRect(MARGEN, y0, ANCHO_TEXTO, alto);
     y = y0 + 8;
-    centro(titulo, `800 30px ${CUERPO}`, 36);
+    centro(papel.sello.titulo, `800 30px ${CUERPO}`, 36);
+    ctx.font = `500 21px ${CUERPO}`;
+    ctx.textAlign = "center";
     for (const l of lineasDet) {
       y += 26;
-      ctx.font = `500 21px ${CUERPO}`;
-      ctx.textAlign = "center";
       ctx.fillText(l, ANCHO_TIQUETE / 2, y);
     }
     ctx.textAlign = "left";
@@ -202,24 +229,21 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
   }
 
   // ── Logo (o el nombre, si el logo no cargó) ──
-  if (logo && logo.naturalWidth > 0) {
-    const w = 330;
-    const h = Math.round((logo.naturalHeight / logo.naturalWidth) * w);
+  /* El logo ENCAJA en su caja: el de la casa (640×274) entra a lo ancho como siempre;
+     uno cuadrado entra a lo alto, en vez de salir de 33 mm de alto. */
+  if (logo && logo.naturalWidth > 0 && logo.naturalHeight > 0) {
+    const s = Math.min(CAJA_LOGO.ancho / logo.naturalWidth, CAJA_LOGO.alto / logo.naturalHeight);
+    const w = Math.round(logo.naturalWidth * s);
+    const h = Math.round(logo.naturalHeight * s);
     ctx.drawImage(logo, (ANCHO_TIQUETE - w) / 2, y, w, h);
     y += h + 10;
   } else {
-    centro(a.negocio || "Papaghetti", `700 44px ${TITULO}`, 48);
+    centro(papel.cabecera.nombre, `700 44px ${DISPLAY}`, 48);
     y += 6;
   }
 
   // ── Datos del negocio ──
-  const datos = [
-    a.razonSocial,
-    a.nit ? `NIT ${a.nit}` : "",
-    a.direccion,
-    a.telefonoLocal || a.whatsapp ? `Tel. ${a.telefonoLocal || a.whatsapp}` : "",
-  ].filter(Boolean) as string[];
-  for (const d of datos) centro(d, `500 20px ${CUERPO}`, 25);
+  for (const d of papel.cabecera.datos) centro(d, `500 20px ${CUERPO}`, 25);
   y += 14;
 
   y = hebra(ctx, g, y);
@@ -227,36 +251,34 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
   // ── Título + número ──
   // Lado a lado si caben; si no (58 mm con un número largo), el número baja.
   y += 8;
-  const numero = `N° ${p.consecutivo ?? p.id}`;
   ctx.font = `700 22px ${CUERPO}`;
-  const wTit = ctx.measureText("COMPROBANTE DE CONSUMO").width;
-  ctx.font = `700 34px ${TITULO}`;
-  const wNum = ctx.measureText(numero).width;
+  const wTit = ctx.measureText(papel.titulo).width;
+  ctx.font = `700 34px ${DISPLAY}`;
+  const wNum = ctx.measureText(papel.numero).width;
   ctx.font = `700 22px ${CUERPO}`;
   ctx.textAlign = "left";
-  ctx.fillText("COMPROBANTE DE CONSUMO", MARGEN, y + 22);
+  ctx.fillText(papel.titulo, MARGEN, y + 22);
   if (wTit + 16 + wNum > ANCHO_TEXTO) y += 34;
-  ctx.font = `700 34px ${TITULO}`;
+  ctx.font = `700 34px ${DISPLAY}`;
   ctx.textAlign = "right";
-  ctx.fillText(numero, ANCHO_TIQUETE - MARGEN, y + 26);
+  ctx.fillText(papel.numero, ANCHO_TIQUETE - MARGEN, y + 26);
   ctx.textAlign = "left";
   y += 44;
 
-  // ── Meta ──
+  // ── Meta: fecha, servicio y los datos del cliente que se muestran ──
   const meta: [string, string][] = [
-    ["FECHA", fechaTiquete(p.creadoEn)],
-    ["SERVICIO", tipoLabel[p.tipo]],
+    ["FECHA", papel.fecha],
+    ["SERVICIO", papel.servicio],
+    ...papel.cliente.map((d): [string, string] => [d.k.toUpperCase(), d.v]),
   ];
-  if (p.referencia) meta.push(["UBICACIÓN", p.referencia]);
-  if (p.cliente) meta.push(["CLIENTE", p.cliente]);
-  for (const [k, v] of meta) fila(k, v, `700 18px ${CUERPO}`, `600 21px ${CUERPO}`, 28);
+  for (const [k, v] of meta) rotulo(k, v, `700 18px ${CUERPO}`, `600 21px ${CUERPO}`, 28);
   y += 14;
 
   y = hebra(ctx, g, y, true);
 
   // ── Renglones ──
   y += 6;
-  const cuenta = cuentaImpresa(p, a.impuestoPct);
+  const cuenta = papel.cuenta;
   for (const l of cuenta.lineas) {
     const cant = l.cantidad > 1 ? `${l.cantidad}× ` : "";
     fila(`${cant}${l.nombre}`, formatCOP(l.importe), `800 24px ${CUERPO}`, `800 24px ${CUERPO}`, 32);
@@ -269,9 +291,9 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
     }
     y += 6;
   }
-  if (p.notas) {
+  if (papel.nota) {
     ctx.font = `600 19px ${CUERPO}`;
-    for (const s of partir(ctx, `Nota: ${p.notas}`, ANCHO_TEXTO)) {
+    for (const s of partir(ctx, `Nota: ${papel.nota}`, ANCHO_TEXTO)) {
       y += 24;
       ctx.fillText(s, MARGEN, y);
     }
@@ -282,14 +304,13 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
 
   // ── Sumas ── (de cuentaImpresa: la tarifa congelada en el pedido)
   for (const [k, v] of cuenta.sumas) fila(k, formatCOP(v), `500 21px ${CUERPO}`, `700 21px ${CUERPO}`, 28);
-  const total = cuenta.total;
 
   // ── TOTAL ──
   y += 16;
   ctx.fillRect(MARGEN, y, ANCHO_TEXTO, 3);
   y += 6;
-  fila("TOTAL", formatCOP(total), `800 26px ${CUERPO}`, `800 40px ${TITULO}`, 44);
-  if (anulado) {
+  fila("TOTAL", formatCOP(cuenta.total), `800 26px ${CUERPO}`, `800 40px ${DISPLAY}`, 44);
+  if (papel.anulado) {
     // Tachado: el total sigue ahí para que se lea, pero no vale.
     const tachado = Math.min(220, ANCHO_TEXTO * 0.5);
     ctx.fillRect(ANCHO_TIQUETE - MARGEN - tachado, y - 14, tachado, 4);
@@ -305,27 +326,20 @@ export function dibujarTiquete({ pedido: p, ajustes: a, logo, rollo = ROLLO_POR_
   }
 
   // ── Pago ──
-  const pago = devuelto
-    ? "DEVUELTO"
-    : p.pago === "pagado"
-      ? p.metodoPago
-        ? metodoLabel[p.metodoPago]
-        : "Pagado"
-      : "PENDIENTE";
-  fila("PAGO", pago, `700 18px ${CUERPO}`, `800 22px ${CUERPO}`, 30);
+  fila("PAGO", papel.pago, `700 18px ${CUERPO}`, `800 22px ${CUERPO}`, 30);
   y += 16;
 
   y = hebra(ctx, g, y);
 
-  // ── Pie ──
+  // ── Pie: la nota legal (fija), las líneas del dueño y el cierre ──
   y += 4;
-  centro(
-    "Documento interno de control. No es factura electrónica de venta ni documento equivalente P.O.S.",
-    `500 17px ${CUERPO}`,
-    22,
-  );
+  centro(papel.pie.legal, `500 17px ${CUERPO}`, 22);
+  if (papel.pie.extra.length) {
+    y += 8;
+    for (const e of papel.pie.extra) centro(e, `500 19px ${CUERPO}`, 24);
+  }
   y += 12;
-  centro("¡Gracias por venir!", `700 26px ${TITULO}`, 30);
+  centro(papel.pie.cierre, `700 26px ${DISPLAY}`, 30);
 
   // Colchón para la cuchilla: se come los últimos milímetros.
   y += 60;
@@ -445,12 +459,166 @@ export function dibujarCalibracion(rollo: Rollo = ROLLO_POR_DEFECTO): HTMLCanvas
   return binarizar(c);
 }
 
-/** Carga una imagen y resuelve con ella, o con null si no se pudo. Nunca rechaza. */
-export function cargarImagen(src: string): Promise<HTMLImageElement | null> {
+/**
+ * Carga una imagen y resuelve con ella, o con null si no se pudo. Nunca rechaza, y
+ * nunca se queda esperando: sin tiempo límite, un logo que no respondía dejaba el
+ * botón en "Preparando…" para siempre. Una imagen de otro origen se pide con CORS:
+ * cargada sin él "ensucia" el lienzo y después no se puede ni descargar ni imprimir
+ * (getImageData lanza error). Si el otro servidor no lo permite, falla limpio y el
+ * papel lleva el nombre escrito.
+ */
+export function cargarImagen(src: string, tiempoMs = 4000): Promise<HTMLImageElement | null> {
   return new Promise((res) => {
-    const img = new Image();
-    img.onload = () => res(img);
-    img.onerror = () => res(null);
-    img.src = src;
+    let listo = false;
+    const fin = (v: HTMLImageElement | null) => {
+      if (listo) return;
+      listo = true;
+      clearTimeout(reloj);
+      res(v);
+    };
+    const reloj = setTimeout(() => fin(null), tiempoMs);
+    try {
+      const img = new Image();
+      img.onload = () => fin(img);
+      img.onerror = () => fin(null);
+      if (/^https?:\/\//i.test(src) && typeof location !== "undefined" && !src.startsWith(location.origin)) {
+        img.crossOrigin = "anonymous";
+      }
+      img.src = src;
+    } catch {
+      fin(null);
+    }
   });
+}
+
+/* ───────────────────────── El logo propio: del archivo al papel ───────────────────────── */
+
+/** El tamaño al que se guarda el logo: el doble de su caja en el papel (nítido en pantalla y en 80 mm). */
+export const LOGO_GUARDADO = { ancho: CAJA_LOGO.ancho * 2, alto: CAJA_LOGO.alto * 2 } as const;
+
+/**
+ * DE COLOR A TINTA, como qa-logo-bn.mjs hizo con el logo de la casa: por DISTANCIA AL
+ * FONDO, no por luminancia. La luminancia es la trampa evidente y es la equivocada: un
+ * naranja es un color CLARO, y pasado a gris salía casi blanco y desaparecía del papel.
+ * Lo que hay que medir es cuánta tinta hay, o sea cuánto se aleja cada píxel del color
+ * del fondo (el de las esquinas; un logo transparente ya llega pintado sobre blanco). El
+ * 1,25 empuja los medios tonos al negro: una térmica no hace grises finos.
+ *
+ * Recibe RGBA y devuelve un gris por píxel: 0 = tinta, 255 = papel. Pura, sin DOM.
+ */
+export function tintaDeLogo(rgba: Uint8ClampedArray | Uint8Array, ancho: number, alto: number): Uint8ClampedArray {
+  const n = ancho * alto;
+  const gris = new Uint8ClampedArray(n).fill(255);
+  if (!n) return gris;
+  const esquinas = [0, ancho - 1, (alto - 1) * ancho, n - 1].map((i) => i * 4);
+  const mediana = (c: number) => {
+    const v = esquinas.map((p) => rgba[p + c]).sort((a, b) => a - b);
+    return (v[1] + v[2]) / 2;
+  };
+  const fondo = [mediana(0), mediana(1), mediana(2)];
+  const dist = new Float32Array(n);
+  let dmax = 0;
+  for (let i = 0; i < n; i++) {
+    const p = i * 4;
+    const d = Math.hypot(rgba[p] - fondo[0], rgba[p + 1] - fondo[1], rgba[p + 2] - fondo[2]);
+    dist[i] = d;
+    if (d > dmax) dmax = d;
+  }
+  /* Una imagen sin dibujo (todo del color del fondo, o casi) no tiene tinta que sacar:
+     normalizar su ruido lo volvería un manchón negro. */
+  if (dmax < 24) return gris;
+  for (let i = 0; i < n; i++) gris[i] = 255 - Math.min(255, (dist[i] / dmax) * 255 * 1.25);
+  return gris;
+}
+
+/** El rectángulo que ocupa la tinta (gris por debajo del umbral), o null si no hay. */
+export function cajaDeTinta(
+  gris: Uint8ClampedArray,
+  ancho: number,
+  alto: number,
+  umbral = 150,
+): { x: number; y: number; w: number; h: number } | null {
+  let x0 = ancho, y0 = alto, x1 = -1, y1 = -1;
+  for (let y = 0; y < alto; y++) {
+    for (let x = 0; x < ancho; x++) {
+      if (gris[y * ancho + x] < umbral) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+/**
+ * EL LOGO DEL DUEÑO, LISTO PARA EL PAPEL: sobre blanco → a tinta → recorte de los
+ * bordes vacíos → encaje en LOGO_GUARDADO → umbral → PNG. Sale en blanco y negro
+ * puros, así que lo que se ve en Ajustes es lo que quema el cabezal (y pesa poco: un PNG
+ * de dos colores se comprime muy bien).
+ *
+ * No sirve ImageUpload para esto: exporta JPEG (los bordes del JPEG son motas después
+ * del umbral) y no pinta fondo, así que un PNG transparente quedaba como un bloque negro.
+ *
+ * `umbral` decide cuánta tinta queda: más alto, trazo más grueso. Devuelve null si la
+ * imagen no tiene dibujo.
+ */
+export function prepararLogo(
+  fuente: CanvasImageSource,
+  anchoFuente: number,
+  altoFuente: number,
+  umbral = 150,
+  caja: { ancho: number; alto: number } = LOGO_GUARDADO,
+): { dataUrl: string; ancho: number; alto: number } | null {
+  if (!(anchoFuente > 0 && altoFuente > 0)) return null;
+  // 1. Sobre blanco, a un tamaño de trabajo razonable (más es solo memoria).
+  const k = Math.min(1, 1600 / Math.max(anchoFuente, altoFuente));
+  const w = Math.max(1, Math.round(anchoFuente * k));
+  const h = Math.max(1, Math.round(altoFuente * k));
+  const trabajo = document.createElement("canvas");
+  trabajo.width = w;
+  trabajo.height = h;
+  const t = trabajo.getContext("2d", { willReadFrequently: true })!;
+  t.fillStyle = "#fff";
+  t.fillRect(0, 0, w, h);
+  t.drawImage(fuente, 0, 0, w, h);
+  const img = t.getImageData(0, 0, w, h);
+  // 2. A tinta (en gris todavía: el encaje suaviza mejor sobre gris que sobre dos colores).
+  const gris = tintaDeLogo(img.data, w, h);
+  const borde = cajaDeTinta(gris, w, h, umbral);
+  if (!borde) return null;
+  for (let i = 0; i < gris.length; i++) {
+    const p = i * 4;
+    img.data[p] = img.data[p + 1] = img.data[p + 2] = gris[i];
+    img.data[p + 3] = 255;
+  }
+  t.putImageData(img, 0, 0);
+  // 3. Recorte (con un margen de 2 px) y encaje, sin agrandar: agrandar solo inventa bordes.
+  const m = 2;
+  const cx = Math.max(0, borde.x - m);
+  const cy = Math.max(0, borde.y - m);
+  const cw = Math.min(w - cx, borde.w + m * 2);
+  const ch = Math.min(h - cy, borde.h + m * 2);
+  const s = Math.min(1, caja.ancho / cw, caja.alto / ch);
+  const fw = Math.max(1, Math.round(cw * s));
+  const fh = Math.max(1, Math.round(ch * s));
+  const final = document.createElement("canvas");
+  final.width = fw;
+  final.height = fh;
+  const f = final.getContext("2d", { willReadFrequently: true })!;
+  f.fillStyle = "#fff";
+  f.fillRect(0, 0, fw, fh);
+  f.imageSmoothingEnabled = true;
+  f.imageSmoothingQuality = "high";
+  f.drawImage(trabajo, cx, cy, cw, ch, 0, 0, fw, fh);
+  // 4. Umbral: blanco y negro puros, como lo quema el cabezal.
+  const fin = f.getImageData(0, 0, fw, fh);
+  for (let i = 0; i < fin.data.length; i += 4) {
+    const v = fin.data[i] < umbral ? 0 : 255;
+    fin.data[i] = fin.data[i + 1] = fin.data[i + 2] = v;
+    fin.data[i + 3] = 255;
+  }
+  f.putImageData(fin, 0, 0);
+  return { dataUrl: final.toDataURL("image/png"), ancho: fw, alto: fh };
 }

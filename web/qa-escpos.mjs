@@ -6,7 +6,8 @@
 const { rasterEscPos, trabajoEscPos, trocear } = await import("./lib/escpos.ts");
 const { ascii, fila, partir, armarTiquete, codificarRenglones, tiqueteEscPos, pruebaTextoEscPos } = await import("./lib/tiquete-escpos.ts");
 let ok = 0, mal = 0;
-const eq = (n, a, b) => { const c = JSON.stringify(a) === JSON.stringify(b); c ? ok++ : mal++; console.log(`  ${c ? "✅" : "❌"} ${n}${c ? "" : `  (dio ${JSON.stringify(a)}, esperaba ${JSON.stringify(b)})`}`); };
+// El 4º argumento es un detalle que se imprime solo si falla (antes se ignoraba).
+const eq = (n, a, b, d) => { const c = JSON.stringify(a) === JSON.stringify(b); c ? ok++ : mal++; console.log(`  ${c ? "✅" : "❌"} ${n}${c ? "" : `  (dio ${JSON.stringify(a)}, esperaba ${JSON.stringify(b)})${d === undefined ? "" : ` · ${typeof d === "string" ? d : JSON.stringify(d)}`}`}`); };
 const hex = (a) => [...a].map((b) => b.toString(16).padStart(2, "0")).join(" ");
 
 /** Un bitmap RGBA de 576 de ancho: fila 0 toda negra, fila 1 alternando negro/blanco. */
@@ -131,6 +132,164 @@ eq("y nada en ella pasa de 32 columnas (16 en doble)", pr58.every((l) => l.t.len
 const bmp58 = { width: 384, height: 2, data: new Uint8ClampedArray(384 * 2 * 4).fill(255) };
 eq("un raster de 384 puntos va a 48 bytes por fila", hex(rasterEscPos(bmp58).subarray(4, 6)), "30 00");
 eq("58 mm: el TOTAL en doble llena sus 16 columnas", t58.find((l) => l.t.startsWith("TOTAL"))?.t, "TOTAL" + " ".repeat(16 - 5 - 7) + "$75.600");
+
+console.log("\n═══ F3 · ascii: ordinales y tabuladores ═══");
+eq("Nº y º/ª (se teclean en las direcciones)", [ascii("Cra 7 Nº 20-15, 2º piso"), ascii("N.º 4, 1ª etapa")], ["Cra 7 No. 20-15, 2o piso", "No. 4, 1a etapa"]);
+eq("un tabulador es un espacio (antes pegaba las palabras)", ascii("Tab\taquí"), "Tab aqui");
+eq("y los espacios de dentro no se tocan (el relleno de las columnas)", ascii("Consumo       $34.400"), "Consumo       $34.400");
+
+console.log("\n═══ F3 · EL PAPEL DE HOY, EN TEXTO (dorado, 32 columnas) ═══");
+/* Sin configurar nada, el tiquete de texto de la TP586 sale como siempre: mismo orden,
+   mismas palabras. Cambia solo lo que se arregló a propósito: la fecha lleva el mismo
+   separador que las otras salidas ("-", que es el "·" en ASCII). */
+/** "concepto ..... valor" a 32 columnas: la regla del papel, escrita aparte del código que se prueba. */
+const a32 = (izq, der) => izq + " ".repeat(32 - izq.length - der.length) + der;
+const DORADO_32 = [
+  "PAPAGHETTI",
+  "NIT 901.234.567-8",
+  "Cra 7 # 20-15, Pereira",
+  "Tel. 606 333 4455",
+  "-".repeat(32),
+  "COMPROBANTE DE CONSUMO",
+  "No. 7",
+  "-".repeat(32),
+  "Fecha: 12/09/2026 - 14:03",
+  "Servicio: En el local",
+  "Ubicacion: Mesa 4",
+  "Cliente: Nandu Perez",
+  "-".repeat(32),
+  "2x Nido Carbonara con un nombre",
+  "larguisimo para forzar el salto",
+  a32("de linea", "$68.800"),
+  "   con Pollo, papa criolla,",
+  "   queso",
+  a32("Limonada", "$6.000"),
+  "",
+  "Nota: Sin cebolla, por favor;",
+  "alergico",
+  "-".repeat(32),
+  a32("Consumo", "$74.800"),
+  a32("Descuento", "-$4.800"),
+  a32("Impuesto (8%)", "$5.600"),
+  "TOTAL" + " ".repeat(16 - 5 - 7) + "$75.600",
+  "Pago: Nequi",
+  "-".repeat(32),
+  "Documento interno de control. No",
+  "es factura electronica de venta",
+  "ni documento equivalente P.O.S.",
+  "Gracias por venir!",
+];
+eq("dorado: línea por línea", t58.map((l) => l.t), DORADO_32);
+
+console.log("\n═══ F3 · A LA MEDIDA · texto ESC/POS ═══");
+const { papelDe, piezasPapel } = await import("./lib/papel.ts");
+const AJ3 = {
+  ...ajustes, whatsapp: "573001112233", razonSocial: "Pasta & Ñoquis S.A.S. — Pereira",
+  comprobante: {
+    mensajeCierre: "¡Vuelve pronto, enredado! 🍝",
+    lineasPie: ["Síguenos en @papaghetti.pereira · ¡gracias!", "W".repeat(70), "Wi-Fi: Papaghetti · Clave: Ñandú2026", "una cuarta que NO sale"],
+    datosCliente: { cliente: false, ubicacion: true, telefono: true },
+  },
+};
+const pF3 = { ...pedido, telefono: "3001234567" };
+const plano = (Lx) => Lx.map((l) => l.t).join(" ").replace(/\s+/g, " ");
+const sb = (s) => s.replace(/\s+/g, "").toLowerCase(); // sin espacios ni mayúsculas: insensible a cortes y relleno
+for (const cols of [32, 48]) {
+  const bytes = tiqueteEscPos(pF3, AJ3, { cols }), Lc = leer(bytes), tx = plano(Lc);
+  eq(`${cols} col · solo ASCII (¡, tildes, eñe, raya, emoji)`, [...bytes].every((b) => b < 0x80), true);
+  eq(`${cols} col · nada pasa del ancho (la mitad en doble)`, Lc.every((l) => l.t.length <= (l.tam === 2 ? cols / 2 : cols)), true, Lc.filter((l) => l.t.length > (l.tam === 2 ? cols / 2 : cols)).map((l) => l.t));
+  eq(`${cols} col · las filas con valor a la derecha miden exactamente el ancho`, Lc.filter((l) => l.tam !== 2 && / {2,}\$\S+$/.test(l.t)).every((l) => l.t.length === cols), true);
+  eq(`${cols} col · cierre propio, en ASCII y sin el emoji`, Lc.some((l) => l.t === "Vuelve pronto, enredado!"), true);
+  eq(`${cols} col · ya no dice Gracias por venir`, /Gracias por venir/.test(tx), false);
+  eq(`${cols} col · líneas extra (y la palabra imposible, partida)`, tx.includes("Siguenos en @papaghetti.pereira - gracias!") && Lc.some((l) => l.t === "W".repeat(cols)), true);
+  eq(`${cols} col · la clave sale sin eñe (por eso el editor avisa)`, sb(tx).includes(sb("Clave: Nandu2026")), true);
+  eq(`${cols} col · como mucho 3`, /una cuarta/.test(tx), false);
+  eq(`${cols} col · razón social sin eñe ni raya`, tx.includes("Pasta & Noquis S.A.S. - Pereira"), true);
+  eq(`${cols} col · cliente oculto / ubicación y teléfono visibles`, [Lc.some((l) => /^Cliente:/.test(l.t)), Lc.some((l) => l.t === "Ubicacion: Mesa 4"), Lc.some((l) => l.t === "Telefono: 300 123 4567")], [false, true, true]);
+  eq(`${cols} col · título y nota legal intactos`, Lc.filter((l) => l.t === "COMPROBANTE DE CONSUMO").length === 1 && tx.includes("No es factura electronica de venta ni documento equivalente P.O.S."), true);
+  eq(`${cols} col · sin el número de ejemplo (sale el teléfono del local)`, [/3001112233|300 111 2233/.test(tx), tx.includes("Tel. 606 333 4455")], [false, true]);
+  eq(`${cols} col · y sin teléfono del local, con el WhatsApp de ejemplo, no hay 'Tel.'`, /Tel\./.test(plano(leer(tiqueteEscPos(pF3, { negocio: "Papaghetti", whatsapp: "573001112233" }, { cols })))), false);
+  eq(`${cols} col · TOTAL en doble llena ${cols / 2}`, Lc.find((l) => l.t.startsWith("TOTAL"))?.t.length, cols / 2);
+  eq(`${cols} col · ninguna línea arranca con un espacio, salvo el detalle sangrado`, Lc.every((l) => !l.t.startsWith(" ") || l.t.startsWith("   ")), true, Lc.filter((l) => l.t.startsWith(" ") && !l.t.startsWith("   ")).map((l) => l.t));
+  eq(`${cols} col · ESC/POS = papel (cada pieza, en ASCII)`, piezasPapel(papelDe(pF3, AJ3)).filter((s) => !sb(tx).includes(sb(ascii(s)))), []);
+  eq(`${cols} col · sigue pesando menos de 3 KB con todo`, bytes.length < 3000, true, bytes.length);
+}
+const centradas = leer(tiqueteEscPos(pF3, { ...AJ3, comprobante: { lineasPie: ["❤️ Hecho con amor ❤️"] } }, { cols: 32 }));
+eq("una línea centrada no arranca con espacio aunque se le quite un emoji", centradas.some((l) => l.t === "Hecho con amor"), true);
+const anuladoEn = (cols) => leer(tiqueteEscPos({ ...pedido, estado: "cancelado", motivoCancelacion: "cliente se fue" }, ajustes, { cols }));
+eq("el sello va ANTES que el nombre, como en la imagen y la pantalla, y en 58 mm cabe en UNA línea doble", (() => {
+  const Lx = anuladoEn(32);
+  return [Lx[0].t, Lx[0].tam, Lx.findIndex((l) => l.t === "PAPAGHETTI") > 2];
+})(), ["PEDIDO ANULADO", 2, true]);
+eq("en 80 mm, con sus asteriscos de siempre", anuladoEn(48)[0].t, "*** PEDIDO ANULADO ***");
+const { lineasImpresas, renglonesDePapel, comoSaleEnTexto } = await import("./lib/tiquete-escpos.ts");
+eq("la vista previa de Ajustes lee las mismas líneas que la impresora", lineasImpresas(renglonesDePapel(papelDe(pF3, AJ3), 32), 32).map((l) => l.texto), leer(tiqueteEscPos(pF3, AJ3, { cols: 32 })).map((l) => l.t));
+eq("comoSaleEnTexto: lo que el editor muestra bajo una línea al pie", comoSaleEnTexto("Wi-Fi: Papaghetti · Clave: Ñandú2026 🍝"), "Wi-Fi: Papaghetti - Clave: Nandu2026");
+
+console.log("\n═══ F3 · LA IMAGEN DE LA TÉRMICA (lienzo de mentira, sin navegador) ═══");
+/* Un contexto 2D falso que anota lo que se dibuja. measureText cuenta 11 unidades por
+   letra: no es la fuente real, pero alcanza para comprobar que nada se pasa del ancho. */
+const trazos = [], dibujos = [];
+const ctx2d = new Proxy({}, {
+  get: (o, k) => k === "measureText" ? (s) => ({ width: [...String(s)].length * 11 })
+    : k === "fillText" ? (s) => trazos.push(String(s))
+    : k === "drawImage" ? (img, ...r) => dibujos.push({ img, r })
+    : k in o ? o[k] : () => {},
+  set: (o, k, v) => ((o[k] = v), true),
+});
+globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }) };
+const { dibujarTiquete, cargarImagen, tintaDeLogo, cajaDeTinta } = await import("./lib/tiquete-imagen.ts");
+const ANCHO = { 58: 456, 80: 532 }; // ancho útil de texto, en unidades lógicas
+const pintar = (p, a, rollo, logo = null) => {
+  trazos.length = 0; dibujos.length = 0;
+  dibujarTiquete({ papel: papelDe(p, a), logo, rollo });
+  return trazos.join(" ").replace(/\s+/g, " ");
+};
+pintar(pedido, ajustes, 58);
+eq("imagen sin configurar: termina en ¡Gracias por venir!", trazos.at(-1), "¡Gracias por venir!");
+eq("y sin logo cargado escribe el nombre arriba", trazos[0], "Papaghetti");
+for (const rollo of [58, 80]) {
+  const img = pintar(pF3, AJ3, rollo);
+  eq(`imagen ${rollo} · cierre propio / sin el de fábrica`, [img.includes("¡Vuelve pronto, enredado!"), img.includes("¡Gracias por venir!")], [true, false]);
+  eq(`imagen ${rollo} · sin cliente (apagado)`, [img.includes("Ñandú Pérez"), trazos.includes("CLIENTE")], [false, false]);
+  eq(`imagen ${rollo} · título fijo, una vez`, trazos.filter((t) => t === "COMPROBANTE DE CONSUMO").length, 1);
+  eq(`imagen ${rollo} · la misma línea extra que el WhatsApp y el texto`, img.includes("Síguenos en @papaghetti.pereira · ¡gracias!"), true);
+  eq(`imagen ${rollo} · nada se pasa del ancho (ni la palabra de 70 letras)`, trazos.filter((t) => [...t].length * 11 > ANCHO[rollo]), []);
+  eq(`imagen ${rollo} · imagen = papel (cada pieza)`, piezasPapel(papelDe(pF3, AJ3)).filter((s) => !sb(img).includes(sb(s))), []);
+}
+const valorLargo = pintar({ ...pF3, referencia: "Mesa del ventanal grande, junto a la puerta que da al parqueadero" }, AJ3, 58);
+eq("un valor largo no se monta sobre su rótulo: el rótulo va solo y el valor debajo, partido", [trazos.includes("UBICACIÓN"), valorLargo.includes("Mesa del ventanal grande, junto a la puerta que da al parqueadero")], [true, true]);
+const logoFalso = { naturalWidth: 400, naturalHeight: 400 };
+pintar(pF3, AJ3, 58, logoFalso);
+const dib = dibujos.find((d) => d.img === logoFalso);
+eq("con logo se dibuja el logo, no el nombre", [Boolean(dib), trazos.includes("Papaghetti")], [true, false]);
+eq("un logo cuadrado ENCAJA en la caja de 330×140 (antes salía de 330 de alto)", dib && [dib.r[2] <= 330, dib.r[3] <= 140, dib.r[3]], [true, true, 140]);
+pintar(pF3, AJ3, 58, { naturalWidth: 640, naturalHeight: 274 });
+const casa = dibujos.find((d) => d.img.naturalWidth === 640);
+eq("el logo de la casa sale como siempre: a lo ancho, ~330×140", casa && [Math.abs(casa.r[2] - 330) <= 4, casa.r[3] <= 140], [true, true]);
+pintar({ ...pedido, estado: "cancelado", pago: "devuelto", devolucion: { monto: 75600, motivo: "se cayó" } }, ajustes, 58);
+eq("el sello de devuelto va primero y con su motivo", [trazos[0], trazos.some((t) => t.includes("se cayó"))], ["DINERO DEVUELTO", true]);
+
+console.log("\n═══ F3 · CARGAR IMAGEN NUNCA SE QUEDA ESPERANDO ═══");
+globalThis.Image = class { set src(v) { this._src = v; } }; // una imagen que nunca responde
+const t0 = Date.now();
+const nada = await cargarImagen("/logo-que-no-responde.png", 60);
+eq("con tiempo límite resuelve null (antes: 'Preparando…' para siempre)", [nada, Date.now() - t0 < 2000], [null, true]);
+globalThis.Image = class { set src(v) { setTimeout(() => this.onerror?.(), 0); } };
+eq("y si falla, null sin lanzar", await cargarImagen("/roto.png", 1000), null);
+
+console.log("\n═══ F3 · EL LOGO PROPIO: DE COLOR A TINTA (sin navegador) ═══");
+/* Un logo de mentira de 10×6 sobre crema: una barra marrón, una naranja (clara: la
+   luminancia la borraba) y el resto fondo. */
+const W10 = 10, H6 = 6, rgba = new Uint8ClampedArray(W10 * H6 * 4);
+for (let i = 0; i < W10 * H6; i++) rgba.set([251, 241, 222, 255], i * 4);
+for (let x = 2; x <= 4; x++) for (let y = 1; y <= 4; y++) rgba.set([60, 36, 20, 255], (y * W10 + x) * 4);
+for (let x = 6; x <= 7; x++) for (let y = 2; y <= 3; y++) rgba.set([242, 165, 22, 255], (y * W10 + x) * 4);
+const gris = tintaDeLogo(rgba, W10, H6);
+eq("el fondo queda blanco y el marrón negro", [gris[0], gris[1 * W10 + 2]], [255, 0]);
+eq("el naranja también es tinta (por distancia al fondo, no por luminancia)", gris[2 * W10 + 6] < 150, true);
+eq("la caja de tinta recorta los bordes vacíos", cajaDeTinta(gris, W10, H6), { x: 2, y: 1, w: 6, h: 4 });
+eq("una imagen sin dibujo no tiene tinta (no se vuelve un manchón)", cajaDeTinta(tintaDeLogo(new Uint8ClampedArray(W10 * H6 * 4).fill(250), W10, H6), W10, H6), null);
 
 console.log(`\n═══ ${ok} ✅  ·  ${mal} ❌ ═══`);
 process.exit(mal ? 1 : 0);

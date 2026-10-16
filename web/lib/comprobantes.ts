@@ -22,12 +22,12 @@ import {
   estadoLabel,
   inicioDe,
   METODOS,
-  type Ajustes,
   type MetodoPago,
   type Pedido,
   type TipoServicio,
 } from "./menu";
-import { cuentaImpresa, diaNegocio, ZONA_NEGOCIO } from "./precios";
+import { diaNegocio, ZONA_NEGOCIO } from "./precios";
+import { papelDe, type AjustesPapel, type Papel } from "./papel";
 
 /* ───────────────────────── Situación: qué pasó con el comprobante ───────────────────────── */
 
@@ -522,40 +522,42 @@ export const nombreCsv = (r: Rango) =>
 /* ───────────────────────── El comprobante en texto (WhatsApp, portapapeles) ───────────────────────── */
 
 /**
- * EL MISMO TEXTO EN TODAS PARTES. Vivía dos veces: en el comprobante (con los avisos
- * de ANULADO / DINERO DEVUELTO) y en la caja (sin ellos): desde Pedidos se podía
- * mandar por WhatsApp un pedido anulado como si fuera un consumo válido. Una sola
- * función, la completa, y las dos pantallas la llaman.
+ * EL MISMO PAPEL, EN TEXTO. Vivía dos veces (en el comprobante, con los avisos de
+ * ANULADO / DINERO DEVUELTO, y en la caja, sin ellos) y luego como un papel aparte: sin
+ * título, sin los datos del negocio, sin el servicio ni el cliente, y con otra nota
+ * legal. Ahora sale de `papelDe`, como la imagen, la pantalla y el ESC/POS: lo que dice
+ * el tiquete impreso lo dice el WhatsApp, con su negrita (*…*) y su cursiva (_…_).
+ *
+ * Las líneas en blanco separan los bloques DE VERDAD: antes un `.filter(Boolean)` se las
+ * comía todas y el mensaje llegaba como un solo bloque apretado.
  */
-export function textoComprobante(p: Pedido, a: Partial<Pick<Ajustes, "negocio" | "impuestoPct">> = {}): string {
-  const cuenta = cuentaImpresa(p, a.impuestoPct);
-  const anulado = p.estado === "cancelado";
-  const devuelto = p.pago === "devuelto";
-  return [
-    `*${a.negocio || "Papaghetti"}*`,
-    `Comprobante N° ${p.consecutivo ?? p.id} · ${fechaCorta(p.creadoEn)} · ${horaLegible(p.creadoEn)}`,
-    devuelto
-      ? `*** DINERO DEVUELTO (${formatCOP(p.devolucion?.monto ?? p.total)}) ***`
-      : anulado
-        ? "*** PEDIDO ANULADO — NO ES UN CONSUMO ***"
-        : "",
-    "",
-    ...cuenta.lineas.flatMap((l) => [
-      `${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}   ${formatCOP(l.importe)}`,
-      l.detalle ? `   _${l.detalle}_` : "",
-    ]),
-    "",
-    ...cuenta.sumas.map(([k, v]) => `${k}: ${formatCOP(v)}`),
-    `*TOTAL: ${formatCOP(cuenta.total)}*`,
-    cuenta.nota ?? "",
-    "",
-    `Pago: ${devuelto ? "devuelto" : p.pago === "pagado" ? (p.metodoPago ? metodoLabel[p.metodoPago] : "pagado") : "PENDIENTE"}`,
-    "",
-    "Comprobante interno de control. No es factura electrónica de venta ni documento equivalente P.O.S.",
-    "¡Gracias por venir!",
-  ]
-    .filter(Boolean)
-    .join("\n");
+export function textoDePapel(papel: Papel): string {
+  const L: string[] = [];
+  if (papel.sello) L.push(`*** ${papel.sello.titulo} ***`, papel.sello.detalle, "");
+  L.push(`*${papel.cabecera.nombre}*`, ...papel.cabecera.datos, "");
+  L.push(`*${papel.titulo}* · ${papel.numero}`, `Fecha: ${papel.fecha}`, `Servicio: ${papel.servicio}`);
+  for (const d of papel.cliente) L.push(`${d.k}: ${d.v}`);
+  L.push("");
+  for (const l of papel.cuenta.lineas) {
+    L.push(`${l.cantidad > 1 ? `${l.cantidad}× ` : ""}${l.nombre}   ${formatCOP(l.importe)}`);
+    if (l.detalle) L.push(`   _${l.detalle}_`);
+  }
+  if (papel.nota) L.push(`Nota: ${papel.nota}`);
+  L.push("");
+  for (const [k, v] of papel.cuenta.sumas) L.push(`${k}: ${formatCOP(v)}`);
+  L.push(`*TOTAL: ${formatCOP(papel.cuenta.total)}*`);
+  if (papel.cuenta.nota) L.push(papel.cuenta.nota);
+  L.push(`Pago: ${papel.pago}`, "", papel.pie.legal, ...papel.pie.extra, papel.pie.cierre);
+  return L.join("\n");
+}
+
+/**
+ * El comprobante de un pedido en texto, con lo que el dueño configuró. Sin ajustes sale
+ * el papel de fábrica completo: la caja lo llamaba así y el WhatsApp perdía el nombre
+ * del negocio que hubiera en Ajustes.
+ */
+export function textoComprobante(p: Pedido, a: AjustesPapel = {}): string {
+  return textoDePapel(papelDe(p, a));
 }
 
 /** Un teléfono tal como se teclea → el número que entiende wa.me (10 dígitos = celular colombiano → 57…). */
@@ -568,7 +570,7 @@ export const waHref = (tel: string, texto: string): string =>
   `https://wa.me/${telefonoWa(tel)}?text=${encodeURIComponent(texto)}`;
 
 /** El enlace de WhatsApp del comprobante al teléfono que dejó el cliente, o null si no dejó ninguno. */
-export function waComprobanteHref(p: Pedido, a?: Partial<Pick<Ajustes, "negocio" | "impuestoPct">>): string | null {
+export function waComprobanteHref(p: Pedido, a: AjustesPapel = {}): string | null {
   if (!p.telefono || p.telefono.replace(/\D/g, "").length < 7) return null;
   return waHref(p.telefono, textoComprobante(p, a));
 }
