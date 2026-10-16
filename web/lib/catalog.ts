@@ -82,16 +82,16 @@ const slugify = (s: string) =>
 /**
  * EL CEREBRO — capa de acceso a datos del catálogo (single source of truth).
  *
- * Hoy persiste en un JSON local (data/catalog.json) para operar ya, en el local.
- * Para producción/multi-canal, activar Supabase: setear SUPABASE_URL +
- * SUPABASE_SERVICE_ROLE y reemplazar read()/write() por el adaptador
- * (esquema SQL en PLAN-MAESTRO.md §5.2 / README). La interfaz pública
- * (getCatalog / updateIngrediente / updateEnredo) NO cambia.
+ * En producción vive en Vercel Blob (un documento privado); en local, en
+ * data/catalog.json. Supabase está cableado como destino futuro (ver "DÓNDE VIVE EL
+ * CEREBRO" más abajo), pero HOY no se usa: con sus dos variables puestas, el cerebro
+ * pasaría a leer de una base vacía. La interfaz pública (getCatalog /
+ * updateIngrediente / updateEnredo) no cambia con el backend.
  */
 
 // En Vercel serverless el FS del proyecto es de solo lectura → usamos /tmp
 // (efímero) para no romper. En local, data/ persiste de verdad.
-// Persistencia real en producción = Supabase (se activa solo con las env vars).
+// Persistencia real en producción = el almacén de Vercel Blob (ver blobEnabled).
 const DATA_DIR = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), "data");
 const FILE = path.join(DATA_DIR, "catalog.json");
 
@@ -791,7 +791,7 @@ export function nombreCopia(fecha: Date = new Date()): string {
 }
 
 /**
- * ¿Estamos en Vercel SIN Supabase? Entonces el cerebro escribe en /tmp, que es
+ * ¿Estamos en Vercel SIN almacén (ni Blob ni Supabase)? Entonces el cerebro escribe en /tmp, que es
  * efímero y distinto por instancia de lambda: el pedido que entra por QR puede no
  * existir para la pantalla de cocina. No lanzamos (tumbaría el sitio público),
  * pero el panel muestra la alarma y aquí queda el rastro en los logs.
@@ -887,9 +887,9 @@ export async function estadoPersistencia(): Promise<{
 }
 if (persistenciaEnRiesgo()) {
   console.warn(
-    "[papaghetti] AVISO: corriendo en Vercel sin Supabase. El catálogo se guarda en /tmp " +
-      "(efímero y por instancia): los pedidos NO persisten. Define NEXT_PUBLIC_SUPABASE_URL " +
-      "y SUPABASE_SERVICE_ROLE.",
+    "[papaghetti] AVISO: corriendo en Vercel sin almacén. El catálogo se guarda en /tmp " +
+      "(efímero y por instancia): los pedidos NO persisten. Conecta el almacén de Vercel " +
+      "Blob al proyecto (Storage → Connect) y vuelve a desplegar.",
   );
 }
 
