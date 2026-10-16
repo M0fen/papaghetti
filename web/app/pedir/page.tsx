@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { getCatalogPublico } from "@/lib/catalog";
+import { getCatalogPublico, getSitioPublico } from "@/lib/catalog";
 import { TOPPINGS_INCLUIDOS } from "@/lib/menu";
+import { metadatosDe } from "@/lib/sitio";
 import EmplataSwitch from "../m/[mesa]/EmplataSwitch";
 import "../m/[mesa]/emplata.css";
 
@@ -14,10 +15,18 @@ import "../m/[mesa]/emplata.css";
  *
  * Server component: lee el cerebro y entrega solo lo que el cliente necesita.
  */
-export const metadata: Metadata = {
-  title: "Papaghetti · Pide aquí",
-  description: "Arma tu enredo o pide un plato de la carta. Va directo a la cocina.",
-};
+/* El título lleva el nombre del negocio; la vista previa al compartir es la misma de la
+   portada (Ajustes → Sitio → Buscadores y compartir). Este es el enlace del QR, el que más
+   se reenvía por WhatsApp: antes heredaba los textos de fábrica del layout aunque el
+   dueño hubiera cambiado los suyos. */
+export async function generateMetadata(): Promise<Metadata> {
+  const sitio = await getSitioPublico();
+  return {
+    ...metadatosDe(sitio),
+    title: `${sitio.negocio} · Pide aquí`,
+    description: "Arma tu enredo o pide un plato de la carta. Va directo a la cocina.",
+  };
+}
 
 // El menú cambia con el inventario (agotados) → siempre fresco.
 export const dynamic = "force-dynamic";

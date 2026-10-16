@@ -7464,4 +7464,174 @@ body.enreda-jugando .sticky-pedir {
    FASE 4 · SITIO (textos, enlaces, fotos, reseñas)
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* ── El sitio público: solo piezas NUEVAS, que no existen con los valores de fábrica. ── */
+
+/* La foto de portada del dueño entra SIEMPRE en el retrato 4:5 del diseño (el de la foto
+   de fábrica): una apaisada habría achatado la portada. Mientras carga, el color del
+   fondo de la portada en vez de un hueco. */
+.hero__foto--propia {
+  display: block;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  background-color: #ead7b2;
+}
+/* El teléfono se toca para llamar: área de 44 px sin engordar la fila. */
+.loc__tel {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-block: -12px;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: rgba(251, 241, 222, 0.35);
+  text-underline-offset: 4px;
+}
+.footer__redes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 18px;
+  margin-top: 10px;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+.footer__redes a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 6px;
+  color: var(--pg-oro);
+}
+.resena__fuente a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ── Ajustes → Sitio ── */
+.sitio-ajustes .adminx__pageh p { max-width: 70ch; }
+.sitio-ver { font-weight: 700; color: var(--pg-oro-ink); text-decoration: underline; text-underline-offset: 3px; }
+
+/* Cada bloque, plegado: se lee qué es y cómo está sin abrirlo. */
+.sitio-grupo { margin-top: 10px; background: rgba(255, 253, 244, 0.6); }
+.sitio-grupo > summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 12px;
+  min-height: 60px;
+  padding: 12px 46px 12px 18px;
+}
+.sitio-grupo > summary::after {
+  content: "";
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  opacity: 0.5;
+  transform: translateY(-70%) rotate(45deg);
+  transition: transform 0.2s;
+}
+.sitio-grupo[open] > summary::after { transform: translateY(-25%) rotate(225deg); }
+.sitio-grupo__tit { font-weight: 800; }
+.sitio-grupo__sub { grid-column: 1; font-size: 0.8rem; font-weight: 500; opacity: 0.62; }
+.sitio-chip {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--pg-crema-2);
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sitio-chip.is-alerta { background: rgba(200, 50, 30, 0.12); color: var(--pg-pomodoro); }
+.sitio-grupo__cuerpo { padding: 14px 18px 18px; }
+.sitio-grupo .setgrid { padding: 0; } /* el bloque ya trae su margen (ver .setgroup--details) */
+.sitio-sub { margin: 22px 0 10px; padding-top: 16px; border-top: 1px dashed rgba(30, 22, 17, 0.14); font-size: 0.95rem; }
+
+.sitio-form { display: grid; gap: 4px; }
+.sitio-campo--completo { grid-column: 1 / -1; }
+.sitio-etq { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sitio-cuenta { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sitio-cuenta.is-pasado { color: var(--pg-pomodoro); font-weight: 800; }
+.sitio-form textarea.admin-input { resize: vertical; min-height: 64px; line-height: 1.45; font-family: var(--pg-font-body); }
+.sitio-form .admin-input[aria-invalid="true"] { border-color: var(--pg-pomodoro); }
+.sitio-casilla .admin-check { min-height: 44px; }
+.sitio-casilla .admin-check input[type="checkbox"] { width: 20px; height: 20px; margin-top: 1px; }
+.sitio-casilla .admin-check em { font-size: 0.84rem; }
+.sitio-botones { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 14px; }
+.sitio-restaurar { min-height: 44px; }
+.sitio-msj {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.sitio-msj.is-ok { background: #eef7f0; color: #1d5e2e; border: 1px solid rgba(76, 154, 90, 0.4); }
+.sitio-msj.is-error { background: #fdecea; color: #8a1f12; border: 1px solid rgba(200, 50, 30, 0.35); }
+
+/* Fotos: la vista previa con la forma que tendrá en el sitio. */
+.sitio-foto__fila { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
+.sitio-foto__datos { flex: 1; min-width: 220px; display: grid; gap: 10px; }
+.sitio-foto__hoy { margin: 0; font-size: 0.92rem; }
+.imgup__preview--retrato { width: 144px; height: 180px; }
+.imgup__preview--apaisada { width: 228px; height: 120px; }
+.sitio-foto .imgup__btn { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 16px; font-size: 0.88rem; }
+.sitio-foto .imgup__acts .linkbtn { min-height: 44px; }
+
+/* Reseñas */
+.sitio-resenas { display: grid; gap: 14px; }
+.sitio-resenas__estado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--pg-crema-2);
+  border: 1px solid rgba(30, 22, 17, 0.1);
+}
+.sitio-resenas__estado.is-on { background: #eef7f0; border-color: rgba(76, 154, 90, 0.4); }
+.sitio-resenas__estado p { flex: 1; min-width: 200px; margin: 0; font-size: 0.9rem; line-height: 1.45; }
+.sitio-resenas__estado .btn { min-height: 44px; }
+.sitio-resenas__estado .sitio-msj { flex-basis: 100%; margin: 0; }
+.sitio-resenas__lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.sitio-resena {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  border-radius: 12px;
+  background: #fff;
+}
+.sitio-resena__texto { display: grid; gap: 4px; min-width: 0; font-size: 0.9rem; line-height: 1.45; }
+.sitio-resena__texto q { quotes: "«" "»"; overflow-wrap: anywhere; }
+.sitio-resena__texto small { opacity: 0.72; }
+.sitio-resena__texto a { color: var(--pg-oro-ink); font-weight: 700; }
+.sitio-resena__estrellas { color: var(--pg-oro); letter-spacing: 1px; }
+.sitio-resena form { display: grid; justify-items: end; gap: 6px; }
+.sitio-resena .btn { min-height: 44px; }
+.sitio-resenas__nueva { padding-top: 14px; border-top: 1px dashed rgba(30, 22, 17, 0.14); }
+.sitio-resenas__nueva h4 { margin: 0 0 10px; font-size: 0.95rem; }
+
+@media (max-width: 520px) {
+  /* En el celular el estado del bloque baja a su propia línea: al lado del título lo apretaba. */
+  .sitio-grupo > summary { grid-template-columns: 1fr; padding-right: 42px; }
+  .sitio-chip { grid-column: 1; grid-row: auto; justify-self: start; margin-top: 4px; }
+  .sitio-grupo__cuerpo { padding: 12px 14px 16px; }
+  .sitio-resena { flex-direction: column; }
+  .sitio-resena form { justify-items: start; }
+}
+
 /* ═══ (fin de la fase 4) ═══ */

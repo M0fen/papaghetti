@@ -11,8 +11,12 @@ const nextConfig: NextConfig = {
       {
         /* /public se sirve con max-age=0 por defecto en Vercel: el video del logo se
            revalidaba en CADA visita. Los media pesados son versionados-por-nombre →
-           immutable un año. (Si cambias el video, cámbiale el nombre de archivo.) */
-        source: "/:file*.(mp4|webm|webp|jpg)",
+           immutable un año. (Si cambias el video, cámbiale el nombre de archivo.)
+           MENOS /foto/…: esas las entrega la puerta de las fotos subidas
+           (app/foto/[...ruta]) con sus propias cabeceras, y Next no deja que una ruta
+           cambie una cabecera que ya puso esta regla. Con ella, un 404 o un tropiezo del
+           almacén salía «immutable» y el navegador guardaba la foto rota un año. */
+        source: "/:file((?!foto/).*)\\.(mp4|webm|webp|jpg)",
         headers: [
           { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
         ],
