@@ -1,5 +1,6 @@
 import { getCatalog } from "@/lib/catalog";
 import { formatCOP, TOPPINGS_INCLUIDOS } from "@/lib/menu";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
  * barra. Los números salen del catálogo de verdad, así que nunca queda desactualizada.
  */
 export default async function AyudaPage() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const cat = await getCatalog();
   const a = cat.ajustes;
 

@@ -18,10 +18,10 @@ const COOKIE = "pg_admin";
 const DURACION_MS = 8 * 60 * 60 * 1000; // 8 h de turno
 
 export { USUARIOS } from "./usuarios";
-import { USUARIOS } from "./usuarios";
+import { USUARIOS, nombreUsuario } from "./usuarios";
 
-/** Normaliza para que quepa en la cookie sin romper el separador. */
-const limpiar = (u: string) => u.replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 24);
+/** Normaliza para que quepa en la cookie sin romper el separador (sin puntos: ver nombreUsuario). */
+const limpiar = nombreUsuario;
 
 /** En local (next dev) hace falta poder entrar sin configurar nada. En producción, no. */
 const ES_DEV = process.env.NODE_ENV !== "production";
@@ -61,15 +61,30 @@ export async function usuarioSesion(): Promise<string | null> {
   if (!key) return null;
   const raw = (await cookies()).get(COOKIE)?.value;
   if (!raw) return null;
+  /* `<vence>.<usuario>.<hmac>`: el vencimiento es lo primero y la firma lo último, así
+     que se leen por los EXTREMOS. Partiendo por "." y tomando tres trozos, un nombre con
+     punto ("Sra. Luz") nunca validaba y esa persona volvía al login en cada clic. */
   const partes = raw.split(".");
   if (partes.length < 3) return null;
-  const [venceStr, usuario, mac] = partes;
+  const venceStr = partes[0];
+  const mac = partes[partes.length - 1];
+  const usuario = partes.slice(1, -1).join(".");
   const vence = Number(venceStr);
   if (!Number.isFinite(vence) || !mac) return null;
   if (vence < Date.now()) return null; // caducada
   return igual(mac, firmar(vence, key, usuario)) ? usuario : null;
 }
 
+/**
+ * ¿Hay sesión? Se pregunta en CADA página del panel, no solo en el layout.
+ *
+ * El layout cambia la página por el login cuando no hay sesión, pero en el App Router
+ * la página se arma igual, por separado, y su resultado viaja dentro del HTML. Se
+ * comprobó con un `curl` sin cookie: /admin, Menú, Cocina, Pedidos, Precios, Recetas,
+ * Inventario y el tiquete devolvían costos, recetas, inventario y pedidos con el
+ * nombre del cliente, debajo de una pantalla que decía "Contraseña". Por eso cada
+ * página empieza con `if (!(await haySesion())) return null;`, igual que /kds.
+ */
 export async function haySesion(): Promise<boolean> {
   return (await usuarioSesion()) !== null;
 }

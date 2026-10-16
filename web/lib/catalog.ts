@@ -17,7 +17,6 @@ import {
 } from "./precios";
 import {
   SEED_CATALOG,
-  SEED_AJUSTES,
   SEED_INSUMOS,
   SEED_RECETAS,
   TOPPINGS_INCLUIDOS,
@@ -50,7 +49,12 @@ import {
   type Movimiento,
   type GastoCategoria,
   type HistItem,
+  type VivoTras,
+  normalizarAjustes,
+  basesMaxDe,
+  cobroBasesDe,
 } from "./menu";
+import { USUARIOS, usuariosDe } from "./usuarios";
 
 const GRUPO: Record<Categoria, "bases" | "proteinas" | "toppings"> = {
   base: "bases",
@@ -129,10 +133,8 @@ function migrate(cat: Catalog): Catalog {
       if (!i.categoria) i.categoria = seedCat.get(i.id) ?? "otro";
     });
   }
-  // ajustes: mezcla defaults para que campos nuevos (promos/banner/…) existan
-  cat.ajustes = { ...structuredClone(SEED_AJUSTES), ...(cat.ajustes ?? {}) };
-  if (!Array.isArray(cat.ajustes.promos)) cat.ajustes.promos = structuredClone(SEED_AJUSTES.promos);
-  if (!Array.isArray(cat.ajustes.adicionales)) cat.ajustes.adicionales = [];
+  // ajustes: defaults para los campos nuevos y FORMA garantizada en las secciones anidadas
+  cat.ajustes = normalizarAjustes(cat.ajustes);
   // ingredientes previos: parStock por defecto y receta sembrada si falta
   for (const g of ["bases", "proteinas", "toppings"] as const) {
     cat[g].forEach((i) => {
@@ -373,7 +375,20 @@ async function writeFile(cat: Catalog): Promise<void> {
   await fs.mkdir(path.dirname(FILE), { recursive: true });
   const tmp = `${FILE}.${process.pid}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(cat, null, 2), "utf8");
-  await fs.rename(tmp, FILE);
+  /* En WINDOWS el rename falla (EPERM/EBUSY) si en ese instante alguien tiene el archivo
+     abierto para leer — otra petición del mismo proceso, el antivirus, el indexador. Es
+     momentáneo: se reintenta unos milisegundos en vez de perder la escritura. (Solo
+     aplica al archivo local; en producción el cerebro vive en el almacén.) */
+  for (let intento = 0; ; intento++) {
+    try {
+      await fs.rename(tmp, FILE);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (intento >= 12 || !(code === "EPERM" || code === "EBUSY" || code === "EACCES")) throw e;
+      await new Promise((r) => setTimeout(r, 15 * (intento + 1)));
+    }
+  }
 }
 
 /* --- Backend: Supabase (persistencia real). El cerebro es 1 documento jsonb --- */
@@ -640,6 +655,8 @@ function stripSnap(cat: Catalog): Catalog {
     undo: undefined,
     redo: undefined,
     historial: undefined,
+    etiqueta: undefined,
+    vivoTras: undefined,
     pedidos: [],
     movimientos: [],
     leads: [],
@@ -648,7 +665,81 @@ function stripSnap(cat: Catalog): Catalog {
     proteinas: sinFotos(cat.proteinas),
     toppings: sinFotos(cat.toppings),
     enredos: sinFotos(cat.enredos),
+    // El logo del papel y las fotos del sitio tampoco viajan en la pila (ver RUTAS_IMAGEN_AJUSTES).
+    ajustes: sinImagenesAjustes(cat.ajustes),
   };
+}
+
+/**
+ * LAS IMÁGENES QUE VIVEN DENTRO DE AJUSTES (el logo del comprobante, las fotos del
+ * sitio). Igual que las de la carta: fuera de las fotos de la pila, y al deshacer se
+ * conservan las de ahora. Una sección nueva con imagen se anota aquí.
+ */
+const RUTAS_IMAGEN_AJUSTES: string[][] = [
+  ["comprobante", "logo"],
+  ["sitio", "portada", "foto"],
+  ["sitio", "seo", "fotoCompartir"],
+];
+function leerRuta(o: unknown, ruta: string[]): unknown {
+  let x: unknown = o;
+  for (const k of ruta) {
+    if (!x || typeof x !== "object") return undefined;
+    x = (x as Record<string, unknown>)[k];
+  }
+  return x;
+}
+/** Pone (o quita, con `undefined`) un valor en una ruta, copiando cada nivel: no muta el original. */
+function conRuta<T>(o: T, ruta: string[], valor: unknown): T {
+  const [k, ...resto] = ruta;
+  const base = (o && typeof o === "object" ? o : {}) as Record<string, unknown>;
+  if (!resto.length) {
+    const copia = { ...base };
+    if (valor === undefined) delete copia[k];
+    else copia[k] = valor;
+    return copia as T;
+  }
+  const hijo = base[k];
+  if (valor === undefined && (hijo === undefined || hijo === null)) return o; // nada que quitar
+  return { ...base, [k]: conRuta(hijo, resto, valor) } as T;
+}
+function sinImagenesAjustes(a: Ajustes): Ajustes {
+  let out = a;
+  for (const r of RUTAS_IMAGEN_AJUSTES) if (leerRuta(out, r) !== undefined) out = conRuta(out, r, undefined);
+  return out;
+}
+function conImagenesAjustes(delSnap: Ajustes, delVivo: Ajustes | undefined): Ajustes {
+  let out = delSnap;
+  for (const r of RUTAS_IMAGEN_AJUSTES) {
+    const v = leerRuta(delVivo, r);
+    if (v !== undefined || leerRuta(out, r) !== undefined) out = conRuta(out, r, v);
+  }
+  return out;
+}
+
+const GRUPOS_ING = ["bases", "proteinas", "toppings"] as const;
+const redondear3 = (n: number) => Math.max(0, Number(n.toFixed(3)));
+
+/** Lo que mueven los pedidos (stock de la despensa, stock suelto, agotados), por id. */
+function vivoDe(cat: Catalog): VivoTras {
+  const insumos: Record<string, number> = {};
+  for (const i of cat.insumos ?? []) insumos[i.id] = i.stock;
+  const stock: Record<string, number> = {};
+  const agotado: Record<string, boolean> = {};
+  for (const g of GRUPOS_ING) {
+    for (const it of cat[g] ?? []) {
+      if (typeof it.stock === "number") stock[it.id] = it.stock;
+      agotado[it.id] = Boolean(it.agotado);
+    }
+  }
+  return { insumos, stock, agotado };
+}
+
+/**
+ * La foto que entra a una pila: el estado ANTES de la acción, qué acción fue y cómo
+ * quedó lo vivo justo DESPUÉS (ver `conLoVivo`).
+ */
+function fotoDe(antes: Catalog, despues: Catalog, etiqueta?: string): Catalog {
+  return { ...stripSnap(antes), etiqueta: etiqueta || undefined, vivoTras: vivoDe(despues) };
 }
 
 /** Devuelve el snapshot con lo TRANSACCIONAL de hoy re-inyectado (nunca se revierte). */
@@ -659,18 +750,52 @@ function conLoVivo(snap: Catalog, vivo: Catalog): Catalog {
     const fotos = new Map((delVivo ?? []).map((x) => [x.id, x.foto]));
     return (delSnap ?? []).map((x) => (fotos.get(x.id) ? { ...x, foto: fotos.get(x.id) } : x));
   };
+  /* LO QUE MUEVEN LOS PEDIDOS NO SE DESHACE. Antes la foto devolvía la despensa entera a
+     como estaba ANTES de la acción: se cambiaba un precio, entraban tres pedidos, se
+     deshacía el precio… y la papa de esos tres pedidos volvía a aparecer en el
+     inventario, con los pedidos ahí. Ahora se aplica solo lo que la acción deshecha
+     cambió (foto − justo después) sobre lo que hay AHORA. Una foto sin `vivoTras` (de
+     antes de esto) conserva lo de ahora tal cual: es lo menos dañino. */
+  const tras = snap.vivoTras;
+  const insVivo = new Map((vivo.insumos ?? []).map((i) => [i.id, i]));
+  const insumos = (snap.insumos ?? []).map((i) => {
+    const v = insVivo.get(i.id);
+    if (!v) return i;
+    const t = tras?.insumos[i.id];
+    return { ...i, stock: t === undefined ? v.stock : redondear3(v.stock + (i.stock - t)) };
+  });
+  const ingVivo = new Map(GRUPOS_ING.flatMap((g) => vivo[g] ?? []).map((x) => [x.id, x]));
+  const conStockVivo = (xs: Ingrediente[] | undefined): Ingrediente[] =>
+    (xs ?? []).map((x) => {
+      const v = ingVivo.get(x.id);
+      if (!v) return x;
+      const out = { ...x };
+      if (typeof x.stock === "number" && typeof v.stock === "number") {
+        const t = tras?.stock[x.id];
+        out.stock = t === undefined ? v.stock : redondear3(v.stock + (x.stock - t));
+      }
+      // El agotado de AHORA, salvo que la acción deshecha lo haya cambiado ella misma.
+      const t = tras?.agotado[x.id];
+      out.agotado = t !== undefined && Boolean(x.agotado) !== t ? x.agotado : v.agotado;
+      return out;
+    });
+  const { etiqueta, vivoTras, ...resto } = snap;
+  void etiqueta;
+  void vivoTras;
   return {
-    ...snap,
+    ...resto,
     pedidos: vivo.pedidos ?? [],
     movimientos: vivo.movimientos ?? [],
     leads: vivo.leads ?? [],
     // El índice del archivo tampoco se "deshace": los meses archivados existen.
     archivoMeses: vivo.archivoMeses ?? [],
     arqueos: vivo.arqueos ?? [],
-    bases: conFotos(snap.bases, vivo.bases),
-    proteinas: conFotos(snap.proteinas, vivo.proteinas),
-    toppings: conFotos(snap.toppings, vivo.toppings),
+    insumos,
+    bases: conFotos(conStockVivo(snap.bases), vivo.bases),
+    proteinas: conFotos(conStockVivo(snap.proteinas), vivo.proteinas),
+    toppings: conFotos(conStockVivo(snap.toppings), vivo.toppings),
     enredos: conFotos(snap.enredos, vivo.enredos),
+    ajustes: conImagenesAjustes(snap.ajustes, vivo.ajustes),
   };
 }
 
@@ -798,11 +923,19 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
  *
  * `autoritativo` = mi documento manda tal cual, sin unir (lo usa el borrado
  * explícito de un movimiento: unir lo resucitaría).
+ *
+ * `transaccional` = la acción es algo que PASÓ (un pedido, un cobro, la caja, un gasto,
+ * mercancía que entró): queda en el historial pero no ocupa la pila de deshacer ni
+ * borra lo que había para rehacer. Antes cada pedido por QR, cada toque de la cocina y
+ * cada cobro empujaba su foto: en pleno servicio el botón Deshacer revertía el último
+ * paso de un pedido en vez del cambio de precio, y la foto del precio se caía de la
+ * pila a los pocos minutos. Ahora Deshacer es "deshacer mi último cambio de carta o
+ * de ajustes", que es lo que el dueño espera.
  */
 async function commit(
   cat: Catalog,
   texto?: string,
-  opciones?: { autoritativo?: boolean; sinDeshacer?: boolean },
+  opciones?: { autoritativo?: boolean; sinDeshacer?: boolean; transaccional?: boolean },
 ): Promise<void> {
   return enFila(async () => {
     for (let intento = 0; intento < 3; intento++) {
@@ -821,8 +954,12 @@ async function commit(
       if (opciones?.sinDeshacer) {
         doc.undo = [];
         doc.redo = [];
+      } else if (opciones?.transaccional) {
+        // Las pilas como están AHORA (las de mi copia pueden venir de hace dos segundos).
+        doc.undo = actual.undo ?? [];
+        doc.redo = actual.redo ?? [];
       } else {
-        doc.undo = [...(actual.undo ?? []), stripSnap(actual)].slice(-UNDO_CAP);
+        doc.undo = [...(actual.undo ?? []), fotoDe(actual, doc, texto)].slice(-UNDO_CAP);
         doc.redo = [];
       }
       if (texto) {
@@ -838,10 +975,7 @@ async function commit(
       } catch (e) {
         // Otra instancia escribió entre nuestra lectura y nuestra escritura: el
         // compare-and-swap la protegió. Releemos y reintentamos sobre lo nuevo.
-        const conflicto =
-          (e as Error)?.name === "BlobPreconditionFailedError" ||
-          /precondition|ifMatch|412/i.test((e as Error)?.message ?? "");
-        if (conflicto && intento < 2) {
+        if (esConflicto(e) && intento < 2) {
           etagActual = null;
           continue;
         }
@@ -851,36 +985,70 @@ async function commit(
   });
 }
 
-/** Deshace la última acción (restaura el snapshot anterior). */
+/** ¿El almacén rechazó la escritura porque otra instancia escribió primero? */
+const esConflicto = (e: unknown): boolean =>
+  (e as Error)?.name === "BlobPreconditionFailedError" ||
+  /precondition|ifMatch|412/i.test((e as Error)?.message ?? "");
+
+/** Deshace el último cambio de carta o ajustes (ver `commit`, opción `transaccional`). */
 export async function deshacer(): Promise<Catalog> {
-  const cat = await read();
-  const undo = cat.undo ?? [];
-  if (undo.length === 0) return cat;
-  const snap = undo[undo.length - 1];
-  const restored: Catalog = {
-    ...conLoVivo(snap, cat), // pedidos/movimientos/leads de HOY sobreviven al deshacer
-    undo: undo.slice(0, -1),
-    redo: [...(cat.redo ?? []), stripSnap(cat)].slice(-UNDO_CAP),
-    historial: [nuevaEntrada("↩︎ Deshacer", true), ...(cat.historial ?? [])].slice(0, HIST_CAP),
-  };
-  await write(restored);
-  return restored;
+  return moverEnPila("deshacer");
 }
 
-/** Rehace la acción deshecha. */
+/** Rehace el cambio deshecho. */
 export async function rehacer(): Promise<Catalog> {
-  const cat = await read();
-  const redo = cat.redo ?? [];
-  if (redo.length === 0) return cat;
-  const snap = redo[redo.length - 1];
-  const restored: Catalog = {
-    ...conLoVivo(snap, cat), // ídem: rehacer tampoco resucita ni borra pedidos
-    redo: redo.slice(0, -1),
-    undo: [...(cat.undo ?? []), stripSnap(cat)].slice(-UNDO_CAP),
-    historial: [nuevaEntrada("↪︎ Rehacer", true), ...(cat.historial ?? [])].slice(0, HIST_CAP),
-  };
-  await write(restored);
-  return restored;
+  return moverEnPila("rehacer");
+}
+
+/**
+ * DESHACER Y REHACER, por la misma puerta que el resto de las escrituras.
+ *
+ * Antes leían con el memo (una copia de hasta dos segundos), fuera de la fila de
+ * escritura y sin reintento: si otra instancia guardaba un pedido en ese instante, el
+ * botón fallaba con un error técnico. Ahora leen fresco dentro de la fila y, si el
+ * almacén dice que alguien escribió primero, lo vuelven a intentar sobre lo nuevo.
+ * Nunca escriben "a la fuerza": deshacer no puede pisar un pedido que acaba de entrar,
+ * así que si a la tercera sigue habiendo choque se le pide al operario repetirlo.
+ */
+async function moverEnPila(sentido: "deshacer" | "rehacer"): Promise<Catalog> {
+  return enFila(async () => {
+    for (let intento = 0; intento < 3; intento++) {
+      const cat = await readFresco();
+      const pila = (sentido === "deshacer" ? cat.undo : cat.redo) ?? [];
+      if (!pila.length) return cat;
+      const snap = pila[pila.length - 1];
+      // Pedidos, caja, leads y lo que gastaron los pedidos sobreviven (ver conLoVivo).
+      const restaurado = conLoVivo(snap, cat);
+      // La foto contraria: lo de AHORA, para poder volver con el otro botón.
+      const contraria = fotoDe(cat, restaurado, snap.etiqueta);
+      if (sentido === "deshacer") {
+        restaurado.undo = pila.slice(0, -1);
+        restaurado.redo = [...(cat.redo ?? []), contraria].slice(-UNDO_CAP);
+      } else {
+        restaurado.redo = pila.slice(0, -1);
+        restaurado.undo = [...(cat.undo ?? []), contraria].slice(-UNDO_CAP);
+      }
+      const que = snap.etiqueta ? `: ${snap.etiqueta}` : "";
+      restaurado.historial = [
+        nuevaEntrada(`${sentido === "deshacer" ? "↩︎ Deshizo" : "↪︎ Rehízo"}${que}`, true, await quien()),
+        ...(cat.historial ?? []),
+      ].slice(0, HIST_CAP);
+      try {
+        await write(restaurado);
+        return restaurado;
+      } catch (e) {
+        if (esConflicto(e) && intento < 2) {
+          etagActual = null;
+          continue;
+        }
+        if (esConflicto(e)) {
+          throw new Error("Justo ahora se estaba guardando otra cosa. Vuelve a tocar el botón.");
+        }
+        throw e;
+      }
+    }
+    throw new Error("Justo ahora se estaba guardando otra cosa. Vuelve a tocar el botón.");
+  });
 }
 
 export async function getCatalog(): Promise<Catalog> {
@@ -920,6 +1088,8 @@ export type AjustesPublicos = Pick<
   | "costoDomicilio"
   | "pedidoMinimo"
   | "promos"
+  | "basesMax"
+  | "cobroBases"
 >;
 
 /** Un ingrediente sin su interior de negocio (receta, stock, costo). */
@@ -952,8 +1122,23 @@ export async function getCatalogPublico(): Promise<CatalogoPublico> {
       costoDomicilio: a.costoDomicilio,
       pedidoMinimo: a.pedidoMinimo,
       promos: a.promos,
+      // El armador, el juego y el QR cobran con estas dos: tienen que verlas.
+      basesMax: basesMaxDe(a),
+      cobroBases: cobroBasesDe(a),
     },
   };
+}
+
+/**
+ * LOS NOMBRES DE LA PANTALLA DE ENTRADA. Se leen antes de que haya sesión, así que un
+ * parpadeo del almacén no puede cerrar la puerta: si falla, el respaldo de siempre.
+ */
+export async function usuariosDelPanel(): Promise<string[]> {
+  try {
+    return usuariosDe((await read()).ajustes);
+  } catch {
+    return USUARIOS;
+  }
 }
 
 export async function updateIngrediente(
@@ -1100,7 +1285,10 @@ export async function deleteEnredo(id: string): Promise<Catalog> {
 export interface LineaComanda {
   /** Plato de precio cerrado. Manda sobre lo que venga armado. */
   enredoId?: string;
+  /** Una base (el campo de siempre). */
   baseId?: string;
+  /** Una o dos bases (Ajustes → Cobro y servicio). Si viene, manda sobre `baseId`. */
+  baseIds?: string[];
   proteinaIds?: string[];
   toppingIds?: string[];
   /** Cuántas porciones de ESTE renglón (1 por defecto). */
@@ -1126,7 +1314,10 @@ export interface NuevaComanda {
 }
 
 export interface NuevoPedido {
-  baseId: string;
+  /** Una base (el campo de siempre; los clientes viejos solo mandan este). */
+  baseId?: string;
+  /** Una o dos bases. Si viene, manda sobre `baseId`. */
+  baseIds?: string[];
   /** Opcional: un plato sin proteína también se vende. */
   proteinaId?: string;
   proteinaId2?: string; // 2ª proteína (retro-compat con el flujo de 2)
@@ -1778,6 +1969,7 @@ export async function crearComanda(input: NuevaComanda): Promise<Pedido> {
   await commit(
     cat,
     `Nuevo pedido #${pedido.id}${platos > 1 ? ` · ${platos} platos` : ""} (${formatCOP(pedido.total)})`,
+    { transaccional: true },
   );
   return pedido;
 }
@@ -1833,7 +2025,7 @@ export async function avanzarPedido(id: string, desde?: EstadoPedido): Promise<P
   if (p.estado === "entregado") return cat.pedidos;
   p.estado = nextEstado(p.estado);
   sellarEstado(p);
-  await commit(cat, `Avanzó #${id} a ${p.estado}`);
+  await commit(cat, `Avanzó #${id} a ${p.estado}`, { transaccional: true });
   return cat.pedidos;
 }
 
@@ -1857,7 +2049,7 @@ export async function retrocederPedido(id: string): Promise<Catalog> {
   if (p.estado === "cancelado") throw new Error("Ese pedido está cancelado.");
   const i = ESTADOS.indexOf(p.estado);
   if (i > 0) p.estado = ESTADOS[i - 1];
-  await commit(cat, `Devolvió #${id} a ${p.estado}`);
+  await commit(cat, `Devolvió #${id} a ${p.estado}`, { transaccional: true });
   return cat;
 }
 
@@ -1930,6 +2122,7 @@ export async function cobrarPedido(
     cat,
     `${corregir ? "Corrigió el cobro de" : "Cobró"} #${id} (${metodo} · ${formatCOP(p.total)})` +
       (desc > 0 ? ` · descuento ${formatCOP(desc)}: ${motivo}` : ""),
+    { transaccional: true },
   );
   return cat;
 }
@@ -1970,6 +2163,7 @@ export async function agregarAdicional(id: string, a: AdicionalNuevo): Promise<C
   await commit(
     cat,
     `Agregó ${it.cantidad > 1 ? `${it.cantidad}× ` : ""}"${it.nombre}" (${formatCOP((it.precioFinal ?? 0) * it.cantidad)}) a #${id}`,
+    { transaccional: true },
   );
   return cat;
 }
@@ -1998,7 +2192,7 @@ export async function quitarAdicional(id: string, indice: number, nombre: string
   const pct = cat.ajustes.impuestoPct ?? 0;
   aPreciosFinales(p, pct);
   recalcularPendiente(p, pct);
-  await commit(cat, `Quitó "${fuera.nombre}" de #${id}`);
+  await commit(cat, `Quitó "${fuera.nombre}" de #${id}`, { transaccional: true });
   return cat;
 }
 
@@ -2116,7 +2310,7 @@ export async function devolverPedido(id: string, motivo: string): Promise<Catalo
   p.pago = "devuelto";
   p.estado = "cancelado";
   p.motivoCancelacion = `Devolución: ${razon.slice(0, 160)}`;
-  await commit(cat, `Devolvió #${id} (${formatCOP(p.devolucion.monto)}) · ${razon.slice(0, 60)}`);
+  await commit(cat, `Devolvió #${id} (${formatCOP(p.devolucion.monto)}) · ${razon.slice(0, 60)}`, { transaccional: true });
   return cat;
 }
 
@@ -2153,7 +2347,7 @@ export async function cancelarPedido(id: string, motivo?: string): Promise<Catal
   }
   p.estado = "cancelado";
   p.motivoCancelacion = motivo?.trim().slice(0, 140) || undefined;
-  await commit(cat, `Canceló #${id}${motivo ? ` — ${motivo.trim().slice(0, 60)}` : ""}`);
+  await commit(cat, `Canceló #${id}${motivo ? ` — ${motivo.trim().slice(0, 60)}` : ""}`, { transaccional: true });
   return cat;
 }
 
@@ -2174,15 +2368,28 @@ export async function asignarReferencia(id: string, referencia: string): Promise
   // estado internamente contradictorio ("come aquí, pero paga el domiciliario").
   p.domicilio = 0;
   if (p.pago !== "pagado") p.total = totalDe(p);
-  await commit(cat, `#${id} está en "${texto}"`);
+  await commit(cat, `#${id} está en "${texto}"`, { transaccional: true });
   return cat;
 }
 
-/** Ajustes del negocio (los lee el sitio y el panel). */
-export async function updateAjustes(patch: Partial<Ajustes>): Promise<Catalog> {
+/**
+ * Ajustes del negocio (los lee el sitio y el panel).
+ *
+ * Cada sección del panel manda SOLO sus campos. Las secciones anidadas (`comprobante`,
+ * `sitio`) se mezclan un nivel más adentro: guardar el mensaje de cierre no puede borrar
+ * el logo, ni guardar la portada borrar la historia. `texto` es lo que dice el historial
+ * y el botón Deshacer ("Cambió el comprobante"), en vez de un genérico.
+ */
+export async function updateAjustes(patch: Partial<Ajustes>, texto = "Actualizó los ajustes"): Promise<Catalog> {
   const cat = await read();
   const antes = controlaStock(cat);
-  cat.ajustes = { ...cat.ajustes, ...patch };
+  const a = cat.ajustes;
+  cat.ajustes = normalizarAjustes({
+    ...a,
+    ...patch,
+    ...(patch.comprobante ? { comprobante: { ...(a.comprobante ?? {}), ...patch.comprobante } } : {}),
+    ...(patch.sitio ? { sitio: { ...(a.sitio ?? {}), ...patch.sitio } } : {}),
+  });
   /* Encender o apagar el control de despensa tiene que notarse EN EL ACTO: si no se
      recalcula aquí, el operario apaga el control para poder vender y la carta sigue
      apareciendo agotada hasta que algo más la toque. */
@@ -2190,7 +2397,7 @@ export async function updateAjustes(patch: Partial<Ajustes>): Promise<Catalog> {
     // Al APAGARLO se limpia lo que agotó la despensa; al encenderlo se recalcula.
     recalcularDisponibilidad(cat, !controlaStock(cat));
   }
-  await commit(cat, "Actualizó los ajustes");
+  await commit(cat, texto);
   return cat;
 }
 
@@ -2391,6 +2598,7 @@ export async function abastecerInsumo(
     cat,
     `Abasteció ${cantidad} ${it.unidad} de ${it.nombre}` +
       (montoTotal && montoTotal > 0 ? ` por ${formatCOP(montoTotal)}` : ""),
+    { transaccional: true },
   );
   return cat;
 }
@@ -2412,7 +2620,7 @@ export async function abastecerAPar(id: string): Promise<Catalog> {
     registrarCompra(cat, it, it.stock - antes);
   }
   reactivarPreparables(cat, id);
-  await commit(cat, `Abasteció "${it?.nombre ?? id}" a estándar`);
+  await commit(cat, `Abasteció "${it?.nombre ?? id}" a estándar`, { transaccional: true });
   return cat;
 }
 
@@ -2435,6 +2643,7 @@ export async function abastecerTodoAPar(): Promise<{ repuestos: number; total: n
     repuestos > 0
       ? `Repuso ${repuestos} insumo(s) a su nivel estándar`
       : "Revisó la despensa: ya estaba toda en su nivel estándar",
+    { transaccional: true },
   );
   return { repuestos, total: cat.insumos.length };
 }
@@ -2567,7 +2776,7 @@ export async function abrirCaja(base: number, usuario?: string): Promise<Catalog
     usuarioAbre: usuario,
   };
   cat.arqueos = [arqueo, ...cat.arqueos].slice(0, 400);
-  await commit(cat, `Abrió caja con ${formatCOP(arqueo.base)}`);
+  await commit(cat, `Abrió caja con ${formatCOP(arqueo.base)}`, { transaccional: true });
   return cat;
 }
 
@@ -2602,7 +2811,7 @@ export async function cerrarCaja(input: {
       : arqueo.diferencia > 0
         ? `sobran ${formatCOP(arqueo.diferencia)}`
         : `faltan ${formatCOP(-arqueo.diferencia)}`;
-  await commit(cat, `Cerró caja: contó ${formatCOP(contado)} · ${señal}`);
+  await commit(cat, `Cerró caja: contó ${formatCOP(contado)} · ${señal}`, { transaccional: true });
   return cat;
 }
 
@@ -2617,14 +2826,14 @@ export async function crearGasto(input: NuevoGasto): Promise<Catalog> {
     categoria: input.categoria,
   };
   cat.movimientos = [mov, ...(cat.movimientos ?? [])].slice(0, 2000);
-  await commit(cat, `Gasto: ${mov.concepto} ${formatCOP(mov.monto)}`);
+  await commit(cat, `Gasto: ${mov.concepto} ${formatCOP(mov.monto)}`, { transaccional: true });
   return cat;
 }
 
 export async function deleteMovimiento(id: string): Promise<Catalog> {
   const cat = await read();
   cat.movimientos = (cat.movimientos ?? []).filter((m) => m.id !== id);
-  await commit(cat, "Eliminó un movimiento", { autoritativo: true });
+  await commit(cat, "Eliminó un movimiento", { autoritativo: true, transaccional: true });
   return cat;
 }
 
@@ -2706,7 +2915,7 @@ export async function crearLead(input: NuevoLead): Promise<Lead> {
     creadoEn: new Date().toISOString(),
   };
   cat.leads = [lead, ...cat.leads].slice(0, 500);
-  await commit(cat, `Nuevo lead: ${lead.nombre}`);
+  await commit(cat, `Nuevo lead: ${lead.nombre}`, { transaccional: true });
   return lead;
 }
 
@@ -2717,7 +2926,7 @@ export async function updateLead(
   const cat = await read();
   const idx = cat.leads.findIndex((l) => l.id === id);
   if (idx >= 0) cat.leads[idx] = { ...cat.leads[idx], ...patch };
-  await commit(cat, "Actualizó un lead");
+  await commit(cat, "Actualizó un lead", { transaccional: true });
   return cat;
 }
 

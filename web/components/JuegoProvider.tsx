@@ -164,6 +164,8 @@ export default function JuegoProvider({
             canal="web"
             costoDomicilio={ajustes.costoDomicilio}
             pedidoMinimo={ajustes.pedidoMinimo}
+            basesMax={ajustes.basesMax}
+            cobroBases={ajustes.cobroBases}
             precargar={precarga}
             onSalir={salir}
             onModoRapido={pedirRapido}

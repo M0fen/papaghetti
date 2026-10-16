@@ -77,6 +77,8 @@ export default async function Home() {
             costoDomicilio={catalog.ajustes.costoDomicilio}
             pedidoMinimo={catalog.ajustes.pedidoMinimo}
             abierto={catalog.ajustes.abierto !== false}
+            basesMax={catalog.ajustes.basesMax}
+            cobroBases={catalog.ajustes.cobroBases}
           />
           <Divider color="pomodoro" />
           <FeaturedMenu catalog={catalog} />
@@ -84,6 +86,7 @@ export default async function Home() {
             bases={catalog.bases}
             proteinas={catalog.proteinas}
             toppings={catalog.toppings}
+            basesMax={catalog.ajustes.basesMax}
           />
           <Divider />
           <Story />

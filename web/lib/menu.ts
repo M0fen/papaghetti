@@ -5,6 +5,10 @@
  * Ver PLAN-MAESTRO.md §5.2.
  */
 
+import type { AjustesComprobante } from "./papel";
+import type { AjustesSitio } from "./sitio";
+import { limpiarUsuarios } from "./usuarios";
+
 /**
  * Familias de componente. "salsa" se añadió con la carta real: valen $0 y se eligen
  * libremente, así que se filtran de todo lo que cobra. Viven dentro del grupo
@@ -332,6 +336,12 @@ export interface ItemPedido {
   precio: number;
   /** Ids de los componentes de UNA unidad, para devolver despensa al cancelar. */
   componentes?: string[];
+  /**
+   * Los ids que UNA unidad gasta a MEDIA porción: las dos bases de un plato "mitad y
+   * mitad". Nunca se repiten en `componentes`, que son siempre porciones enteras: así un
+   * pedido viejo (sin este campo) se sigue leyendo igual que siempre.
+   */
+  mitades?: string[];
   /** Si el renglón es un plato de precio cerrado, su id. */
   enredoId?: string;
   /** COGS de UNA unidad, congelado al crear. */
@@ -496,6 +506,12 @@ export interface Pedido {
    * los ids no se podía devolver la despensa al cancelar ni saber qué se vendió.
    */
   componentes?: string[];
+  /**
+   * Como `componentes`, pero a MEDIA porción (una entrada por unidad vendida): las bases
+   * de un "mitad y mitad". Cancelar o devolver suma media receta por cada una, ni más ni
+   * menos de lo que se gastó. Ausente = ninguna (todos los pedidos de antes).
+   */
+  mitades?: string[];
   /** Clave de idempotencia del cliente: el mismo envío repetido es un solo pedido. */
   idemKey?: string;
   subtotal: number;
@@ -701,6 +717,15 @@ export interface Promo {
   activo: boolean;
 }
 
+/**
+ * CÓMO SE COBRA UN PLATO DE DOS BASES.
+ *  · "mitad" (mitad y mitad): es UN plato repartido. Se cobra la base más cara y cada
+ *    una gasta media porción de su receta.
+ *  · "suma": es un plato DOBLE. Cada base a su precio y con su porción completa.
+ * Con una sola base los dos modos dan exactamente lo mismo.
+ */
+export type CobroBases = "mitad" | "suma";
+
 /** ------- Ajustes del negocio (una sola fuente para sitio + panel) ------- */
 export interface Ajustes {
   negocio: string;
@@ -744,6 +769,19 @@ export interface Ajustes {
    * configuran en Precios. Lo que no esté aquí se puede escribir a mano igual.
    */
   adicionales?: AdicionalConfig[];
+  /**
+   * DOS BASES EN UN PLATO: cuántas puede llevar una caja armada (1 o 2) y cómo se
+   * cobran cuando son dos (ver `CobroBases`). Con 1, todo funciona como siempre. Se
+   * leen SIEMPRE con `basesMaxDe` / `cobroBasesDe`: un cerebro viejo no las trae.
+   */
+  basesMax?: 1 | 2;
+  cobroBases?: CobroBases;
+  /** Lo que el dueño personaliza del comprobante (ver lib/papel.ts). Ausente = el de fábrica. */
+  comprobante?: AjustesComprobante;
+  /** Textos, enlaces y fotos del sitio público (ver lib/sitio.ts). Ausente = el de fábrica. */
+  sitio?: AjustesSitio;
+  /** Quiénes entran al panel (ver lib/usuarios.ts). Ausente o vacío = el respaldo. */
+  usuarios?: string[];
 }
 /* APAGADAS de fábrica: son plantillas. Una promo encendida que nadie aprobó
    es una promesa que el local tiene que cumplir en la puerta. */
@@ -780,7 +818,45 @@ export const SEED_AJUSTES: Ajustes = {
   pedidoMinimo: 20000,
   promos: SEED_PROMOS,
   adicionales: [],
+  basesMax: 2,
+  cobroBases: "mitad",
 };
+
+/** Hasta cuántas bases lleva un plato armado. Lo que no sea 1 es 2 (el de fábrica). */
+export const basesMaxDe = (a?: { basesMax?: number } | null): 1 | 2 => (a?.basesMax === 1 ? 1 : 2);
+/** Cómo se cobran dos bases. Lo que no sea "suma" es "mitad" (el de fábrica). */
+export const cobroBasesDe = (a?: { cobroBases?: string } | null): CobroBases =>
+  a?.cobroBases === "suma" ? "suma" : "mitad";
+
+const esObjeto = (v: unknown): v is Record<string, unknown> =>
+  Boolean(v) && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * AJUSTES SANOS, vengan de donde vengan (un cerebro viejo, un respaldo, un Deshacer a
+ * un estado anterior). Pura e idempotente.
+ *
+ * La mezcla de siempre (`{...SEED, ...guardado}`) es de UN nivel: servía mientras todos
+ * los campos eran números, textos o listas. Con secciones anidadas (comprobante, sitio)
+ * una sección a medias, `null` o un texto se colaban tal cual y la primera pantalla que
+ * hiciera `seccion.algo` reventaba. Aquí se garantiza la FORMA; los valores de fábrica
+ * de cada sección los pone su propio lector (`comprobanteDe`, `sitioDe`), al leer, para
+ * que un cambio de texto de fábrica llegue también a quien nunca tocó ese campo.
+ */
+export function normalizarAjustes(raw: unknown): Ajustes {
+  const a = { ...structuredClone(SEED_AJUSTES), ...(esObjeto(raw) ? raw : {}) } as Ajustes;
+  if (!Array.isArray(a.promos)) a.promos = structuredClone(SEED_AJUSTES.promos);
+  if (!Array.isArray(a.adicionales)) a.adicionales = [];
+  a.basesMax = basesMaxDe(a);
+  a.cobroBases = cobroBasesDe(a);
+  if (!esObjeto(a.comprobante)) delete a.comprobante;
+  if (!esObjeto(a.sitio)) delete a.sitio;
+  if (a.usuarios !== undefined) {
+    const lista = limpiarUsuarios(Array.isArray(a.usuarios) ? a.usuarios : []);
+    if (lista.length) a.usuarios = lista;
+    else delete a.usuarios;
+  }
+  return a;
+}
 
 /**
  * El número de la semilla es un PLACEHOLDER. Mientras el dueño no ponga el real en
@@ -869,6 +945,25 @@ export interface Catalog {
   /** Pilas de snapshots para deshacer/rehacer (sin sus propias pilas). */
   undo?: Catalog[];
   redo?: Catalog[];
+  /**
+   * SOLO dentro de una foto de la pila: la acción que la produjo. El botón Deshacer
+   * mostraba la última línea del historial, que casi nunca era lo que iba a deshacer.
+   */
+  etiqueta?: string;
+  /**
+   * SOLO dentro de una foto de la pila: cómo quedó lo VIVO (stock de la despensa, stock
+   * suelto y agotados) justo DESPUÉS de esa acción. Al deshacer se revierte solo lo que
+   * ella cambió: los pedidos que llegaron después ya gastaron despensa, y esa despensa
+   * gastada no puede volver a aparecer por deshacer un cambio de precio.
+   */
+  vivoTras?: VivoTras;
+}
+
+/** El estado de lo que mueven los pedidos, por id (ver Catalog.vivoTras). */
+export interface VivoTras {
+  insumos: Record<string, number>;
+  stock: Record<string, number>;
+  agotado: Record<string, boolean>;
 }
 
 const prep = (list: Ingrediente[], s: number): Ingrediente[] =>

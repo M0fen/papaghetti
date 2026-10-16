@@ -44,6 +44,8 @@ export default async function PedirPage() {
       /* Los 12 platos de precio cerrado: sin esto, media carta (y los tickets más
          altos del negocio) no existían para quien pide desde el teléfono. */
       platos={cat.enredos.filter((e) => e.activo !== false)}
+      basesMax={cat.ajustes.basesMax}
+      cobroBases={cat.ajustes.cobroBases}
     />
   );
 }

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import Login from "@/components/admin/Login";
 import Sidebar from "@/components/admin/Sidebar";
 import GhettIA from "@/components/admin/GhettIA";
-import { getCatalog, persistenciaEnRiesgo } from "@/lib/catalog";
+import { getCatalog, persistenciaEnRiesgo, usuariosDelPanel } from "@/lib/catalog";
 import { haySesion } from "@/lib/sesion";
 import { logout, deshacerAction, rehacerAction } from "./actions";
 
@@ -22,9 +22,11 @@ export default async function AdminLayout({
   const authed = await haySesion();
 
   if (!authed) {
+    // Los nombres salen de Ajustes → Usuarios del panel (con el respaldo si no hay).
+    const usuarios = await usuariosDelPanel();
     return (
       <Suspense fallback={null}>
-        <Login />
+        <Login usuarios={usuarios} />
       </Suspense>
     );
   }
@@ -32,7 +34,10 @@ export default async function AdminLayout({
   const cat = await getCatalog();
   const puedeDeshacer = (cat.undo?.length ?? 0) > 0;
   const puedeRehacer = (cat.redo?.length ?? 0) > 0;
-  const ultima = cat.historial?.[0]?.texto;
+  /* Lo que de verdad va a deshacer (o rehacer): la etiqueta de la foto de arriba de la
+     pila. Antes decía la última línea del historial, que casi nunca era eso. */
+  const aDeshacer = cat.undo?.at(-1)?.etiqueta;
+  const aRehacer = cat.redo?.at(-1)?.etiqueta;
   const aviso = (await cookies()).get("pg_aviso")?.value;
   const [avisoTipo, ...avisoResto] = (aviso ?? "").split(":");
   const avisoTexto = avisoResto.join(":");
@@ -67,7 +72,7 @@ export default async function AdminLayout({
                 className="undobtn"
                 type="submit"
                 disabled={!puedeDeshacer}
-                title={puedeDeshacer ? `Deshacer: ${ultima ?? ""}` : "Nada que deshacer"}
+                title={puedeDeshacer ? `Deshacer: ${aDeshacer ?? "el último cambio"}` : "Nada que deshacer"}
               >
                 ↩︎ <span>Deshacer</span>
               </button>
@@ -77,7 +82,7 @@ export default async function AdminLayout({
                 className="undobtn"
                 type="submit"
                 disabled={!puedeRehacer}
-                title={puedeRehacer ? "Rehacer" : "Nada que rehacer"}
+                title={puedeRehacer ? `Rehacer: ${aRehacer ?? "el último cambio"}` : "Nada que rehacer"}
               >
                 ↪︎ <span>Rehacer</span>
               </button>

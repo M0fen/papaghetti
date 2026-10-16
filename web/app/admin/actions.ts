@@ -1,10 +1,9 @@
 "use server";
 
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
-  haySesion,
   usuarioSesion,
   abrirSesion,
   cerrarSesion,
@@ -42,10 +41,11 @@ import {
   deleteMovimiento,
   deshacer,
   rehacer,
-  guardarFoto,
+  usuariosDelPanel,
   guardarAdicionalConfig,
   borrarAdicionalConfig,
 } from "@/lib/catalog";
+import { guard, avisar, intentar, reflejar, reflejarSitio, fotoValida } from "./_guardia";
 import type {
   EstadoLead,
   Categoria,
@@ -56,69 +56,9 @@ import type {
   GastoCategoria,
 } from "@/lib/menu";
 
-/**
- * Puerta única del panel. La sesión ahora va FIRMADA (ver lib/sesion.ts): antes esto
- * era `cookie === "1"`, así que cualquiera escribía esa cookie a mano y era dueño del
- * negocio. Y de paso RENUEVA el turno: la cookie de 8 h no se refrescaba nunca, así que
- * el operario se quedaba fuera a media tarde sin explicación.
- */
-async function guard(): Promise<boolean> {
-  const u = await usuarioSesion();
-  if (!u) return false;
-  await abrirSesion(u); // renueva el turno SIN cambiar de persona
-  return true;
-}
-
-/**
- * Aviso efímero para el operario. Las 31 acciones hacían `return` mudo cuando algo
- * fallaba: "guardado" y "no pasó nada" se veían exactamente igual. Esto deja un
- * mensaje de 10 s que la barra del panel pinta en el siguiente render.
- */
-export async function avisar(texto: string, tipo: "ok" | "error" = "error") {
-  (await cookies()).set("pg_aviso", `${tipo}:${texto}`.slice(0, 300), {
-    httpOnly: false,
-    sameSite: "lax",
-    path: "/admin",
-    maxAge: 10,
-  });
-}
-
-/**
- * Sanea la foto que llega de un formulario.
- *
- * `foto` se guardaba tal cual: cualquier cadena, de cualquier tamaño. La compresión a
- * 640px vive solo en el navegador (ImageUpload), o sea del lado de quien envía. Un data
- * URI de 5MB se replicaba en cada snapshot de undo y acababa dentro del HTML público.
- */
-async function fotoValida(raw: FormData | string | null, id = "ficha"): Promise<string | undefined> {
-  const v = typeof raw === "string" ? raw.trim() : "";
-  if (!v) return undefined;
-  const esData = /^data:image\/(jpeg|png|webp|avif);base64,[A-Za-z0-9+/=]+$/.test(v);
-  const esUrl = /^https?:\/\/[^\s"'<>]+$/i.test(v) || /^\/[^\s"'<>]*$/.test(v);
-  if (!esData && !esUrl) return undefined;
-  if (v.length > 300_000) return undefined; // ~220KB de imagen: de sobra para una ficha
-  /* La imagen se sube como archivo aparte y aquí solo queda su dirección: dentro del
-     cerebro pesaba más que todo lo demás junto. */
-  return guardarFoto(v, id);
-}
-
-/** Ejecuta una mutación del cerebro y convierte su error en un aviso visible. */
-async function intentar(fn: () => Promise<unknown>, exito?: string): Promise<boolean> {
-  try {
-    await fn();
-    if (exito) await avisar(exito, "ok");
-    return true;
-  } catch (e) {
-    await avisar(e instanceof Error ? e.message : "No se pudo completar la acción.");
-    return false;
-  }
-}
-
-function reflejar() {
-  // Un solo cambio → se refleja en la web pública y en el propio admin.
-  revalidatePath("/");
-  revalidatePath("/admin");
-}
+/* La puerta, el aviso, el "intentar" y el saneo de fotos viven en ./_guardia.ts: un
+   archivo "use server" solo puede exportar acciones, y cada sección nueva del panel
+   tiene su propio archivo de acciones. */
 
 export async function login(formData: FormData) {
   // Freno de fuerza bruta: antes se podían probar contraseñas sin límite ni castigo.
@@ -133,7 +73,11 @@ export async function login(formData: FormData) {
     redirect("/admin?error=1");
   }
   limpiarIntentos(ip);
-  await abrirSesion(String(formData.get("usuario") ?? ""));
+  /* QUIÉN entra: solo un nombre de la lista (Ajustes → Usuarios del panel). Un nombre
+     inventado en el formulario no puede firmar el historial. */
+  const lista = await usuariosDelPanel();
+  const pedido = String(formData.get("usuario") ?? "");
+  await abrirSesion(lista.includes(pedido) ? pedido : lista[0]);
   redirect("/admin");
 }
 
@@ -214,27 +158,35 @@ export async function updateLeadEstado(formData: FormData) {
   revalidatePath("/admin");
 }
 
+/**
+ * "Cobro y servicio" en Ajustes: SOLO estos campos. Antes este formulario reescribía
+ * también los datos del negocio y `propinaSugeridaPct`, que no tenía casilla: cada
+ * "Guardar" la dejaba en 0. Ahora cada sección del panel guarda lo suyo y nada más
+ * (comprobante y sitio tienen sus propias acciones).
+ */
 export async function saveAjustes(formData: FormData) {
   if (!(await guard())) return;
-  await updateAjustes({
-    negocio: String(formData.get("negocio") ?? "").trim() || "Papaghetti",
-    whatsapp: String(formData.get("whatsapp") ?? "").trim(),
-    direccion: String(formData.get("direccion") ?? "").trim(),
-    /* Los tres del comprobante. Se imprimían desde siempre y no se podían escribir. */
-    razonSocial: String(formData.get("razonSocial") ?? "").trim().slice(0, 80),
-    nit: String(formData.get("nit") ?? "").trim().slice(0, 24),
-    telefonoLocal: String(formData.get("telefonoLocal") ?? "").trim().slice(0, 24),
-    horarios: String(formData.get("horarios") ?? "").trim(),
-    numMesas: Math.max(0, Math.min(60, Number(formData.get("numMesas") ?? 0))),
-    impuestoPct: Math.max(0, Math.min(30, Number(formData.get("impuestoPct") ?? 0))),
-    propinaSugeridaPct: Math.max(0, Math.min(30, Number(formData.get("propinaSugeridaPct") ?? 0))),
-    instagram: String(formData.get("instagram") ?? "").trim().replace(/^@/, ""),
-    rappi: String(formData.get("rappi") ?? "").trim(),
-    costoDomicilio: Math.max(0, Number(formData.get("costoDomicilio") ?? 0)),
-    pedidoMinimo: Math.max(0, Number(formData.get("pedidoMinimo") ?? 0)),
-    controlarStock: formData.get("controlarStock") === "on",
-  });
-  revalidatePath("/", "layout"); // afecta sitio y panel
+  const num = (k: string, min: number, max: number) => {
+    const n = Number(String(formData.get(k) ?? "").replace(",", "."));
+    return Math.max(min, Math.min(max, Number.isFinite(n) ? n : 0));
+  };
+  await intentar(
+    () =>
+      updateAjustes(
+        {
+          numMesas: Math.round(num("numMesas", 0, 60)),
+          impuestoPct: num("impuestoPct", 0, 30),
+          costoDomicilio: Math.round(num("costoDomicilio", 0, 1_000_000)),
+          pedidoMinimo: Math.round(num("pedidoMinimo", 0, 10_000_000)),
+          controlarStock: formData.get("controlarStock") === "on",
+          basesMax: formData.get("basesMax") === "1" ? 1 : 2,
+          cobroBases: formData.get("cobroBases") === "suma" ? "suma" : "mitad",
+        },
+        "Cambió el cobro y servicio",
+      ),
+    "Cobro y servicio guardados",
+  );
+  reflejarSitio(); // afecta sitio y panel
 }
 
 /** Abre/cierra el negocio con un clic (lo más usado a diario). */
@@ -429,14 +381,15 @@ export async function eliminarMovimientoAction(formData: FormData) {
 
 export async function deshacerAction() {
   if (!(await guard())) return;
-  await deshacer();
-  revalidatePath("/", "layout"); // afecta sitio y todo el panel
+  // Si choca con otra escritura, el operario lo lee en vez de ver una pantalla de error.
+  await intentar(() => deshacer());
+  reflejarSitio(); // afecta sitio y todo el panel
 }
 
 export async function rehacerAction() {
   if (!(await guard())) return;
-  await rehacer();
-  revalidatePath("/", "layout");
+  await intentar(() => rehacer());
+  reflejarSitio();
 }
 
 /* ------- CRUD (control del operador) ------- */

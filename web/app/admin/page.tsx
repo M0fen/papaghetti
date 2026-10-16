@@ -13,10 +13,13 @@ import ArqueoCaja from "@/components/admin/ArqueoCaja";
 import Pendientes from "@/components/admin/Pendientes";
 import { tareasDelDia } from "@/lib/tareas";
 import { toggleAbiertoAction } from "./actions";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const cat = await getCatalog();
   /* El día se cuenta en hora de PEREIRA (antes `toDateString()` usaba la del servidor,
      que en Vercel es UTC: el día "de hoy" empezaba a las 7 p.m.), y los CANCELADOS no

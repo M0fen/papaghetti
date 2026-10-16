@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Fraunces, Manrope } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
+import { SITIO_URL } from "@/lib/sitio";
 
 /* Display: FRAUNCES variable (ejes SOFT/WONK/opsz) — diseñada sobre Windsor/Cooper,
    la familia histórica de los restaurantes cálidos, y hermana tipográfica del logo
@@ -24,7 +25,7 @@ const body = Manrope({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://papaghetti.vercel.app"),
+  metadataBase: new URL(SITIO_URL),
   title: "Papaghetti — Un delicioso enredo",
   description:
     "Arma tu enredo: papa criolla, papa francesa o spaghetti + proteína + toppings. Comfort food premium para armar a tu gusto, en Pereira.",

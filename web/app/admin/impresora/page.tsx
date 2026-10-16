@@ -1,4 +1,5 @@
 import PruebaImpresora from "@/components/admin/PruebaImpresora";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,9 @@ export const dynamic = "force-dynamic";
  * directo por Bluetooth o puerto serie. Escrito para quien esté delante de la
  * térmica sin nadie al lado.
  */
-export default function ImpresoraPage() {
+export default async function ImpresoraPage() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   return (
     <section>
       <div className="adminx__pageh">

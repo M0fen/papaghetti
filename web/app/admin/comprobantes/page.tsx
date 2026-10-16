@@ -30,6 +30,7 @@ import {
 import { esVenta, formatCOP, METODOS, metodoLabel, metodoEmoji, TIPOS, tipoLabel, tipoIcon, type Pedido } from "@/lib/menu";
 import { diaNegocio } from "@/lib/precios";
 import { cobrarAction } from "@/app/pedido-actions";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,8 @@ const BADGE: Record<Situacion, string> = {
 const CANAL: Record<Pedido["canal"], string> = { web: "Sitio web", qr: "QR en mesa", salon: "Mostrador" };
 
 export default async function ComprobantesPage({ searchParams }: { searchParams: Promise<ParamsCrudos> }) {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const sp = await searchParams;
   const f = leerFiltros(sp);
   const ahora = new Date();

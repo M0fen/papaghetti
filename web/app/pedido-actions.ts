@@ -17,7 +17,7 @@ import {
   type NuevoPedido,
 } from "@/lib/catalog";
 import { haySesion } from "@/lib/sesion";
-import { avisar } from "@/app/admin/actions";
+import { avisar } from "@/app/admin/_guardia";
 import type { AdicionalNuevo, EstadoPedido, MetodoPago } from "@/lib/menu";
 
 async function authed() {
@@ -25,6 +25,10 @@ async function authed() {
 }
 
 function refrescarPanel() {
+  /* La portada es ESTÁTICA y muestra los agotados: una comanda, una cancelación o una
+     devolución desde la caja mueven la despensa, y sin esto la portada seguía diciendo
+     "hoy no disponible" (o al revés) hasta que otra cosa la regenerara. */
+  revalidatePath("/");
   revalidatePath("/admin");
   revalidatePath("/admin/pedidos");
   revalidatePath("/admin/cocina");

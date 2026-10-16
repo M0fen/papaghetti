@@ -1,9 +1,12 @@
 import { getCatalog } from "@/lib/catalog";
 import RecetasEditor from "@/components/admin/RecetasEditor";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
 export default async function RecetasPage() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const cat = await getCatalog();
   return (
     <section>

@@ -29,6 +29,7 @@ import { pruebaTextoEscPos } from "@/lib/tiquete-escpos";
 import ImpresionDirecta, { type TrabajosDirectos } from "./ImpresionDirecta";
 import { ALINEACIONES, ROLLOS, type Rollo } from "@/lib/rollo";
 import { useAlineacion, useRollo } from "./useRollo";
+import { SITIO_URL } from "@/lib/sitio";
 
 /* El patrón se dibuja UNA vez por pestaña y rollo, y se sirve como "almacén externo":
    en el servidor no hay canvas (null), en el cliente se crea al primer render y se
@@ -309,7 +310,7 @@ export default function PruebaImpresora() {
         </p>
         <code className="impresora__cmd">
           &quot;C:\Program Files\Google\Chrome\Application\chrome.exe&quot; --kiosk-printing
-          https://papaghetti.vercel.app/admin/pedidos
+          {SITIO_URL}/admin/pedidos
         </code>
         <p className="impresora__nota">
           Hay que cerrar todas las ventanas de Chrome y abrirlo SIEMPRE desde ese acceso

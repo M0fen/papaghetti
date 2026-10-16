@@ -17,6 +17,7 @@ import {
   type Pedido,
   type EstadoPedido,
 } from "@/lib/menu";
+import type { AjustesPapel } from "@/lib/papel";
 import {
   avanzarPedidoAction,
   retrocederPedidoAction,
@@ -44,11 +45,15 @@ const conPuntos = (s: string) => {
 export default function OrdersTable({
   pedidos,
   adicionales = [],
+  ajustesPapel,
 }: {
   pedidos: Pedido[];
   /** Los adicionales de un toque, configurados en Precios. */
   adicionales?: AdicionalConfig[];
+  /** Lo que el comprobante necesita para el WhatsApp de cada pedido (sin el logo). */
+  ajustesPapel?: AjustesPapel;
 }) {
+  void ajustesPapel; // (lo usa el WhatsApp del comprobante; ver la fase del comprobante)
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const router = useRouter();
 

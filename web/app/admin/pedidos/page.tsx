@@ -1,12 +1,17 @@
 import { getCatalog } from "@/lib/catalog";
 import { diaNegocio } from "@/lib/precios";
+import { basesMaxDe, cobroBasesDe } from "@/lib/menu";
+import { ajustesPapelDe } from "@/lib/papel";
 import OrdersTable from "@/components/admin/OrdersTable";
 import NuevoPedido from "@/components/admin/NuevoPedido";
 import PreciosRapidos from "@/components/admin/PreciosRapidos";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
 export default async function PedidosPage() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const cat = await getCatalog();
   /* LA CAJA ES HOY. Antes esta lista traía los ~2.000 pedidos del cerebro, así que
      "Cobrado" sumaba semanas enteras y no coincidía con el "Cobrado · hoy" del
@@ -48,6 +53,8 @@ export default async function PedidosPage() {
           impuestoPct={cat.ajustes.impuestoPct ?? 0}
           costoDomicilio={cat.ajustes.costoDomicilio}
           adicionales={cat.ajustes.adicionales ?? []}
+          basesMax={basesMaxDe(cat.ajustes)}
+          cobroBases={cobroBasesDe(cat.ajustes)}
         />
         <PreciosRapidos
           bases={cat.bases}
@@ -56,7 +63,11 @@ export default async function PedidosPage() {
           platos={cat.enredos}
         />
       </div>
-      <OrdersTable pedidos={delDia} adicionales={cat.ajustes.adicionales ?? []} />
+      <OrdersTable
+        pedidos={delDia}
+        adicionales={cat.ajustes.adicionales ?? []}
+        ajustesPapel={ajustesPapelDe(cat.ajustes)}
+      />
     </section>
   );
 }

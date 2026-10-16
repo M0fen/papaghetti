@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useState } from "react";
-import type { Ingrediente } from "@/lib/menu";
+import type { CobroBases, Ingrediente } from "@/lib/menu";
 import Reveal from "./Reveal";
 import Configurator from "./Configurator";
 import IngImg from "./IngImg";
@@ -32,6 +32,8 @@ export default function EnredaTuPlato({
   costoDomicilio,
   pedidoMinimo,
   abierto = true,
+  basesMax,
+  cobroBases,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
@@ -43,6 +45,9 @@ export default function EnredaTuPlato({
   pedidoMinimo?: number;
   /** Negocio abierto: con el local cerrado el CTA no puede seguir aceptando pedidos. */
   abierto?: boolean;
+  /** Dos bases en un plato (Ajustes → Cobro y servicio). */
+  basesMax?: 1 | 2;
+  cobroBases?: CobroBases;
 }) {
   const [modo, setModo] = useState<Modo>("elegir");
   const juego = useJuego();
@@ -124,6 +129,8 @@ export default function EnredaTuPlato({
               costoDomicilio={costoDomicilio}
               pedidoMinimo={pedidoMinimo}
               abierto={abierto}
+              basesMax={basesMax}
+              cobroBases={cobroBases}
               embebido
             />
           </div>

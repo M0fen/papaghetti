@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { formatCOP, estadoLabel, type EnredoInsignia, type EstadoPedido, type Ingrediente } from "@/lib/menu";
+import { formatCOP, estadoLabel, type CobroBases, type EnredoInsignia, type EstadoPedido, type Ingrediente } from "@/lib/menu";
 import PlatosCarta from "@/components/PlatosCarta";
 import Salsas from "@/components/Salsas";
 import { calcularTotales, soloCobrables } from "@/lib/precios";
@@ -109,6 +109,9 @@ export default function EmplataClient({
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
   platos?: EnredoInsignia[];
+  /** Dos bases en un plato (Ajustes → Cobro y servicio). Sin esto: hasta 2, mitad y mitad. */
+  basesMax?: 1 | 2;
+  cobroBases?: CobroBases;
 }) {
   const disponibles = (l: Ingrediente[]) => l.filter((i) => !i.agotado);
   const [modo, setModo] = useState<Modo>("emplata");

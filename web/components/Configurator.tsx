@@ -8,6 +8,7 @@ import {
   formatCOP,
   waLink as waHref,
   whatsappValido,
+  type CobroBases,
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
@@ -45,6 +46,9 @@ export default function Configurator({
   abierto?: boolean;
   /** true = lo monta EnredaTuPlato dentro de su sección: no repite <section> ni encabezado. */
   embebido?: boolean;
+  /** Dos bases en un plato (Ajustes → Cobro y servicio). Sin esto: hasta 2, mitad y mitad. */
+  basesMax?: 1 | 2;
+  cobroBases?: CobroBases;
 }) {
   const all = [...bases, ...proteinas, ...toppingsCat];
   const find = (id: string) => all.find((i) => i.id === id);

@@ -1,21 +1,47 @@
 import { getCatalog, estadoPersistencia } from "@/lib/catalog";
-import { whatsappValido } from "@/lib/menu";
+import { basesMaxDe, cobroBasesDe } from "@/lib/menu";
+import { usuariosDe } from "@/lib/usuarios";
 import { saveAjustes, toggleAbiertoAction } from "../actions";
 import PromosEditor from "@/components/admin/PromosEditor";
+import AjustesComprobante from "@/components/admin/AjustesComprobante";
+import AjustesSitio from "@/components/admin/AjustesSitio";
+import AjustesUsuarios from "@/components/admin/AjustesUsuarios";
+import BotonGuardar from "@/components/admin/BotonGuardar";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * AJUSTES: TODO LO DEL NEGOCIO, SIN TOCAR CÓDIGO.
+ *
+ * Lo del día a día arriba (abrir/cerrar, promos, cobro), lo que casi nunca cambia abajo.
+ * Cada sección es su PROPIO formulario y guarda solo sus campos: antes un único
+ * formulario reescribía todo lo que conocía, incluso campos sin casilla, y así la
+ * propina sugerida volvía a 0 en cada "Guardar".
+ */
 export default async function AjustesPage() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const { ajustes } = await getCatalog();
   const persistencia = await estadoPersistencia();
   const abierto = ajustes.abierto !== false;
 
   return (
-    <section>
+    <section className="ajustes">
       <div className="adminx__pageh">
         <h1>Ajustes</h1>
         <p>Lo del día a día arriba; lo que casi nunca cambia, abajo.</p>
       </div>
+
+      {/* Índice: con siete secciones, nadie baja a buscar a ciegas. */}
+      <nav className="ajustes__indice" aria-label="Secciones de Ajustes">
+        <a href="#promos">Promociones</a>
+        <a href="#cobro">Cobro y servicio</a>
+        <a href="#comprobante">Comprobante</a>
+        <a href="#sitio">Sitio web</a>
+        <a href="#usuarios">Usuarios</a>
+        <a href="#copia">Copia de seguridad</a>
+      </nav>
 
       {/* 1 · Estado del negocio — la acción más frecuente, de un clic */}
       <div className={`estado ${abierto ? "is-open" : "is-closed"}`}>
@@ -34,14 +60,16 @@ export default async function AjustesPage() {
       </div>
 
       {/* 2 · Promociones del sitio */}
-      <div className="adminx__pageh" style={{ marginTop: 28 }}>
-        <h2 className="ins-cat__title">📣 Promociones del sitio</h2>
-        <p>Enciende, apaga o edita promos. Las marcadas “barra superior” salen como anuncio en la web.</p>
-      </div>
-      <PromosEditor promos={ajustes.promos ?? []} />
+      <section id="promos" className="ajustes__sec">
+        <div className="adminx__pageh">
+          <h2 className="ins-cat__title">📣 Promociones del sitio</h2>
+          <p>Enciende, apaga o edita promos. Las marcadas “barra superior” salen como anuncio en la web.</p>
+        </div>
+        <PromosEditor promos={ajustes.promos ?? []} />
+      </section>
 
-      {/* 3 · Cobro + identidad, en un solo formulario */}
-      <form action={saveAjustes} className="settings settings--wide" style={{ marginTop: 28 }}>
+      {/* 3 · Cobro y servicio */}
+      <form id="cobro" action={saveAjustes} className="settings settings--wide ajustes__sec">
         <fieldset className="setgroup">
           <legend>💵 Cobro y servicio</legend>
           <div className="setgrid setgrid--nums">
@@ -49,7 +77,7 @@ export default async function AjustesPage() {
               {/* Se dice aquí porque es donde alguien lo cambiaría pensando que se suma:
                   los precios de la carta YA lo traen y el comprobante solo lo informa. */}
               <span>Impuesto % (impoconsumo · ya va incluido en los precios)</span>
-              <input className="admin-input" type="number" name="impuestoPct" min={0} max={30} defaultValue={ajustes.impuestoPct} />
+              <input className="admin-input" type="number" name="impuestoPct" min={0} max={30} step="any" defaultValue={ajustes.impuestoPct} />
             </label>
             {/* EL INTERRUPTOR QUE DESBLOQUEA EL PRIMER DÍA. Con la despensa sin
                 contar, todo sale agotado y el armador aparece vacío: el mesero solo
@@ -76,80 +104,61 @@ export default async function AjustesPage() {
               <span>Costo domicilio (COP)</span>
               <input className="admin-input" type="number" name="costoDomicilio" min={0} step="any" defaultValue={ajustes.costoDomicilio} />
             </label>
+            {/* step "any": con step={1000} el navegador rechazaba en silencio un mínimo
+                de $25.500 y el formulario no se enviaba. */}
             <label className="field">
               <span>Pedido mínimo (COP)</span>
-              <input className="admin-input" type="number" name="pedidoMinimo" min={0} step={1000} defaultValue={ajustes.pedidoMinimo} />
+              <input className="admin-input" type="number" name="pedidoMinimo" min={0} step="any" defaultValue={ajustes.pedidoMinimo} />
+            </label>
+          </div>
+
+          {/* DOS BASES EN UN PLATO. Se dice cómo se cobra en la misma opción, porque es
+              una decisión de plata: "mitad y mitad" es el mismo plato repartido; "las
+              dos" es un plato doble. */}
+          <div className="setgrid ajustes__bases">
+            <label className="field">
+              <span>Bases por plato</span>
+              <select className="admin-input" name="basesMax" defaultValue={String(basesMaxDe(ajustes))}>
+                <option value="1">Una base</option>
+                <option value="2">Hasta dos bases</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Con dos bases se cobra</span>
+              <select className="admin-input" name="cobroBases" defaultValue={cobroBasesDe(ajustes)}>
+                <option value="mitad">Mitad y mitad</option>
+                <option value="suma">Las dos completas</option>
+              </select>
+              <small className="field__nota">
+                <b>Mitad y mitad:</b> se cobra la base más cara y cada una gasta media porción.{" "}
+                <b>Las dos completas:</b> cada base a su precio y en porción entera. Solo cuenta
+                cuando el cliente elige dos bases.
+              </small>
             </label>
           </div>
         </fieldset>
-
-        <details className="setgroup setgroup--details">
-          <summary>🏪 Datos del negocio (rara vez cambian)</summary>
-          <div className="setgrid" style={{ marginTop: 14 }}>
-            <label className="field">
-              <span>Nombre del negocio</span>
-              <input className="admin-input" name="negocio" defaultValue={ajustes.negocio} />
-            </label>
-            <label className="field">
-              <span>WhatsApp (formato 57…)</span>
-              <input className="admin-input" name="whatsapp" defaultValue={ajustes.whatsapp} inputMode="numeric" placeholder="573001112233" />
-              {!whatsappValido(ajustes.whatsapp) && (
-                <small className="field__alerta">
-                  Este número es el de ejemplo. Mientras siga así, el sitio esconde los botones de
-                  WhatsApp para no mandar clientes a un chat que no existe.
-                </small>
-              )}
-            </label>
-            <label className="field">
-              <span>Enlace de Rappi (opcional)</span>
-              <input className="admin-input" name="rappi" defaultValue={ajustes.rappi ?? ""} placeholder="https://www.rappi.com.co/restaurantes/…" />
-              <small className="field__nota">Vacío = el sitio no muestra el botón de Rappi.</small>
-            </label>
-            <label className="field">
-              <span>Instagram (sin @)</span>
-              <input className="admin-input" name="instagram" defaultValue={ajustes.instagram} placeholder="papaghetti.pereira" />
-            </label>
-            <label className="field">
-              <span>Dirección</span>
-              <input className="admin-input" name="direccion" defaultValue={ajustes.direccion} placeholder="Calle 00 # 00-00, barrio" />
-              <small className="field__nota">
-                Con calle y número. Una zona («Zona Circunvalar») no le sirve a Google para medir
-                cercanía, y es lo que decide si apareces cuando alguien busca comida cerca.
-              </small>
-            </label>
-            {/* ESTOS TRES SE IMPRIMEN EN CADA COMPROBANTE y no había dónde escribirlos:
-                el modelo los tenía, el papel los pintaba, el formulario no existía y la
-                acción de guardar no los leía. El Resumen mostraba además una tarea
-                permanente «Completa el NIT» que enlazaba aquí, a un campo inexistente. */}
-            <label className="field">
-              <span>Razón social</span>
-              <input className="admin-input" name="razonSocial" defaultValue={ajustes.razonSocial ?? ""} placeholder="Como aparece en el RUT" />
-            </label>
-            <label className="field">
-              <span>NIT</span>
-              <input className="admin-input" name="nit" defaultValue={ajustes.nit ?? ""} placeholder="901.234.567-8" />
-            </label>
-            <label className="field">
-              <span>Teléfono del local</span>
-              <input className="admin-input" name="telefonoLocal" defaultValue={ajustes.telefonoLocal ?? ""} inputMode="tel" placeholder="606 333 4455" />
-              <small className="field__nota">
-                El que se imprime en el comprobante. Si lo dejas vacío se usa el WhatsApp.
-              </small>
-            </label>
-            <label className="field field--full">
-              <span>Horarios</span>
-              <input className="admin-input" name="horarios" defaultValue={ajustes.horarios} />
-            </label>
-          </div>
-        </details>
-
-        <button className="btn btn--primary" type="submit"><span>Guardar cambios</span></button>
+        <BotonGuardar>Guardar cobro y servicio</BotonGuardar>
       </form>
+
+      {/* 4 · El papel que se entrega al cliente */}
+      <section id="comprobante" className="ajustes__sec">
+        <AjustesComprobante ajustes={ajustes} />
+      </section>
+
+      {/* 5 · El sitio público */}
+      <section id="sitio" className="ajustes__sec">
+        <AjustesSitio ajustes={ajustes} />
+      </section>
+
+      {/* 6 · Quién entra al panel */}
+      <section id="usuarios" className="ajustes__sec">
+        <AjustesUsuarios usuarios={usuariosDe(ajustes)} propios={Boolean(ajustes.usuarios?.length)} />
+      </section>
 
       {/* DÓNDE SE GUARDA. "¿Esto está guardando bien?" no puede ser una pregunta que
           el dueño tenga que adivinar: si el POS pierde el turno se entera al día
           siguiente, y ya es tarde. */}
-      <section className={`persis ${persistencia.durable && persistencia.ok ? "is-ok" : "is-mal"}`}>
+      <section id="copia" className={`persis ajustes__sec ${persistencia.durable && persistencia.ok ? "is-ok" : "is-mal"}`}>
         <div className="persis__head">
           <span className="persis__dot" aria-hidden />
           <h2>Dónde se guarda todo</h2>
@@ -162,6 +171,18 @@ export default async function AjustesPage() {
             {persistencia.backend === "blob" && " · copia de seguridad diaria automática"}
           </p>
         )}
+        {/* LA COPIA DEL DUEÑO. Un enlace normal (no <Link>): es una descarga, nadie debe
+            "precargarla". La ruta exige sesión. */}
+        <div className="persis__copia">
+          <a className="btn btn--ghost btnmini" href="/admin/ajustes/copia" download>
+            <span>⬇ Descargar copia completa</span>
+          </a>
+          <small className="field__nota">
+            Un archivo con todo el negocio: carta, despensa, pedidos y comprobantes archivados,
+            caja, gastos y ajustes. Lleva nombres y teléfonos de clientes: guárdalo en un lugar
+            privado. Las fotos van como enlaces, no como imágenes.
+          </small>
+        </div>
       </section>
     </section>
   );

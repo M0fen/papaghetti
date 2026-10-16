@@ -48,6 +48,9 @@ web/qa-*.mjs
 !web/qa-pedidos.mjs
 !web/qa-comanda.mjs
 !web/qa-adicionales.mjs
+!web/qa-ajustes.mjs
+!web/qa-ajuste-precios.mjs
+!web/qa-sitio.mjs
 !web/qa-despensa.mjs
 !web/qa-comprobantes.mjs
 !web/qa-escpos.mjs

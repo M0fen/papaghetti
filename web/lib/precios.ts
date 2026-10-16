@@ -15,6 +15,8 @@
  *    (`incluidos` es 0 hoy; existe por si algún día hay promoción)
  *  · las salsas valen $0 en la carta: van con el plato siempre
  *  · las proteínas van a precio completo
+ *  · DOS BASES (Ajustes → Cobro y servicio): en "mitad y mitad" se cobra la más cara;
+ *    en "suma", las dos (ver `precioBases`)
  *  · el DOMICILIO se cobra aparte y solo cuando el servicio es a domicilio
  *  · el descuento se teclea en pesos que deja de pagar el cliente
  */
@@ -23,6 +25,7 @@ import {
   TOPPINGS_INCLUIDOS,
   formatCOP,
   lineasDe,
+  type CobroBases,
   type Ingrediente,
   type Pedido,
   type TipoServicio,
@@ -134,8 +137,56 @@ export function idsGratis(toppings: Ingrediente[], incluidos = TOPPINGS_INCLUIDO
   );
 }
 
+/**
+ * LO QUE SE COBRA POR LAS BASES. Una base: su precio. Dos en "mitad": la más cara (es un
+ * plato repartido). Dos en "suma": las dos. El orden en que se tocaron no cambia nada.
+ * `crearComanda` usa ESTA función: la pantalla no puede decir un precio y la caja otro.
+ */
+export function precioBases(bases: (Ingrediente | null | undefined)[], modo: CobroBases = "mitad"): number {
+  const bs = (bases ?? []).filter(Boolean) as Ingrediente[];
+  if (!bs.length) return 0;
+  return modo === "suma" ? bs.reduce((s, b) => s + b.precio, 0) : Math.max(...bs.map((b) => b.precio));
+}
+
+/**
+ * Las bases elegidas EN EL ORDEN DE LA CARTA, no en el de los toques: el mismo plato se
+ * llama igual lo pida quien lo pida, y los reportes no lo cuentan como dos platos.
+ */
+export const basesElegidas = <T extends { id: string }>(ids: readonly string[], catalogo: readonly T[]): T[] =>
+  catalogo.filter((b) => ids.includes(b.id));
+
+/** El nombre del renglón con dos bases: "Spaghetti / Papa criolla". */
+export const nombreBases = (bases: readonly { nombre: string }[]): string => bases.map((b) => b.nombre).join(" / ");
+
+/** Lo que la cocina tiene que saber de un plato con dos bases. Va al frente del detalle. */
+export const modoBasesTexto = (modo: CobroBases): string => (modo === "mitad" ? "mitad y mitad" : "dos bases completas");
+
+/**
+ * Los renglones de las bases en un ticket de pantalla (armador, juego). Su suma ES
+ * `precioBases`, así que el ticket siempre cuadra con lo que se cobra: en "mitad" las
+ * dos van en UN renglón a precio de la más cara, nunca cada una a su precio completo.
+ */
+export function renglonesBases(bases: readonly Ingrediente[], modo: CobroBases): { nombre: string; precio: number }[] {
+  if (bases.length < 2 || modo === "suma") return bases.map((b) => ({ nombre: b.nombre, precio: b.precio }));
+  return [{ nombre: `${nombreBases(bases)} · ${modoBasesTexto(modo)}`, precio: precioBases([...bases], modo) }];
+}
+
+/**
+ * TOCAR UNA BASE, igual en todas las pantallas. Con máximo 1: reemplaza (tocar la que ya
+ * está no hace nada, como siempre). Con 2: prende y apaga, y si ya hay dos la última cede
+ * su sitio. La única base elegida no se suelta: un toque nunca deja el plato sin base.
+ */
+export function alternarBase(prev: readonly string[], id: string, max: 1 | 2): string[] {
+  if (prev.includes(id)) return max === 1 || prev.length === 1 ? [...prev] : prev.filter((x) => x !== id);
+  return prev.length < max ? [...prev, id] : [...prev.slice(0, max - 1), id];
+}
+
 export function calcularTotales(opts: {
   base?: Ingrediente | null;
+  /** Una o dos bases; si viene, manda sobre `base`. */
+  bases?: (Ingrediente | null | undefined)[];
+  /** Cómo se cobran dos bases (de fábrica, "mitad"). */
+  cobroBases?: CobroBases;
   /** las que vengan; los undefined se ignoran */
   proteinas?: (Ingrediente | null | undefined)[];
   toppings?: Ingrediente[];
@@ -150,7 +201,7 @@ export function calcularTotales(opts: {
   const tops = soloCobrables(opts.toppings ?? []);
 
   const subtotal =
-    (opts.base?.precio ?? 0) +
+    precioBases(opts.bases ?? [opts.base], opts.cobroBases) +
     prots.reduce((s, p) => s + p.precio, 0) +
     cobroToppings(tops, incluidos);
 

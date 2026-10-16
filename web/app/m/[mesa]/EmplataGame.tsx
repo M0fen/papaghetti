@@ -23,11 +23,13 @@ import {
   estadoLabel,
   TIPOS,
   tipoLabel,
+  type CobroBases,
   type EstadoPedido,
   type EnredoInsignia,
   type Ingrediente,
   type TipoServicio,
 } from "@/lib/menu";
+import { SITIO_DOMINIO } from "@/lib/sitio";
 import { calcularTotales, faltaParaMinimo, idsGratis, soloCobrables } from "@/lib/precios";
 import PlatosCarta from "@/components/PlatosCarta";
 import Salsas from "@/components/Salsas";
@@ -121,8 +123,8 @@ const FXENV = 0.42; // soporte de la envolvente: la cúpula no colapsa a la altu
 /* Unidades de DISEÑO de la escena (px a escala 1 = teléfono de 390). Todo lo demás las
    multiplica por `U` (ver geo()), así el mismo dibujo sirve en un móvil y en un portátil.
    MOBILE FIRST: a 390px U vale exactamente 1 → la escena del teléfono no se mueve un píxel. */
-/** La dirección pública que se imprime en la foto compartida. Cambiar aquí al tener dominio propio. */
-const SITIO = "papaghetti.vercel.app";
+/** La dirección pública que se imprime en la foto compartida (NEXT_PUBLIC_SITIO_URL, ver lib/sitio.ts). */
+const SITIO = SITIO_DOMINIO;
 const CAJA_BASE = 300; // ancho de la caja a escala 1
 const CARTA_W = 96; // +4 respecto al original: gana texto sin quitar cartas a la vista
 const CARTA_H = 118;
@@ -1196,6 +1198,9 @@ export default function EmplataGame(props: {
     /** Identidad del enredo insignia: conserva su precio de carta si nada cambia. */
     enredoId?: string;
   } | null;
+  /** Dos bases en un plato (Ajustes → Cobro y servicio). Sin esto: hasta 2, mitad y mitad. */
+  basesMax?: 1 | 2;
+  cobroBases?: CobroBases;
 }) {
   const { mesa, negocio, abierto, impuestoPct, incluidos, bases, proteinas, toppings } = props;
   const platos = props.platos ?? [];

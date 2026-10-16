@@ -1,6 +1,6 @@
 import type { Catalog } from "./menu";
 import { diaNegocio, horaNegocio } from "./precios";
-import { insumoBajo } from "./menu";
+import { insumoBajo, whatsappValido } from "./menu";
 
 /**
  * LO QUE FALTA POR HACER — calculado, no una lista que alguien tiene que marcar.
@@ -58,7 +58,7 @@ export function tareasDelDia(cat: Catalog): ResumenTareas {
       momento: "montaje",
       texto: "Completa el NIT y la razón social",
       porque: "Son los datos que salen impresos en el comprobante del cliente.",
-      href: "/admin/ajustes",
+      href: "/admin/ajustes#comprobante",
       tono: "normal",
     });
   }
@@ -128,7 +128,7 @@ export function tareasDelDia(cat: Catalog): ResumenTareas {
         conStock === 0
           ? "Se puede vender todo aunque la despensa esté en cero. Cuando la cuentes, vuelve a encenderlo para que la carta se agote sola."
           : `${conStock} insumos tienen existencias cargadas. Enciéndelo para que la carta deje de ofrecer lo que ya no hay.`,
-      href: "/admin/ajustes",
+      href: "/admin/ajustes#cobro",
       tono: "normal",
     });
   }
@@ -141,19 +141,22 @@ export function tareasDelDia(cat: Catalog): ResumenTareas {
       momento: "montaje",
       texto: `Revisa ${promosActivas.length} ${promosActivas.length === 1 ? "promoción activa" : "promociones activas"} en el sitio`,
       porque: `El sitio está anunciando: "${promosActivas[0].texto.slice(0, 48)}". Si no la vas a cumplir, apágala.`,
-      href: "/admin/ajustes",
+      href: "/admin/ajustes#promos",
       tono: "urgente",
     });
   }
 
   // 6. El WhatsApp de ejemplo esconde los botones de pedido del sitio.
-  if (!a.whatsapp || a.whatsapp.includes("300000")) {
+  /* `whatsappValido` es la MISMA regla que esconde los botones del sitio. Antes esto
+     buscaba "300000" dentro del número, que no está en el de ejemplo (573001112233):
+     la tarea no aparecía nunca justo cuando hacía falta. */
+  if (!whatsappValido(a.whatsapp)) {
     t.push({
       id: "whatsapp",
       momento: "montaje",
       texto: "Pon tu número real de WhatsApp",
       porque: "Mientras sea el de ejemplo, el sitio esconde los botones de WhatsApp.",
-      href: "/admin/ajustes",
+      href: "/admin/ajustes#sitio",
       tono: "normal",
     });
   }

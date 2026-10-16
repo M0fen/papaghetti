@@ -2,6 +2,7 @@ import { getCatalog } from "@/lib/catalog";
 import { formatCOP } from "@/lib/menu";
 import PreciosRapidos from "@/components/admin/PreciosRapidos";
 import AdicionalesEditor from "@/components/admin/AdicionalesEditor";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,8 @@ export const dynamic = "force-dynamic";
  * impuesto va encima) y los ADICIONALES: lo que se cobra y no es un plato.
  */
 export default async function PreciosPage() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const cat = await getCatalog();
   const a = cat.ajustes;
   const pct = a.impuestoPct ?? 0;

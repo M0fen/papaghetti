@@ -26,6 +26,7 @@ import { diaNegocio, horaNegocio } from "@/lib/precios";
 import { crearGastoAction, eliminarMovimientoAction } from "../actions";
 import GastoRapido from "@/components/admin/GastoRapido";
 import type { CSSVars } from "@/lib/cssVars";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,8 @@ export default async function FinanzasPage({
 }: {
   searchParams: Promise<{ p?: string }>;
 }) {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const sp = await searchParams;
   const periodo: Periodo = PERIODO_IDS.includes(sp.p as Periodo)
     ? (sp.p as Periodo)

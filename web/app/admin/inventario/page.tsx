@@ -1,10 +1,13 @@
 import { getCatalog } from "@/lib/catalog";
 import { insumoBajo } from "@/lib/menu";
 import InsumosTable from "@/components/admin/InsumosTable";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
 export default async function InventarioPage() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const cat = await getCatalog();
   const alerta = cat.insumos.filter(insumoBajo).length;
 

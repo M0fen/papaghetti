@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
-import type { EnredoInsignia, Ingrediente } from "@/lib/menu";
+import type { CobroBases, EnredoInsignia, Ingrediente } from "@/lib/menu";
 import EmplataClient from "./EmplataClient";
 import EmplataGame from "./EmplataGame";
 
@@ -22,6 +22,9 @@ export default function EmplataSwitch(props: {
   toppings: Ingrediente[];
   /** Los platos de precio cerrado (combos, ensaladas, a la carta, especiales). */
   platos?: EnredoInsignia[];
+  /** Dos bases en un plato (Ajustes → Cobro y servicio). Sin esto: hasta 2, mitad y mitad. */
+  basesMax?: 1 | 2;
+  cobroBases?: CobroBases;
 }) {
   const [modo, setModo] = useState<"game" | "2d" | null>(null);
 

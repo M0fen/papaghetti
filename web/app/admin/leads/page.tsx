@@ -1,9 +1,12 @@
 import { getCatalog } from "@/lib/catalog";
 import LeadsTable from "@/components/admin/LeadsTable";
+import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeadsPage() {
+  // Sin sesión no se arma nada: el login del layout no basta (ver haySesion en lib/sesion.ts).
+  if (!(await haySesion())) return null;
   const cat = await getCatalog();
   const nuevos = cat.leads.filter((l) => l.estado === "nuevo").length;
   return (

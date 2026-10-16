@@ -51,11 +51,15 @@ export default function CartaCompleta({
   bases,
   proteinas,
   toppings,
+  basesMax,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
   toppings: Ingrediente[];
+  /** Cuántas bases admite un plato (Ajustes): la nota de la carta lo tiene que decir. */
+  basesMax?: 1 | 2;
 }) {
+  void basesMax; // (lo usa la nota de "La base"; ver la fase de dos bases)
   const juego = useJuegoOpcional();
   /* Las salsas viven dentro del array `toppings` del catálogo, pero en la carta son
      su propio bloque: valen $0 y se leen mejor lejos de lo que sí se cobra. */

@@ -27,6 +27,7 @@ import {
   grupoPlatoLabel,
   GRUPOS_PLATO,
   type AdicionalConfig,
+  type CobroBases,
   type EnredoInsignia,
   type GrupoPlato,
   type Ingrediente,
@@ -87,6 +88,8 @@ export default function NuevoPedido({
   impuestoPct,
   costoDomicilio = 0,
   adicionales = [],
+  basesMax,
+  cobroBases,
 }: {
   bases: Ingrediente[];
   proteinas: Ingrediente[];
@@ -96,7 +99,12 @@ export default function NuevoPedido({
   costoDomicilio?: number;
   /** Los adicionales de un toque, configurados en Precios. */
   adicionales?: AdicionalConfig[];
+  /** Dos bases en un plato (Ajustes → Cobro y servicio). */
+  basesMax?: 1 | 2;
+  cobroBases?: CobroBases;
 }) {
+  void basesMax; // (los usa el armador de la caja; ver la fase de dos bases)
+  void cobroBases;
   const [abierto, setAbierto] = useState(false);
   /* Clave de idempotencia: era el ÚNICO canal sin ella. Un doble toque en el
      mostrador creaba dos comandas y descontaba la despensa dos veces. Va en ESTADO,

@@ -9,8 +9,7 @@
 
 import type { CatalogoPublico } from "@/lib/catalog";
 import { findIn } from "@/lib/menu";
-
-const SITIO = "https://papaghetti.vercel.app";
+import { SITIO_URL as SITIO } from "@/lib/sitio";
 
 export default function DatosEstructurados({ catalog }: { catalog: CatalogoPublico }) {
   const { ajustes } = catalog;
