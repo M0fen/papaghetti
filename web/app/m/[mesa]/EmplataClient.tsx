@@ -280,7 +280,7 @@ export default function EmplataClient({
     setEnviando(false);
     /* `referencia` y `notas` se leen arriba y faltaban aquí: solo no se notaba porque `s`
        cambia en cada render y rehace la función. Sin ellas, la mesa y la alergia escritas
-       justo antes de pedir podían irse vacías. `mesa` ya no se lee, pero se queda: sin
+       justo antes de pedir podían irse vacías. `mesa` no se lee aquí, pero se queda: sin
        ella el compilador de React no logra conservar esta memoización (error de lint). */
   }, [abierto, enviando, basesSel, proteinaIds, toppingIds, referencia, notas, mesa, reduce, s]);
 
