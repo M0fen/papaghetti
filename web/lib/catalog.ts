@@ -3479,7 +3479,7 @@ export async function updateLead(
 export type { EstadoLead };
 
 /* ══════════════════════════════════════════════════════════════════════════
-   SUBIR O BAJAR LOS PRECIOS DE UNA VEZ (Precios → Subir o bajar precios)
+   SUBIR O BAJAR LOS PRECIOS DE UNA VEZ (Precios → Ajustar precios)
 
    El plan lo arma lib/precios.ts (`planAjuste`): el MISMO que pinta la vista previa.
    Aquí solo se comprueba que lo que el dueño vio sigue siendo verdad, y se guarda:

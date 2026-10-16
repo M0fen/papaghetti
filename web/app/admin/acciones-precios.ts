@@ -5,7 +5,7 @@ import { esGrupoAjuste, leerPct, textoListo, PCT_MAX_AJUSTE, type EstadoAjuste }
 import { guard, avisar, intentar, reflejarSitio } from "./_guardia";
 
 /**
- * Precios → Subir o bajar precios. Una sola acción y un solo commit para todo el lote:
+ * Precios → Ajustar precios. Una sola acción y un solo commit para todo el lote:
  * las acciones de un mismo navegador corren de a una, y un lote de cuarenta guardados
  * habría llenado la pila de deshacer con cuarenta fotos.
  *

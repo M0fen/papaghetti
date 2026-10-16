@@ -7148,7 +7148,7 @@ body.enreda-jugando .sticky-pedir {
 /* ══════════════════════════════════════════════════════════════════════════
    FASE 2 · AJUSTE DE PRECIOS
    ══════════════════════════════════════════════════════════════════════════ */
-/* Precios → «Subir o bajar precios» (components/admin/AjustePrecios.tsx). Mide lo mismo que
+/* Precios → «Ajustar precios» (components/admin/AjustePrecios.tsx). Mide lo mismo que
    el bloque de reglas y adicionales que tiene encima (860 px, y todo el ancho desde 1100),
    y sus filas se acomodan a LA TARJETA (container), no a la ventana. */
 .ajp { container-type: inline-size; max-width: 860px; margin-bottom: 18px; scroll-margin-top: 80px; }
@@ -7301,7 +7301,16 @@ body.enreda-jugando .sticky-pedir {
   .ajp__item { grid-template-columns: minmax(0, 1fr); }
   .ajp__precios { justify-content: flex-start; }
   .ajp__aplicar { width: 100%; }
+  /* En el celular la lista ocupa media pantalla: al llegar a su final, el siguiente gesto
+     del pulgar sigue bajando la página (sin tener que buscar un borde libre para tocar). */
+  .ajp__lista { overscroll-behavior: auto; }
 }
+/* La hoja de siempre, justo debajo (PreciosRapidos). A 390 px el buscador no cedía ancho
+   (un campo de texto no se encoge por debajo de su ancho natural) y empujaba «+ Nuevo
+   producto» fuera de la tarjeta, cortado a la mitad. Ahora, si no caben juntos, el botón
+   baja a su propio renglón. */
+.prq__buscar { flex-wrap: wrap; }
+.prq__buscar input { min-width: min(100%, 180px); }
 
 /* ═══ (fin de la fase 2) ═══ */
 

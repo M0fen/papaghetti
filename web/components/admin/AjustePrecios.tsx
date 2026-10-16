@@ -38,6 +38,8 @@ const INICIO: EstadoAjuste = { vez: 0 };
 const RAPIDOS = [3, 5, 10];
 /** De fábrica, la carta entera. Los adicionales (bebidas, empaques) suelen ir por su lado: se eligen a mano. */
 const DE_FABRICA: GrupoAjuste[] = ["bases", "proteinas", "acompanantes", "platos"];
+/** Lo apagado se dice como lo dice su pantalla: el Menú habla de la carta y los adicionales, de la caja. */
+const apagado = (g: GrupoAjuste) => (g === "adicionales" ? "fuera de la caja" : "fuera de la carta");
 
 export default function AjustePrecios({ listas }: { listas: ListasAjuste }) {
   const [estado, accion, enviando] = useActionState(ajustarPreciosAction, INICIO);
@@ -48,11 +50,13 @@ export default function AjustePrecios({ listas }: { listas: ListasAjuste }) {
   return (
     <section className="card ajp" id="ajustar" aria-labelledby="ajp-titulo">
       <div className="card__h">
-        <h2 id="ajp-titulo">Subir o bajar precios</h2>
+        {/* El nombre con el que la Ayuda y la guía de entrega mandan a buscarla. */}
+        <h2 id="ajp-titulo">Ajustar precios</h2>
       </div>
       <p className="ajp__sub">
-        Para cuando sube el queso o el arriendo: cambia de una vez los precios de los grupos
-        que elijas, redondeados a $100. Antes de aplicar ves cada uno, el de ahora y el nuevo.
+        Para cuando sube el queso o el arriendo: sube o baja de una vez los precios de los
+        grupos que elijas, redondeados a $100. Antes de aplicar ves cada uno, el de ahora y
+        el nuevo.
       </p>
       {estado.listo && tocadoTras !== estado.vez && (
         <p className="ajp__listo" role="status">
@@ -241,7 +245,8 @@ function Formulario({
             {salsas > 0
               ? `Las salsas (${salsas}) no se tocan nunca: van con el plato.`
               : "Las salsas no se tocan nunca: van con el plato."}{" "}
-            Los productos fuera de la carta también se ajustan, para que vuelvan con el precio de ahora.
+            Lo que hoy no se vende (fuera de la carta o de la caja) también se ajusta, para que vuelva
+            con el precio de ahora.
           </small>
         </fieldset>
       </fieldset>
@@ -266,7 +271,12 @@ function Formulario({
             {plan.sinCambio.length > 0 && (
               <span> · {plan.sinCambio.length} {plan.sinCambio.length === 1 ? "se queda igual" : "se quedan igual"}</span>
             )}
-            {fuera > 0 && <span> · {fuera} fuera de la carta</span>}
+            {fuera > 0 && (
+              <span>
+                {" "}
+                · {fuera} {fuera === 1 ? "que hoy no se vende" : "que hoy no se venden"}
+              </span>
+            )}
           </p>
           {/* Acotada y con su propio scroll: con la carta entera son cuarenta renglones, y
               el botón de aplicar tiene que quedar a la vista justo debajo. */}
@@ -285,7 +295,7 @@ function Formulario({
                       <li key={c.id} className="ajp__item">
                         <span className="ajp__nombre">
                           {c.nombre}
-                          {c.fueraDeCarta && <em className="ajp__off">fuera de la carta</em>}
+                          {c.fueraDeCarta && <em className="ajp__off">{apagado(c.grupo)}</em>}
                         </span>
                         <span className="ajp__precios">
                           <span className="visually-hidden">pasa de</span>
@@ -304,7 +314,7 @@ function Formulario({
                       <li key={c.id} className="ajp__item is-igual">
                         <span className="ajp__nombre">
                           {c.nombre}
-                          {c.fueraDeCarta && <em className="ajp__off">fuera de la carta</em>}
+                          {c.fueraDeCarta && <em className="ajp__off">{apagado(c.grupo)}</em>}
                         </span>
                         <span className="ajp__precios">
                           <b>{formatCOP(c.precio)}</b>

@@ -350,7 +350,7 @@ export function faltaParaMinimo(
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   SUBIR O BAJAR LOS PRECIOS DE UNA VEZ (Precios → Subir o bajar precios)
+   SUBIR O BAJAR LOS PRECIOS DE UNA VEZ (Precios → Ajustar precios)
 
    Cuando sube el queso o el arriendo, el dueño cambiaba la carta precio por precio:
    cuarenta guardados, y a mitad de camino ya no sabía cuáles había tocado. Aquí se
