@@ -790,6 +790,85 @@ export function nombreCopia(fecha: Date = new Date()): string {
   return `papaghetti-copia-${diaNegocio(fecha)}-${fmtHoraMinuto.format(fecha).replace(":", "")}.json`;
 }
 
+/** Lo que haría (o hizo) una restauración. */
+export interface PlanRestauracion {
+  /** Cuándo se descargó la copia. */
+  generadoEn: string;
+  pedidos: number;
+  meses: string[];
+  pedidosArchivados: number;
+  destino: { backend: "supabase" | "blob" | "archivo"; entorno: string };
+  /** Solo si se restauró de verdad: dónde quedó guardado el estado de ANTES. */
+  respaldo?: string;
+}
+
+/**
+ * RESTAURAR UNA COPIA COMPLETA. Herramienta del DESARROLLADOR (restaurar-copia.mjs): no
+ * hay botón en el panel a propósito, porque es la única operación que reemplaza el
+ * negocio entero.
+ *
+ * Por defecto solo SIMULA: valida el archivo y dice qué escribiría. Con `deVerdad`:
+ *  1. guarda el estado ACTUAL como `respaldo-antes-de-restaurar-<fecha>` (por si la copia
+ *     resulta ser la equivocada),
+ *  2. escribe cada mes del archivo tal cual venía en la copia,
+ *  3. escribe el documento principal con las pilas de deshacer VACÍAS (un Deshacer no
+ *     puede saltar por encima de una restauración) y el índice de meses de la copia.
+ * Los meses que existan en el almacén y no estén en la copia NO se borran: quedan fuera
+ * del índice, recuperables.
+ *
+ * Se corre con el negocio cerrado y todas las pantallas cerradas, y después se vuelve a
+ * desplegar: una instancia con el estado de antes en memoria podría escribir encima.
+ */
+export async function restaurarCopia(
+  crudo: unknown,
+  opciones: { deVerdad?: boolean; ahora?: Date } = {},
+): Promise<PlanRestauracion> {
+  const c = crudo as Partial<CopiaCompleta> | null;
+  if (!c || typeof c !== "object" || c.formato !== "papaghetti/copia-completa") {
+    throw new Error("Ese archivo no es una copia completa de Papaghetti.");
+  }
+  if (c.version !== 1) throw new Error(`Versión de copia desconocida (${String(c.version)}).`);
+  if (c.completo !== true) {
+    throw new Error("La copia está incompleta (se cortó al descargarla): no se restaura.");
+  }
+  const cerebro = c.cerebro;
+  if (!cerebro || typeof cerebro !== "object" || !Array.isArray(cerebro.pedidos)) {
+    throw new Error("La copia no trae el documento principal.");
+  }
+  const archivo = c.archivo && typeof c.archivo === "object" ? c.archivo : {};
+  const meses = Object.keys(archivo).filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
+  for (const m of meses) {
+    if (!Array.isArray(archivo[m]?.pedidos)) throw new Error(`El mes ${m} de la copia viene dañado.`);
+  }
+  const plan: PlanRestauracion = {
+    generadoEn: String(c.generadoEn ?? ""),
+    pedidos: cerebro.pedidos.length,
+    meses,
+    pedidosArchivados: meses.reduce((s, m) => s + archivo[m].pedidos.length, 0),
+    destino: {
+      backend: supabaseEnabled() ? "supabase" : blobEnabled() ? "blob" : "archivo",
+      entorno: process.env.VERCEL_ENV || "local",
+    },
+  };
+  if (!opciones.deVerdad) return plan;
+
+  return enFila(async () => {
+    const ahora = opciones.ahora ?? new Date();
+    const actual = await readFresco();
+    const respaldo = `respaldo-antes-de-restaurar-${ahora.toISOString().replace(/[:.]/g, "-")}`;
+    await escribirDoc(respaldo, actual);
+    for (const m of meses) await escribirDoc(claveMes(m), archivo[m]);
+    const doc = migrate({ ...structuredClone(cerebro), undo: [], redo: [], archivoMeses: meses });
+    doc.historial = [
+      nuevaEntrada(`Restauró la copia del ${plan.generadoEn.slice(0, 10) || "?"} (el estado anterior quedó en ${respaldo})`, true),
+      ...(doc.historial ?? []),
+    ].slice(0, HIST_CAP);
+    await write(doc, true);
+    olvidar();
+    return { ...plan, respaldo };
+  });
+}
+
 /**
  * ¿Estamos en Vercel SIN almacén (ni Blob ni Supabase)? Entonces el cerebro escribe en /tmp, que es
  * efímero y distinto por instancia de lambda: el pedido que entra por QR puede no
