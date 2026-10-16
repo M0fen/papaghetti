@@ -11,9 +11,20 @@ import GameClient from "./GameClient";
  *
  * UNBRANDED (Prompt Maestro §12): the game is "EL ENREDO" — no logo, no restaurant name.
  */
+const TITULO = "EL ENREDO";
+const DESCRIPCION = "Un juego de cocina. Cierra el enredo, sube el multiplicador, sirve.";
+
 export const metadata: Metadata = {
-  title: "EL ENREDO",
-  description: "Un juego de cocina. Cierra el enredo, sube el multiplicador, sirve.",
+  title: TITULO,
+  description: DESCRIPCION,
+  /* Sin marca también al compartirlo: Next no mezcla `openGraph`/`twitter` con los del
+     layout, los hereda ENTEROS si la página no pone los suyos, y el enlace del juego
+     salía en WhatsApp como «Papaghetti — Un delicioso enredo» con el logo. Sin foto a
+     propósito (el juego no tiene una sin marca), y sin las palabras clave del
+     restaurante. */
+  keywords: null,
+  openGraph: { title: TITULO, description: DESCRIPCION, type: "website", locale: "es_CO" },
+  twitter: { card: "summary", title: TITULO, description: DESCRIPCION },
   manifest: "/juego/manifest.webmanifest",
   // Mystery launch: keep it out of the index until the reveal.
   robots: { index: false, follow: false },

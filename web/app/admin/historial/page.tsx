@@ -1,4 +1,5 @@
 import { getCatalog } from "@/lib/catalog";
+import { ZONA_NEGOCIO } from "@/lib/precios";
 import { deshacerAction, rehacerAction } from "../actions";
 import { haySesion } from "@/lib/sesion";
 
@@ -44,8 +45,12 @@ export default async function HistorialPage() {
               <li key={h.id} className={`hist__row ${h.meta ? "is-meta" : ""}`}>
                 <span className="hist__dot" aria-hidden />
                 <span className="hist__txt">{h.texto}</span>
-                <time className="hist__time" suppressHydrationWarning>
+                {/* La hora de PEREIRA, dicha a propósito. Esto se arma en el servidor, y en
+                    Vercel el servidor vive en UTC: sin la zona, un cambio de las 3:00 p.m.
+                    salía a las 8:00 p.m. y el historial no cuadraba con nada. */}
+                <time className="hist__time" dateTime={h.fecha} suppressHydrationWarning>
                   {new Date(h.fecha).toLocaleString("es-CO", {
+                    timeZone: ZONA_NEGOCIO,
                     day: "2-digit",
                     month: "short",
                     hour: "2-digit",

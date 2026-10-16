@@ -5,14 +5,17 @@
  * sin horario, sin dirección, sin menú. Esto es lo que habilita los resultados
  * enriquecidos (ficha, horario, platos) y sale del MISMO catálogo que ve el cliente,
  * así que no puede quedar desincronizado.
+ *
+ * Los datos del negocio (descripción, ciudad, redes, horario) salen de Ajustes → Sitio.
+ * Las reseñas NO van aquí nunca (ni `review` ni `aggregateRating`): Google no acepta que
+ * un negocio publique las suyas sobre sí mismo.
  */
 
 import type { CatalogoPublico } from "@/lib/catalog";
 import { findIn } from "@/lib/menu";
-import { SITIO_URL as SITIO } from "@/lib/sitio";
+import { SITIO_URL as SITIO, jsonLdSeguro, telHref, type SitioPublico } from "@/lib/sitio";
 
-export default function DatosEstructurados({ catalog }: { catalog: CatalogoPublico }) {
-  const { ajustes } = catalog;
+export default function DatosEstructurados({ catalog, sitio }: { catalog: CatalogoPublico; sitio: SitioPublico }) {
   const byId = (id: string) => findIn(catalog, id);
   const activos = (l: typeof catalog.bases) => l.filter((i) => i.activo && !i.agotado);
 
@@ -26,28 +29,36 @@ export default function DatosEstructurados({ catalog }: { catalog: CatalogoPubli
     })),
   });
 
+  const telefono = sitio.telefono ? telHref(sitio.telefono).replace(/^tel:/, "") : "";
   const data = {
     "@context": "https://schema.org",
     "@type": "Restaurant",
-    name: ajustes.negocio || "Papaghetti",
-    description:
-      "Comfort food premium para armar a tu gusto: base, proteína y toppings en una caja.",
+    name: sitio.negocio,
+    description: sitio.seo.descripcionGoogle,
     url: SITIO,
     servesCuisine: ["Colombiana", "Comfort food"],
     priceRange: "$$",
     address: {
       "@type": "PostalAddress",
-      streetAddress: ajustes.direccion,
-      addressLocality: "Pereira",
-      addressRegion: "Risaralda",
+      streetAddress: sitio.direccion,
+      addressLocality: sitio.ciudad,
+      addressRegion: sitio.departamento,
       addressCountry: "CO",
     },
-    ...(ajustes.instagram ? { sameAs: [`https://instagram.com/${ajustes.instagram}`] } : {}),
-    openingHours: ajustes.horarios,
+    // Solo si el dueño decidió mostrarlo en el sitio: lo que Google sabe, lo ve el cliente.
+    ...(telefono ? { telephone: telefono } : {}),
+    ...(sitio.sameAs.length ? { sameAs: sitio.sameAs } : {}),
+    /* Google solo entiende «Mo-Su 12:00-22:00». Si el dueño escribió el horario para
+       Google, va ese; si no, el texto del sitio, como siempre. */
+    openingHours: sitio.seo.horarioGoogle.length
+      ? sitio.seo.horarioGoogle.length === 1
+        ? sitio.seo.horarioGoogle[0]
+        : sitio.seo.horarioGoogle
+      : sitio.horarios,
     acceptsReservations: false,
     hasMenu: {
       "@type": "Menu",
-      name: "La carta de Papaghetti",
+      name: `La carta de ${sitio.negocio}`,
       hasMenuSection: [
         seccion("Las bases", activos(catalog.bases)),
         seccion("Las proteínas", activos(catalog.proteinas)),
@@ -55,19 +66,22 @@ export default function DatosEstructurados({ catalog }: { catalog: CatalogoPubli
         {
           "@type": "MenuSection",
           name: "Los enredos insignia",
-          hasMenuItem: catalog.enredos.map((e) => ({
-            "@type": "MenuItem",
-            name: e.nombre,
-            description: [
-              e.gancho,
-              [byId(e.baseId)?.nombre, byId(e.proteinaId)?.nombre, ...e.toppingIds.map((t) => byId(t)?.nombre)]
+          // Un plato apagado no se ofrece: Google lo mostraba y el pedido se rechazaba.
+          hasMenuItem: catalog.enredos
+            .filter((e) => e.activo !== false)
+            .map((e) => ({
+              "@type": "MenuItem",
+              name: e.nombre,
+              description: [
+                e.gancho,
+                [byId(e.baseId)?.nombre, byId(e.proteinaId)?.nombre, ...e.toppingIds.map((t) => byId(t)?.nombre)]
+                  .filter(Boolean)
+                  .join(", "),
+              ]
                 .filter(Boolean)
-                .join(", "),
-            ]
-              .filter(Boolean)
-              .join(" · "),
-            offers: { "@type": "Offer", price: e.precio, priceCurrency: "COP" },
-          })),
+                .join(" · "),
+              offers: { "@type": "Offer", price: e.precio, priceCurrency: "COP" },
+            })),
         },
       ],
     },
@@ -76,8 +90,9 @@ export default function DatosEstructurados({ catalog }: { catalog: CatalogoPubli
   return (
     <script
       type="application/ld+json"
-      // El JSON viene de nuestro propio catálogo (no de entrada del usuario).
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
+      /* Con «<» escapado: los nombres, descripciones y textos los escriben personas en el
+         panel, y un «</script>» cerraba la etiqueta (ver jsonLdSeguro). */
+      dangerouslySetInnerHTML={{ __html: jsonLdSeguro(data) }}
     />
   );
 }

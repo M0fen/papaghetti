@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getCatalog, buscarPedido } from "@/lib/catalog";
 import Comprobante from "@/components/admin/Comprobante";
+import { ajustesPapelDe } from "@/lib/papel";
 import { haySesion } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +22,14 @@ export default async function TiquetePage({
   const [cat, pedido] = await Promise.all([getCatalog(), buscarPedido(id.toUpperCase())]);
   if (!pedido) notFound();
 
+  /* Al navegador va SOLO lo que el papel necesita (con el logo, que aquí sí se dibuja):
+     antes viajaban los ajustes enteros —usuarios del panel, promos, todo— dentro del
+     HTML de cada comprobante. */
   return (
     <section className="cbte-wrap">
       <Comprobante
         pedido={pedido}
-        ajustes={cat.ajustes}
+        ajustes={ajustesPapelDe(cat.ajustes, true)}
         auto={imprimir === "1"}
         wa={wa === "1"}
         volver={de === "comprobantes" ? "comprobantes" : "pedidos"}

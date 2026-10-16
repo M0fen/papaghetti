@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Fraunces, Manrope } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
-import { SITIO_URL } from "@/lib/sitio";
+import { SITIO_URL, metadatosDe, sitioDe } from "@/lib/sitio";
 
 /* Display: FRAUNCES variable (ejes SOFT/WONK/opsz) — diseñada sobre Windsor/Cooper,
    la familia histórica de los restaurantes cálidos, y hermana tipográfica del logo
@@ -24,11 +24,14 @@ const body = Manrope({
   display: "swap",
 });
 
+/* LOS METADATOS DE RESPALDO, con los textos de fábrica (lib/sitio.ts: los literales viven
+   en un solo lugar). La portada y /pedir ponen los de Ajustes → Sitio con su propio
+   generateMetadata; aquí no se lee el cerebro a propósito: el layout envuelve también el
+   juego (sin marca), el 404 y el panel, y leer aquí los obligaría a todos a esperar al
+   almacén. */
 export const metadata: Metadata = {
   metadataBase: new URL(SITIO_URL),
-  title: "Papaghetti — Un delicioso enredo",
-  description:
-    "Arma tu enredo: papa criolla, papa francesa o spaghetti + proteína + toppings. Comfort food premium para armar a tu gusto, en Pereira.",
+  ...metadatosDe({ negocio: "Papaghetti", seo: sitioDe().seo }),
   keywords: [
     "Papaghetti",
     "arma tu bowl",
@@ -37,20 +40,6 @@ export const metadata: Metadata = {
     "comida premium Pereira",
     "bowl",
   ],
-  openGraph: {
-    title: "Papaghetti — Un delicioso enredo",
-    description: "Arma tu enredo. Papa + pasta + tu toque. Pereira.",
-    locale: "es_CO",
-    type: "website",
-    siteName: "Papaghetti",
-    images: [{ url: "/og.jpg", width: 1200, height: 630, alt: "Papaghetti" }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Papaghetti — Un delicioso enredo",
-    description: "Arma tu enredo. Papa + pasta + tu toque. Pereira.",
-    images: ["/og.jpg"],
-  },
 };
 
 export const viewport: Viewport = {

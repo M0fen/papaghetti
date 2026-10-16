@@ -1,18 +1,39 @@
 import type { Ajustes } from "@/lib/menu";
+import { comprobanteDe, LARGO, lineaLimpia, MAX_LINEAS_PIE, type FormularioComprobante } from "@/lib/papel";
+import EditorComprobante from "./EditorComprobante";
 
 /**
- * Ajustes → Comprobante: datos del negocio en el papel, logo propio, mensaje de cierre,
- * líneas al pie y datos del cliente, con vista previa en vivo. (Marcador: lo construye
- * la fase del comprobante.)
+ * AJUSTES → COMPROBANTE: datos del negocio en el papel, logo propio, mensaje de cierre,
+ * líneas al pie y datos del cliente, con la vista previa en vivo de las tres salidas.
+ *
+ * Aquí (en el servidor) se arma lo GUARDADO tal como lo escribió el dueño —con el
+ * cierre vacío si nunca puso uno, para que el campo muestre el de fábrica como
+ * ejemplo— y el editor del navegador hace el resto.
  */
 export default function AjustesComprobante({ ajustes }: { ajustes: Ajustes }) {
-  void ajustes;
+  const c = comprobanteDe(ajustes);
+  const crudo = ajustes.comprobante ?? {};
+  const pie = (Array.isArray(crudo.lineasPie) ? crudo.lineasPie : [])
+    .map((l) => lineaLimpia(l, LARGO.lineaPie))
+    .filter(Boolean)
+    .slice(0, MAX_LINEAS_PIE);
+  const inicial: FormularioComprobante = {
+    negocio: lineaLimpia(ajustes.negocio, LARGO.negocio),
+    razonSocial: lineaLimpia(ajustes.razonSocial, LARGO.razonSocial),
+    nit: lineaLimpia(ajustes.nit, LARGO.nit),
+    direccion: lineaLimpia(ajustes.direccion, LARGO.direccion),
+    telefonoLocal: lineaLimpia(ajustes.telefonoLocal, LARGO.telefonoLocal),
+    mensajeCierre: lineaLimpia(crudo.mensajeCierre, LARGO.cierre),
+    // Siempre las tres casillas, llenas o no.
+    lineasPie: Array.from({ length: MAX_LINEAS_PIE }, (_, i) => pie[i] ?? ""),
+    datosCliente: c.datosCliente,
+  };
   return (
-    <div className="settings settings--wide">
-      <fieldset className="setgroup">
-        <legend>🧾 Comprobante</legend>
-        <p className="setgroup__nota">En construcción.</p>
-      </fieldset>
-    </div>
+    <EditorComprobante
+      inicial={inicial}
+      logo={c.logoPropio ? c.logo : ""}
+      whatsapp={ajustes.whatsapp ?? ""}
+      impuestoPct={ajustes.impuestoPct ?? 0}
+    />
   );
 }

@@ -1,7 +1,9 @@
 import Reveal from "./Reveal";
 import LogoMedia from "./LogoMedia";
+import type { SitioPublico } from "@/lib/sitio";
 
-export default function Story() {
+/** La historia la cuenta el dueño (Ajustes → Sitio → Historia); el marco y el video, no. */
+export default function Story({ historia }: { historia: SitioPublico["historia"] }) {
   return (
     <section className="section" id="historia">
       <div className="container">
@@ -9,20 +11,14 @@ export default function Story() {
           <Reveal>
             <div>
               <p className="eyebrow">Nuestra historia</p>
-              <h2>
-                Todo empezó por un enredo
-              </h2>
-              <p style={{ opacity: 0.82, marginBottom: 14 }}>
-                Una hebra de spaghetti no sabe de líneas rectas. Se enreda, se
-                mezcla, se junta con lo que encuentra… y ahí está la gracia.
-              </p>
-              <p style={{ opacity: 0.82, marginBottom: 14 }}>
-                Papaghetti nace en Pereira uniendo dos amores: la papa criolla
-                dorada del Eje Cafetero y la pasta que a todos nos gusta. Comfort
-                food premium, hecha para verse hermosa y para armarse a tu gusto.
-              </p>
+              <h2>{historia.titulo}</h2>
+              {historia.parrafos.map((p, i) => (
+                <p key={i} style={{ opacity: 0.82, marginBottom: 14 }}>
+                  {p}
+                </p>
+              ))}
               <p style={{ fontFamily: "var(--pg-font-display)", fontSize: "1.4rem", color: "var(--pg-pomodoro)" }}>
-                El enredo es la gracia.
+                {historia.cierre}
               </p>
             </div>
           </Reveal>

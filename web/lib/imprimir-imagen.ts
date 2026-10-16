@@ -1,5 +1,9 @@
 import type { Alineacion } from "./rollo";
 
+/** Texto seguro para escribirlo dentro de HTML (contenido o atributo entre comillas). */
+export const escaparHtml = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
 /**
  * MANDAR UNA IMAGEN A LA IMPRESORA DEL SISTEMA, por el diálogo del navegador.
  *
@@ -30,14 +34,18 @@ export function imprimirImagen(
      diálogo, se encoja en vez de perder el borde derecho. */
   const margen = alinear === "izq" ? "margin:0" : alinear === "centro" ? "margin:0 auto" : "margin:0 0 0 auto";
   const ancho = termica ? `width:${anchoMm}mm;max-width:100%;${margen}` : "width:100%";
+  /* El título se ESCAPA: va escrito dentro de un documento HTML armado a mano, y un
+     "<" o unas comillas en él (un número de pedido raro, un texto del dueño) partían el
+     documento o metían marcado en la pestaña de impresión. */
+  const t = escaparHtml(titulo);
   const html =
     `<!doctype html><html lang="es"><head><meta charset="utf-8">` +
-    `<title>${titulo}</title>` +
+    `<title>${t}</title>` +
     `<style>${page}
       html,body{margin:0;padding:0;background:#fff}
       img{display:block;${ancho};height:auto}
       @media print{ body,img{visibility:visible !important;display:block !important} }
-    </style></head><body><img src="${src}" alt="${titulo}"></body></html>`;
+    </style></head><body><img src="${escaparHtml(src)}" alt="${t}"></body></html>`;
 
   /* ESPERAR A LA IMAGEN. En un popup rellenado con document.write, print() no espera
      a que una <img data:> esté decodificada. Se decodifica explícitamente y se dejan

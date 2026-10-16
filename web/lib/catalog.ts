@@ -790,6 +790,85 @@ export function nombreCopia(fecha: Date = new Date()): string {
   return `papaghetti-copia-${diaNegocio(fecha)}-${fmtHoraMinuto.format(fecha).replace(":", "")}.json`;
 }
 
+/** Lo que haría (o hizo) una restauración. */
+export interface PlanRestauracion {
+  /** Cuándo se descargó la copia. */
+  generadoEn: string;
+  pedidos: number;
+  meses: string[];
+  pedidosArchivados: number;
+  destino: { backend: "supabase" | "blob" | "archivo"; entorno: string };
+  /** Solo si se restauró de verdad: dónde quedó guardado el estado de ANTES. */
+  respaldo?: string;
+}
+
+/**
+ * RESTAURAR UNA COPIA COMPLETA. Herramienta del DESARROLLADOR (restaurar-copia.mjs): no
+ * hay botón en el panel a propósito, porque es la única operación que reemplaza el
+ * negocio entero.
+ *
+ * Por defecto solo SIMULA: valida el archivo y dice qué escribiría. Con `deVerdad`:
+ *  1. guarda el estado ACTUAL como `respaldo-antes-de-restaurar-<fecha>` (por si la copia
+ *     resulta ser la equivocada),
+ *  2. escribe cada mes del archivo tal cual venía en la copia,
+ *  3. escribe el documento principal con las pilas de deshacer VACÍAS (un Deshacer no
+ *     puede saltar por encima de una restauración) y el índice de meses de la copia.
+ * Los meses que existan en el almacén y no estén en la copia NO se borran: quedan fuera
+ * del índice, recuperables.
+ *
+ * Se corre con el negocio cerrado y todas las pantallas cerradas, y después se vuelve a
+ * desplegar: una instancia con el estado de antes en memoria podría escribir encima.
+ */
+export async function restaurarCopia(
+  crudo: unknown,
+  opciones: { deVerdad?: boolean; ahora?: Date } = {},
+): Promise<PlanRestauracion> {
+  const c = crudo as Partial<CopiaCompleta> | null;
+  if (!c || typeof c !== "object" || c.formato !== "papaghetti/copia-completa") {
+    throw new Error("Ese archivo no es una copia completa de Papaghetti.");
+  }
+  if (c.version !== 1) throw new Error(`Versión de copia desconocida (${String(c.version)}).`);
+  if (c.completo !== true) {
+    throw new Error("La copia está incompleta (se cortó al descargarla): no se restaura.");
+  }
+  const cerebro = c.cerebro;
+  if (!cerebro || typeof cerebro !== "object" || !Array.isArray(cerebro.pedidos)) {
+    throw new Error("La copia no trae el documento principal.");
+  }
+  const archivo = c.archivo && typeof c.archivo === "object" ? c.archivo : {};
+  const meses = Object.keys(archivo).filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
+  for (const m of meses) {
+    if (!Array.isArray(archivo[m]?.pedidos)) throw new Error(`El mes ${m} de la copia viene dañado.`);
+  }
+  const plan: PlanRestauracion = {
+    generadoEn: String(c.generadoEn ?? ""),
+    pedidos: cerebro.pedidos.length,
+    meses,
+    pedidosArchivados: meses.reduce((s, m) => s + archivo[m].pedidos.length, 0),
+    destino: {
+      backend: supabaseEnabled() ? "supabase" : blobEnabled() ? "blob" : "archivo",
+      entorno: process.env.VERCEL_ENV || "local",
+    },
+  };
+  if (!opciones.deVerdad) return plan;
+
+  return enFila(async () => {
+    const ahora = opciones.ahora ?? new Date();
+    const actual = await readFresco();
+    const respaldo = `respaldo-antes-de-restaurar-${ahora.toISOString().replace(/[:.]/g, "-")}`;
+    await escribirDoc(respaldo, actual);
+    for (const m of meses) await escribirDoc(claveMes(m), archivo[m]);
+    const doc = migrate({ ...structuredClone(cerebro), undo: [], redo: [], archivoMeses: meses });
+    doc.historial = [
+      nuevaEntrada(`Restauró la copia del ${plan.generadoEn.slice(0, 10) || "?"} (el estado anterior quedó en ${respaldo})`, true),
+      ...(doc.historial ?? []),
+    ].slice(0, HIST_CAP);
+    await write(doc, true);
+    olvidar();
+    return { ...plan, respaldo };
+  });
+}
+
 /**
  * ¿Estamos en Vercel SIN almacén (ni Blob ni Supabase)? Entonces el cerebro escribe en /tmp, que es
  * efímero y distinto por instancia de lambda: el pedido que entra por QR puede no
@@ -1119,13 +1198,123 @@ function unir<T extends { id: string }>(base: T[], mio: T[]): T[] {
   return [...m.values()];
 }
 
+/* ── LA FUSIÓN A TRES VÍAS (la usa `fusionar`, justo abajo) ───────────────────── */
+
+/**
+ * ¿Lo mismo? Igualdad profunda de lo que viaja en el cerebro (JSON): sin importar el
+ * orden de las claves, y un campo en `undefined` cuenta como ausente, que es como queda
+ * al guardarse.
+ */
+function igual(x: unknown, y: unknown): boolean {
+  if (x === y) return true;
+  if (typeof x !== "object" || typeof y !== "object" || x === null || y === null) return false;
+  if (Array.isArray(x) || Array.isArray(y)) {
+    return Array.isArray(x) && Array.isArray(y) && x.length === y.length && x.every((v, i) => igual(v, y[i]));
+  }
+  const a = x as Record<string, unknown>;
+  const b = y as Record<string, unknown>;
+  const ka = Object.keys(a).filter((k) => a[k] !== undefined);
+  const kb = Object.keys(b).filter((k) => b[k] !== undefined);
+  return ka.length === kb.length && ka.every((k) => igual(a[k], b[k]));
+}
+
+const esPlano = (v: unknown): v is Record<string, unknown> =>
+  Boolean(v) && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * LA REGLA, para un valor cualquiera, con lo que había cuando LEÍ (`base`), lo MÍO y lo
+ * que hay AHORA:
+ *  · si yo no lo cambié, manda lo de ahora (aunque sea el cambio de otro);
+ *  · si el otro no lo cambió, manda lo mío;
+ *  · si los dos lo cambiamos y es un objeto, se decide clave por clave; si no, lo mío.
+ * Una lista sin ids (una receta, los toppings de un plato) cuenta como UN valor.
+ */
+function mezclar3(base: unknown, mio: unknown, actual: unknown): unknown {
+  if (igual(mio, base)) return actual;
+  if (igual(actual, base)) return mio;
+  if (esPlano(base) && esPlano(mio) && esPlano(actual)) {
+    const out: Record<string, unknown> = {};
+    for (const k of new Set([...Object.keys(mio), ...Object.keys(actual), ...Object.keys(base)])) {
+      const v = mezclar3(base[k], mio[k], actual[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    return out;
+  }
+  return mio;
+}
+
+/**
+ * Una lista con ids (la carta, la despensa, las promos, los adicionales), a tres vías:
+ *  · lo que yo agregué se queda, y lo que yo borré se va;
+ *  · lo que otro agregó mientras tanto se queda (al final: el orden es el mío);
+ *  · lo que otro borró se va, salvo que yo lo haya cambiado: entonces vuelve con lo mío,
+ *    la misma regla que con los pedidos;
+ *  · lo que está en las tres se mezcla campo por campo.
+ */
+function unir3<T extends { id: string }>(
+  base: readonly T[],
+  mio: readonly T[],
+  actual: readonly T[],
+  mezclar: (b: T, m: T, a: T) => T = (b, m, a) => mezclar3(b, m, a) as T,
+): T[] {
+  if (igual(mio, base)) return [...actual]; // no toqué la lista: como está ahora
+  if (igual(actual, base)) return [...mio]; // nadie más la tocó: la mía
+  const enBase = new Map(base.map((x) => [x.id, x]));
+  const enActual = new Map(actual.map((x) => [x.id, x]));
+  const mios = new Set(mio.map((x) => x.id));
+  const out: T[] = [];
+  for (const m of mio) {
+    const b = enBase.get(m.id);
+    const a = enActual.get(m.id);
+    if (!b) out.push(m);
+    else if (!a) {
+      if (!igual(m, b)) out.push(m);
+    } else out.push(mezclar(b, m, a));
+  }
+  for (const a of actual) if (!mios.has(a.id) && !enBase.has(a.id)) out.push(a);
+  return out;
+}
+
+/**
+ * EL STOCK ES UN CONTADOR, no un dato que alguien elige: lo mueven los pedidos (el de
+ * los insumos, y el suelto de un producto sin receta). Si otra instancia vendió un plato
+ * mientras yo cambiaba un precio, tomar mi número devolvía su descuento al inventario: el
+ * pedido quedaba registrado y la materia prima no. Se aplica MI cambio (mío − base)
+ * sobre lo que hay AHORA y los dos movimientos sobreviven. El resto de campos, a tres vías.
+ */
+function conStockPorDelta<T extends { stock?: number }>(b: T, m: T, a: T): T {
+  const r = mezclar3(b, m, a) as T;
+  if (typeof b.stock !== "number" || typeof m.stock !== "number" || typeof a.stock !== "number") return r;
+  return { ...r, stock: Math.max(0, Number((a.stock + (m.stock - b.stock)).toFixed(3))) };
+}
+
+/**
+ * Los ajustes, clave por clave (y dentro de comprobante y sitio, también). Las promos y
+ * los adicionales son listas con id, como la carta: dos creados a la vez se quedan los dos.
+ */
+function mezclarAjustes(base: Ajustes | undefined, mio: Ajustes, actual: Ajustes | undefined): Ajustes {
+  if (!base || !actual) return mio;
+  const r = { ...(mezclar3(base, mio, actual) as Ajustes) };
+  r.promos = unir3(base.promos ?? [], mio.promos ?? [], actual.promos ?? []);
+  r.adicionales = unir3(base.adicionales ?? [], mio.adicionales ?? [], actual.adicionales ?? []);
+  return r;
+}
+
 /**
  * Une lo que YO cambié con lo que otra instancia escribió mientras tanto.
  *
- * Las tres colecciones transaccionales (pedidos, movimientos, leads) son
+ * Las colecciones transaccionales (pedidos, movimientos, leads, arqueos) son
  * append-only en la práctica: si el cajero cobra el #A1 mientras entra el #B2 por
- * QR desde otra lambda, ninguno de los dos puede desaparecer. Para el resto del
- * catálogo (precios, recetas, ajustes) manda mi versión: lo edita una sola persona.
+ * QR desde otra lambda, ninguno de los dos puede desaparecer.
+ *
+ * LA CARTA, LA DESPENSA Y LOS AJUSTES, A TRES VÍAS. Antes mandaba mi copia entera ("lo
+ * edita una sola persona"), pero la copia de un pedido por QR o de un toque de la cocina
+ * puede tener dos segundos (el memo) y trae la carta entera dentro: el dueño subía los
+ * precios y el pedido siguiente, leído un instante antes, los devolvía a los viejos sin
+ * que nadie se enterara. Igual se deshacían un "Cerrar el negocio" o un "se acabó" de la
+ * cocina. Ahora, con lo que leí (`base`) a la vista, lo que yo no cambié queda como esté
+ * AHORA y lo que cambié manda (ver `mezclar3` y `unir3`). Sin esa foto (una copia armada
+ * a mano, como la de restaurar la carta) manda lo mío, como siempre.
  */
 function fusionar(actual: Catalog, mio: Catalog): Catalog {
   // Las tres listas se guardan MÁS NUEVO PRIMERO y las pantallas confían en ese
@@ -1134,21 +1323,17 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
   // registrar no salía arriba en Finanzas.
   const recientes = <T>(xs: T[], fecha: (x: T) => string) =>
     [...xs].sort((a, b) => fecha(b).localeCompare(fecha(a)));
-  /* LA DESPENSA SE FUSIONA POR DELTA, no por "gana el último".
-     Si otra instancia vendió un plato mientras yo cambiaba un precio, tomar mi copia
-     entera devolvía su descuento al inventario: el pedido quedaba registrado y la
-     materia prima no. Aplicando MI cambio (mio - base) sobre lo que hay AHORA, los
-     dos movimientos sobreviven. */
   const base = origen.get(mio);
-  const insumos = base
-    ? (mio.insumos ?? []).map((m) => {
-        const b = base.insumos?.find((x) => x.id === m.id);
-        const a = actual.insumos?.find((x) => x.id === m.id);
-        if (!b || !a) return m; // insumo nuevo o borrado: manda mi versión
-        const delta = m.stock - b.stock;
-        return delta === 0 ? { ...m, stock: a.stock } : { ...m, stock: Math.max(0, Number((a.stock + delta).toFixed(3))) };
-      })
-    : mio.insumos;
+  const carta: Partial<Catalog> = base
+    ? {
+        bases: unir3(base.bases ?? [], mio.bases ?? [], actual.bases ?? [], conStockPorDelta),
+        proteinas: unir3(base.proteinas ?? [], mio.proteinas ?? [], actual.proteinas ?? [], conStockPorDelta),
+        toppings: unir3(base.toppings ?? [], mio.toppings ?? [], actual.toppings ?? [], conStockPorDelta),
+        enredos: unir3(base.enredos ?? [], mio.enredos ?? [], actual.enredos ?? []),
+        insumos: unir3(base.insumos ?? [], mio.insumos ?? [], actual.insumos ?? [], conStockPorDelta),
+        ajustes: mezclarAjustes(base.ajustes, mio.ajustes, actual.ajustes),
+      }
+    : {};
   /* SOLO LO QUE YO CAMBIÉ. De mi copia viajan los pedidos NUEVOS y los que YO toqué;
      los que traigo igual que como los leí se dejan como estén AHORA.
      Son dos fallos en uno:
@@ -1173,7 +1358,7 @@ function fusionar(actual: Catalog, mio: Catalog): Catalog {
   const misMeses = (mio.archivoMeses ?? []).filter((m) => !base || !(base.archivoMeses ?? []).includes(m));
   return {
     ...mio,
-    insumos,
+    ...carta,
     pedidos: recientes(unir(actual.pedidos ?? [], misPedidos), (p) => p.creadoEn),
     movimientos: recientes(unir(actual.movimientos ?? [], mio.movimientos ?? []), (m) => m.fecha),
     leads: recientes(unir(actual.leads ?? [], mio.leads ?? []), (l) => l.creadoEn),
@@ -1410,6 +1595,59 @@ export async function usuariosDelPanel(): Promise<string[]> {
     return USUARIOS;
   }
 }
+
+/* ═══════════════════ FASE 4 · EL SITIO EN MANOS DEL DUEÑO ═══════════════════
+   (lib/sitio.ts se importa aquí dentro y no arriba: este bloque es todo lo que la
+   fase toca de este archivo.) */
+
+/**
+ * EL SITIO QUE PUEDE VER UN DESCONOCIDO: los datos del negocio y lo que el dueño escribió
+ * en Ajustes → Sitio, ya resueltos (ver `sitioPublicoDe` en lib/sitio.ts).
+ *
+ * Va APARTE de getCatalogPublico a propósito: FeaturedMenu recibe el catálogo público
+ * entero y todo lo que lleva viaja dentro del HTML. Un borrador de reseña, un teléfono que
+ * el dueño no quiso mostrar o los usuarios del panel no pueden ir ahí — ni aquí: esta
+ * puerta tampoco los entrega.
+ */
+export async function getSitioPublico() {
+  const { sitioPublicoDe } = await import("./sitio");
+  return sitioPublicoDe((await read()).ajustes);
+}
+
+/**
+ * GUARDA UN CAMBIO DEL SITIO SOBRE LO QUE HAY AHORA. `cambio` recibe los ajustes de este
+ * momento y devuelve lo que cambia: campos de siempre (WhatsApp, dirección…) y/o el
+ * `sitio` entero ya mezclado (ver `conCampos`). Hace falta leer antes de escribir porque
+ * updateAjustes reemplaza cada grupo del sitio entero, y la portada guarda en el mismo
+ * grupo sus textos y su foto: guardar la frase borraba la foto, y agregar una reseña
+ * necesita las que ya hay.
+ *
+ * `transaccional` es para las FOTOS. No viajan en la pila de Deshacer (RUTAS_IMAGEN_AJUSTES:
+ * pesan demasiado para copiarlas seis veces), así que su foto en la pila sería un
+ * «Deshacer: Cambió la foto» que no deshace nada. Quedan en el historial, y para volver a
+ * la de fábrica cada foto tiene su propio botón.
+ *
+ * Devuelve si hubo cambio. Guardar un bloque tal como estaba no escribe nada: dejaba un
+ * paso en la pila que no deshacía nada, y el «Deshacer» siguiente se gastaba en él en
+ * vez de revertir el cambio de verdad.
+ */
+export async function guardarSitio(
+  cambio: (a: Ajustes) => Partial<Ajustes>,
+  texto: string,
+  opciones?: { transaccional?: boolean },
+): Promise<boolean> {
+  const cat = await read();
+  const antes = normalizarAjustes(cat.ajustes);
+  const despues = normalizarAjustes({ ...cat.ajustes, ...cambio(cat.ajustes) });
+  // Un sitio sin nada propio es un sitio de fábrica: ni siquiera el objeto vacío.
+  if (despues.sitio && !Object.keys(despues.sitio).length) delete despues.sitio;
+  if (JSON.stringify(despues) === JSON.stringify(antes)) return false;
+  cat.ajustes = despues;
+  await commit(cat, texto, opciones?.transaccional ? { transaccional: true } : undefined);
+  return true;
+}
+
+/* ═══════════════════ (fin de la fase 4) ═══════════════════ */
 
 export async function updateIngrediente(
   id: string,
@@ -3371,3 +3609,59 @@ export async function updateLead(
 }
 
 export type { EstadoLead };
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SUBIR O BAJAR LOS PRECIOS DE UNA VEZ (Precios → Ajustar precios)
+
+   El plan lo arma lib/precios.ts (`planAjuste`): el MISMO que pinta la vista previa.
+   Aquí solo se comprueba que lo que el dueño vio sigue siendo verdad, y se guarda:
+    · UN commit normal. Deshacer lo revierte entero (platos y adicionales incluidos) y,
+      como los pedidos ya no ocupan la pila, sigue ahí aunque entren pedidos después.
+    · Solo cambian los PRECIOS. Nombres, fotos, disponibilidad y recetas viajan como
+      estaban, y la fusión a tres vías (ver `fusionar`) deja pasar lo que otra pantalla
+      cambie de ellos mientras tanto.
+    · La FIRMA es la huella de la vista previa (cada "antes → después"). Si no coincide,
+      algo cambió desde que se miró —otro precio, un producto nuevo, o este mismo ajuste
+      que ya entró con un doble toque— y no se toca nada.
+   El import vive con su bloque y no arriba con los demás: así el bloque se lee (y se
+   fusiona entre ramas) de una pieza.
+   ══════════════════════════════════════════════════════════════════════════ */
+import { planAjuste, listasAjusteDe, textoAjuste, PCT_MAX_AJUSTE, type GrupoAjuste } from "./precios";
+
+export async function ajustarPrecios(input: {
+  pct: number;
+  grupos: readonly GrupoAjuste[];
+  firma: string;
+}): Promise<{ n: number; texto: string }> {
+  const pct = Math.round(Number(input?.pct) * 10) / 10;
+  if (!Number.isFinite(pct) || pct === 0 || Math.abs(pct) > PCT_MAX_AJUSTE) {
+    throw new Error(`El porcentaje tiene que estar entre 0,1 y ${PCT_MAX_AJUSTE} %.`);
+  }
+  /* Lectura FRESCA, no la copia de hasta 2 s del memo: la firma se compara contra lo que
+     hay de verdad ahora, no contra lo que esta instancia vio hace un momento. */
+  const cat = await readFresco();
+  const plan = planAjuste(listasAjusteDe(cat), pct, Array.isArray(input?.grupos) ? input.grupos : []);
+  if (plan.firma !== String(input?.firma ?? "")) {
+    throw new Error("Los precios cambiaron mientras mirabas la vista previa: revísala de nuevo.");
+  }
+  if (!plan.cambios.length) {
+    throw new Error("Con ese porcentaje no cambia ningún precio. Prueba otro, o elige otros grupos.");
+  }
+  const donde: Record<GrupoAjuste, { id: string; precio: number }[]> = {
+    bases: cat.bases,
+    proteinas: cat.proteinas,
+    acompanantes: cat.toppings,
+    platos: cat.enredos,
+    adicionales: cat.ajustes.adicionales ?? [],
+  };
+  for (const c of plan.cambios) {
+    const it = donde[c.grupo].find((x) => x.id === c.id);
+    if (!it) throw new Error("Los precios cambiaron mientras mirabas la vista previa: revísala de nuevo.");
+    // Un adicional pasa por las mismas reglas que en la caja: mayor que cero y con tope.
+    if (c.grupo === "adicionales") itemAdicional({ nombre: c.nombre, precio: c.despues }, 0);
+    it.precio = c.despues;
+  }
+  const texto = textoAjuste(plan, pct);
+  await commit(cat, texto);
+  return { n: plan.cambios.length, texto };
+}

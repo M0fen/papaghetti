@@ -7161,6 +7161,169 @@ body.enreda-jugando .sticky-pedir {
 /* ══════════════════════════════════════════════════════════════════════════
    FASE 2 · AJUSTE DE PRECIOS
    ══════════════════════════════════════════════════════════════════════════ */
+/* Precios → «Ajustar precios» (components/admin/AjustePrecios.tsx). Mide lo mismo que
+   el bloque de reglas y adicionales que tiene encima (860 px, y todo el ancho desde 1100),
+   y sus filas se acomodan a LA TARJETA (container), no a la ventana. */
+.ajp { container-type: inline-size; max-width: 860px; margin-bottom: 18px; scroll-margin-top: 80px; }
+@media (min-width: 1100px) {
+  .ajp { max-width: none; }
+}
+/* El renglón de dos bases en «Cómo se cobra» lleva su enlace a Ajustes: que se vea enlace. */
+.cobro-reglas__cambiar { color: var(--pg-pomodoro, #c8321e); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.ajp__sub { margin: -4px 0 14px; font-size: 0.88rem; line-height: 1.5; opacity: 0.75; max-width: 64ch; }
+.ajp__listo {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(76, 154, 90, 0.12);
+  border: 1px solid rgba(76, 154, 90, 0.38);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.ajp__form { display: grid; gap: 14px; }
+.ajp__campos,
+.ajp__grupos { border: 0; padding: 0; margin: 0; min-width: 0; }
+.ajp__campos { display: grid; gap: 10px; }
+/* Mientras se aplica no se puede cambiar lo que se está aplicando. */
+.ajp__campos:disabled { opacity: 0.6; }
+.ajp__cuanto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ajp__sentido,
+.ajp__rapidos,
+.ajp__chips { display: flex; flex-wrap: wrap; gap: 7px; }
+/* Objetivos táctiles de verdad: todo esto se toca con el pulgar. */
+.ajp .chipbtn { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 0.86rem; cursor: pointer; }
+.ajp .chipbtn.is-on { background: var(--pg-oro, #f2a516); border-color: transparent; color: #241a0c; }
+/* La casilla de verdad está escondida dentro del chip: el foco se dibuja en el chip, y solo
+   cuando se llega con el teclado (con el dedo, un anillo después de cada toque estorba). */
+.ajp label.chipbtn:has(input:focus-visible) { outline: 2px solid var(--pg-oro-ink, #9a6300); outline-offset: 2px; }
+.ajp .chipbtn small { font-size: 0.74rem; font-weight: 700; opacity: 0.6; }
+.ajp .chipbtn.is-vacio { opacity: 0.45; cursor: not-allowed; }
+.ajp__pct {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 2px solid rgba(30, 22, 17, 0.16);
+  background: #fff;
+}
+.ajp__pct:focus-within { border-color: var(--pg-oro, #f2a516); }
+.ajp__pct input {
+  width: 4ch;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 800;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ajp__pct input:focus { outline: none; }
+.ajp__pct > span:last-child { font-size: 1.1rem; font-weight: 800; opacity: 0.6; }
+.ajp__grupos legend {
+  margin-bottom: 7px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+.ajp__grupos .field__nota { display: block; margin-top: 8px; max-width: 70ch; }
+.ajp__falta { margin: 0; }
+.ajp__previa { display: grid; gap: 10px; padding-top: 14px; border-top: 1px dashed rgba(30, 22, 17, 0.16); }
+.ajp__resumen { margin: 0; font-size: 0.98rem; font-weight: 800; }
+.ajp__resumen span { font-weight: 600; opacity: 0.7; }
+/* Acotada: el botón de aplicar queda a la vista justo debajo, aun con la carta entera. */
+.ajp__lista {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 14px 6px;
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  border-radius: 14px;
+  background: #fffdf8;
+}
+/* El nombre del grupo se queda arriba mientras se baja por sus precios. */
+.ajp__grupo h3 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 12px 0 6px;
+  background: #fffdf8;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(30, 22, 17, 0.62);
+}
+.ajp__grupo h3 span { margin-left: 4px; font-weight: 800; }
+.ajp__grupo ul { list-style: none; margin: 0; padding: 0; }
+.ajp__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(30, 22, 17, 0.06);
+  font-size: 0.9rem;
+}
+.ajp__grupo li:last-child { border-bottom: 0; }
+.ajp__item.is-igual { opacity: 0.62; }
+.ajp__nombre { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.ajp__off {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--pg-crema-2, #f3e4c9);
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ajp__precios {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.ajp__precios s { opacity: 0.55; }
+.ajp__precios b { font-weight: 800; }
+.ajp__precios small { font-size: 0.74rem; font-weight: 600; opacity: 0.75; }
+.ajp__precios .ajp__dif { color: var(--pg-oro-ink, #9a6300); font-weight: 800; opacity: 1; }
+.ajp__avisos {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(242, 165, 22, 0.55);
+  background: #fff6ea;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+.ajp__avisos ul { display: grid; gap: 4px; margin: 6px 0 0; padding-left: 18px; }
+.ajp__cuentas { display: block; margin: 0; font-size: 0.8rem; }
+.ajp__pie { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px 14px; }
+.ajp__error { flex: 1 1 260px; margin: 0; font-size: 0.86rem; }
+.ajp__aplicar { min-height: 48px; justify-content: center; text-align: center; }
+.ajp__aplicar:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+@container (max-width: 520px) {
+  .ajp__item { grid-template-columns: minmax(0, 1fr); }
+  .ajp__precios { justify-content: flex-start; }
+  .ajp__aplicar { width: 100%; }
+  /* En el celular la lista ocupa media pantalla: al llegar a su final, el siguiente gesto
+     del pulgar sigue bajando la página (sin tener que buscar un borde libre para tocar). */
+  .ajp__lista { overscroll-behavior: auto; }
+}
+/* La hoja de siempre, justo debajo (PreciosRapidos). A 390 px el buscador no cedía ancho
+   (un campo de texto no se encoge por debajo de su ancho natural) y empujaba «+ Nuevo
+   producto» fuera de la tarjeta, cortado a la mitad. Ahora, si no caben juntos, el botón
+   baja a su propio renglón. */
+.prq__buscar { flex-wrap: wrap; }
+.prq__buscar input { min-width: min(100%, 180px); }
 
 /* ═══ (fin de la fase 2) ═══ */
 
@@ -7169,11 +7332,319 @@ body.enreda-jugando .sticky-pedir {
    FASE 3 · COMPROBANTE
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* ── El papel en pantalla: lo nuevo que trae el comprobante personalizable ── */
+/* El nombre escrito cuando el logo no carga (el papel nunca se queda sin cabecera). */
+.cbte__nombre {
+  margin: 0;
+  font-family: var(--pg-font-display);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.1;
+  text-align: center;
+}
+/* El logo ENCAJA en su caja, como en la imagen: uno cuadrado ya no sale de 174 px de alto. */
+.cbte__logo { width: auto; max-width: 174px; max-height: 74px; }
+/* Las líneas del dueño al pie (Wi-Fi, Instagram, web), entre la nota legal y el cierre. */
+.cbte__pie .cbte__extra { margin-top: 5px; font-size: 9.5px; line-height: 1.4; }
+/* Cada base de un plato de dos bases es un bloque: el renglón se parte en la barra. */
+.cbte__trozo { display: inline-block; max-width: 100%; }
+/* Una dirección o una URL larga se parte en vez de salirse del papel. */
+.cbte__meta dd { min-width: 0; overflow-wrap: anywhere; }
+.cbte__nom, .cbte__nota, .cbte__datos span, .cbte__pie p { overflow-wrap: anywhere; }
+@media print {
+  .cbte__logo { width: auto; max-width: 46mm; max-height: 20mm; }
+  .cbte--r58 .cbte__logo { width: auto; max-width: 34mm; max-height: 14.5mm; }
+}
+
+/* ── Ajustes → Comprobante: el editor con el papel al lado ── */
+.cbte-editor { display: grid; gap: 14px; }
+.cbte-editor__cabeza .setgroup__nota { margin-bottom: 0; }
+.cbte-editor__ir { font-weight: 700; color: var(--pg-pomodoro, #d1381f); white-space: nowrap; }
+.cbte-editor__cuerpo { display: grid; gap: 18px; align-items: start; }
+.cbte-editor__col { display: grid; gap: 14px; min-width: 0; }
+/* `.settings` limita el ancho para las secciones sueltas; aquí manda la columna. */
+.cbte-editor__form { max-width: none; }
+/* La dirección ocupa la fila entera: es el dato más largo y a media fila se cortaba. */
+.cbte-editor .setgrid .field--full { grid-column: 1 / -1; }
+.cbte-editor__h { margin: 0; font-size: 0.95rem; font-weight: 800; }
+.cbte-editor__logo { display: grid; gap: 10px; }
+/* El logo a su tamaño en el papel de 58 mm (264 × 112 puntos), sobre blanco. */
+.cbte-editor__logocaja {
+  display: grid;
+  place-items: center;
+  min-height: 112px;
+  padding: 12px;
+  background: #fff;
+  border: 1px dashed rgba(30, 22, 17, 0.2);
+  border-radius: var(--pg-radius);
+}
+.cbte-editor__logocaja img { display: block; max-width: min(100%, 264px); max-height: 112px; width: auto; height: auto; }
+.cbte-editor__acciones { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cbte-editor__acciones form { margin: 0; }
+/* Objetivos táctiles de 44 px: el editor se usa también desde el celular. */
+.cbte-editor .btnmini { min-height: 44px; }
+.cbte-editor__chips, .cbte-editor__tinta { display: flex; flex-wrap: wrap; gap: 8px; }
+.cbte-editor__chip { min-height: 44px; padding: 8px 14px; font-size: 0.86rem; }
+.cbte-editor__pie { display: grid; gap: 12px; margin-bottom: 8px; }
+.cbte-editor__pie .field__nota, .cbte-editor__pie .field__alerta { overflow-wrap: anywhere; }
+.cbte-editor__sitio { display: block; margin-top: 12px; }
+/* Lo fijo se ve como fijo: sin campo, con su porqué debajo. */
+.cbte-editor__fijo {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--pg-radius);
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  background: rgba(30, 22, 17, 0.035);
+}
+.cbte-editor__fijo b { font-size: 0.9rem; }
+.cbte-editor__fijo p { margin: 0; font-size: 0.88rem; line-height: 1.45; }
+.cbte-editor__fijo p span {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.cbte-editor__error, .cbte-editor__pendiente { margin: 0; font-size: 0.86rem; }
+
+/* La vista previa: el papel, la impresora de texto y el WhatsApp. */
+.cbte-editor__vista {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  min-width: 0;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  border-radius: var(--pg-radius-lg);
+}
+.cbte-editor__opciones { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.cbte-editor__seg { max-width: 100%; }
+.cbte-editor__seg button { min-height: 44px; }
+.cbte-editor__cargando { margin: 40px 0; }
+/* La impresora de texto, columna a columna: el recuadro mide justo el ancho del papel. */
+.cbte-editor__esc {
+  max-width: 100%;
+  padding: 12px 10px;
+  overflow-x: auto;
+  background: #fff;
+  color: #000;
+  border: 1px solid rgba(30, 22, 17, 0.16);
+  border-radius: 6px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+.cbte-editor__esc--32 { font-size: 13px; width: calc(32ch + 22px); }
+.cbte-editor__esc--48 { font-size: 10.5px; width: calc(48ch + 22px); }
+.cbte-editor__escl { white-space: pre; line-height: 1.35; }
+.cbte-editor__escl.is-centro { text-align: center; }
+.cbte-editor__escl.is-der { text-align: right; }
+.cbte-editor__escl.is-b { font-weight: 800; }
+/* Letra doble: el doble de ancho y de alto, como la imprime la térmica. */
+.cbte-editor__escl.is-doble { font-size: 2em; line-height: 1.15; }
+.cbte-editor__escl.is-alto { transform: scaleY(1.8); margin: 0.3em 0; }
+/* El WhatsApp, como burbuja: lo que lee el cliente en el celular. */
+.cbte-editor__wa {
+  width: 100%;
+  max-width: 330px;
+  padding: 10px 12px;
+  background: #e7ffdb;
+  color: #111b21;
+  border-radius: 10px 10px 10px 2px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  font-size: 0.86rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+/* Los espacios cuentan: WhatsApp respeta los de "Nido Carbonara   $32.000" y la sangría
+   del detalle, y la vista previa también. */
+.cbte-editor__wa > div { min-height: 1.4em; white-space: pre-wrap; }
+@media (min-width: 1180px) {
+  .cbte-editor__cuerpo { grid-template-columns: minmax(0, 1fr) 360px; }
+  .cbte-editor__vista { position: sticky; top: 16px; }
+  .cbte-editor__ir { display: none; }
+}
+@media (max-width: 520px) {
+  .cbte-editor__vista { padding: 10px; }
+  .cbte-editor__seg button { padding: 0 10px; }
+}
+
 /* ═══ (fin de la fase 3) ═══ */
 
 
 /* ══════════════════════════════════════════════════════════════════════════
    FASE 4 · SITIO (textos, enlaces, fotos, reseñas)
    ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── El sitio público: solo piezas NUEVAS, que no existen con los valores de fábrica. ── */
+
+/* La foto de portada del dueño entra SIEMPRE en el retrato 4:5 del diseño (el de la foto
+   de fábrica): una apaisada habría achatado la portada. Mientras carga, el color del
+   fondo de la portada en vez de un hueco. */
+.hero__foto--propia {
+  display: block;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  background-color: #ead7b2;
+}
+/* El teléfono se toca para llamar: área de 44 px sin engordar la fila. */
+.loc__tel {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-block: -12px;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: rgba(251, 241, 222, 0.35);
+  text-underline-offset: 4px;
+}
+.footer__redes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 18px;
+  margin-top: 10px;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+.footer__redes a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 6px;
+  color: var(--pg-oro);
+}
+.resena__fuente a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ── Ajustes → Sitio ── */
+.sitio-ajustes .adminx__pageh p { max-width: 70ch; }
+.sitio-ver { font-weight: 700; color: var(--pg-oro-ink); text-decoration: underline; text-underline-offset: 3px; }
+
+/* Cada bloque, plegado: se lee qué es y cómo está sin abrirlo. */
+.sitio-grupo { margin-top: 10px; background: rgba(255, 253, 244, 0.6); }
+.sitio-grupo > summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 12px;
+  min-height: 60px;
+  padding: 12px 46px 12px 18px;
+}
+.sitio-grupo > summary::after {
+  content: "";
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  opacity: 0.5;
+  transform: translateY(-70%) rotate(45deg);
+  transition: transform 0.2s;
+}
+.sitio-grupo[open] > summary::after { transform: translateY(-25%) rotate(225deg); }
+.sitio-grupo__tit { font-weight: 800; }
+.sitio-grupo__sub { grid-column: 1; font-size: 0.8rem; font-weight: 500; opacity: 0.62; }
+.sitio-chip {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--pg-crema-2);
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sitio-chip.is-alerta { background: rgba(200, 50, 30, 0.12); color: var(--pg-pomodoro); }
+.sitio-grupo__cuerpo { padding: 14px 18px 18px; }
+.sitio-grupo .setgrid { padding: 0; } /* el bloque ya trae su margen (ver .setgroup--details) */
+.sitio-sub { margin: 22px 0 10px; padding-top: 16px; border-top: 1px dashed rgba(30, 22, 17, 0.14); font-size: 0.95rem; }
+
+.sitio-form { display: grid; gap: 4px; }
+.sitio-campo--completo { grid-column: 1 / -1; }
+.sitio-etq { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sitio-cuenta { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sitio-cuenta.is-pasado { color: var(--pg-pomodoro); font-weight: 800; }
+.sitio-form textarea.admin-input { resize: vertical; min-height: 64px; line-height: 1.45; font-family: var(--pg-font-body); }
+.sitio-form .admin-input[aria-invalid="true"] { border-color: var(--pg-pomodoro); }
+.sitio-casilla .admin-check { min-height: 44px; }
+.sitio-casilla .admin-check input[type="checkbox"] { width: 20px; height: 20px; margin-top: 1px; }
+.sitio-casilla .admin-check em { font-size: 0.84rem; }
+.sitio-botones { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 14px; }
+.sitio-restaurar { min-height: 44px; }
+.sitio-msj {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.sitio-msj.is-ok { background: #eef7f0; color: #1d5e2e; border: 1px solid rgba(76, 154, 90, 0.4); }
+.sitio-msj.is-error { background: #fdecea; color: #8a1f12; border: 1px solid rgba(200, 50, 30, 0.35); }
+
+/* Fotos: la vista previa con la forma que tendrá en el sitio. */
+.sitio-foto__fila { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 18px; }
+.sitio-foto__datos { flex: 1; min-width: 220px; display: grid; gap: 10px; }
+.sitio-foto__hoy { margin: 0; font-size: 0.92rem; }
+.imgup__preview--retrato { width: 144px; height: 180px; }
+.imgup__preview--apaisada { width: 228px; height: 120px; }
+.sitio-foto .imgup__btn { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 16px; font-size: 0.88rem; }
+.sitio-foto .imgup__acts .linkbtn { min-height: 44px; }
+
+/* Reseñas */
+.sitio-resenas { display: grid; gap: 14px; }
+.sitio-resenas__estado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--pg-crema-2);
+  border: 1px solid rgba(30, 22, 17, 0.1);
+}
+.sitio-resenas__estado.is-on { background: #eef7f0; border-color: rgba(76, 154, 90, 0.4); }
+.sitio-resenas__estado p { flex: 1; min-width: 200px; margin: 0; font-size: 0.9rem; line-height: 1.45; }
+.sitio-resenas__estado .btn { min-height: 44px; }
+.sitio-resenas__estado .sitio-msj { flex-basis: 100%; margin: 0; }
+.sitio-resenas__lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.sitio-resena {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  border-radius: 12px;
+  background: #fff;
+}
+.sitio-resena__texto { display: grid; gap: 4px; min-width: 0; font-size: 0.9rem; line-height: 1.45; }
+.sitio-resena__texto q { quotes: "«" "»"; overflow-wrap: anywhere; }
+.sitio-resena__texto small { opacity: 0.72; }
+.sitio-resena__texto a { color: var(--pg-oro-ink); font-weight: 700; }
+.sitio-resena__estrellas { color: var(--pg-oro); letter-spacing: 1px; }
+.sitio-resena form { display: grid; justify-items: end; gap: 6px; }
+.sitio-resena .btn { min-height: 44px; }
+.sitio-resenas__nueva { padding-top: 14px; border-top: 1px dashed rgba(30, 22, 17, 0.14); }
+.sitio-resenas__nueva h4 { margin: 0 0 10px; font-size: 0.95rem; }
+
+@media (max-width: 520px) {
+  /* En el celular el estado del bloque baja a su propia línea: al lado del título lo apretaba. */
+  .sitio-grupo > summary { grid-template-columns: 1fr; padding-right: 42px; }
+  .sitio-chip { grid-column: 1; grid-row: auto; justify-self: start; margin-top: 4px; }
+  .sitio-grupo__cuerpo { padding: 12px 14px 16px; }
+  .sitio-resena { flex-direction: column; }
+  .sitio-resena form { justify-items: start; }
+}
 
 /* ═══ (fin de la fase 4) ═══ */
