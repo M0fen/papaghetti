@@ -6,11 +6,11 @@
  * documento (tamaño físico de página e imagen embebida), el fallback sin popups,
  * el camino automático, un tiquete largo, uno anulado, y la hoja normal.
  *
- *   node qa-impresion-profunda.mjs    (servidor en :3112 con despensa cargada)
+ *   node qa-impresion-profunda.mjs    (servidor en PG_URL, por defecto :3112, con despensa cargada)
  */
 import { chromium } from "playwright";
 import fs from "node:fs";
-const B = "http://127.0.0.1:3112";
+const B = process.env.PG_URL || "http://127.0.0.1:3112";
 const S = "C:/Users/Carlos/AppData/Local/Temp/claude/c--Users-Carlos-Desktop-Papaghetti/0b9eca89-af0c-469f-953c-639458dbdd51/scratchpad";
 let ok = 0, mal = 0;
 const check = (n, c, d = "") => { c ? ok++ : mal++; console.log(`  ${c ? "OK " : "MAL"} ${n}${d ? " · " + d : ""}`); };
@@ -110,7 +110,10 @@ await p.getByRole("button", { name: /^Imprimir$/ }).click();
 await p.waitForTimeout(2500);
 let doc = await p.evaluate(() => window.__doc);
 check("se abre una pestaña y se imprime", Boolean(doc) && !doc.startsWith("IFRAME:"));
-check("la imagen va a 48mm centrados, con tope al ancho útil", /img\{display:block;width:48mm;max-width:100%;margin:0 auto/.test(doc || ""));
+/* Apoyada a la DERECHA, que es la posición de fábrica (ALINEACION_POR_DEFECTO en
+   lib/rollo): el driver de la TP586 quema los 48 mm de la derecha. Esta aserción
+   pedía "centrada" desde antes de ese cambio y fallaba sola. */
+check("la imagen va a 48mm apoyada a la derecha, con tope al ancho útil", /img\{display:block;width:48mm;max-width:100%;margin:0 0 0 auto/.test(doc || ""));
 /* SIN `size`: los drivers declaran 80×297 y 80×3276 y no todos arrancan en el mismo;
    si el @page no coincide con el papel elegido, Chrome encoge o centra la página
    ("el tiquete en un fragmento del lienzo"). Sin size, manda el papel del driver. */

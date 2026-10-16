@@ -7319,6 +7319,144 @@ body.enreda-jugando .sticky-pedir {
    FASE 3 · COMPROBANTE
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* ── El papel en pantalla: lo nuevo que trae el comprobante personalizable ── */
+/* El nombre escrito cuando el logo no carga (el papel nunca se queda sin cabecera). */
+.cbte__nombre {
+  margin: 0;
+  font-family: var(--pg-font-display);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.1;
+  text-align: center;
+}
+/* El logo ENCAJA en su caja, como en la imagen: uno cuadrado ya no sale de 174 px de alto. */
+.cbte__logo { width: auto; max-width: 174px; max-height: 74px; }
+/* Las líneas del dueño al pie (Wi-Fi, Instagram, web), entre la nota legal y el cierre. */
+.cbte__pie .cbte__extra { margin-top: 5px; font-size: 9.5px; line-height: 1.4; }
+/* Cada base de un plato de dos bases es un bloque: el renglón se parte en la barra. */
+.cbte__trozo { display: inline-block; max-width: 100%; }
+/* Una dirección o una URL larga se parte en vez de salirse del papel. */
+.cbte__meta dd { min-width: 0; overflow-wrap: anywhere; }
+.cbte__nom, .cbte__nota, .cbte__datos span, .cbte__pie p { overflow-wrap: anywhere; }
+@media print {
+  .cbte__logo { width: auto; max-width: 46mm; max-height: 20mm; }
+  .cbte--r58 .cbte__logo { width: auto; max-width: 34mm; max-height: 14.5mm; }
+}
+
+/* ── Ajustes → Comprobante: el editor con el papel al lado ── */
+.cbte-editor { display: grid; gap: 14px; }
+.cbte-editor__cabeza .setgroup__nota { margin-bottom: 0; }
+.cbte-editor__ir { font-weight: 700; color: var(--pg-pomodoro, #d1381f); white-space: nowrap; }
+.cbte-editor__cuerpo { display: grid; gap: 18px; align-items: start; }
+.cbte-editor__col { display: grid; gap: 14px; min-width: 0; }
+/* `.settings` limita el ancho para las secciones sueltas; aquí manda la columna. */
+.cbte-editor__form { max-width: none; }
+/* La dirección ocupa la fila entera: es el dato más largo y a media fila se cortaba. */
+.cbte-editor .setgrid .field--full { grid-column: 1 / -1; }
+.cbte-editor__h { margin: 0; font-size: 0.95rem; font-weight: 800; }
+.cbte-editor__logo { display: grid; gap: 10px; }
+/* El logo a su tamaño en el papel de 58 mm (264 × 112 puntos), sobre blanco. */
+.cbte-editor__logocaja {
+  display: grid;
+  place-items: center;
+  min-height: 112px;
+  padding: 12px;
+  background: #fff;
+  border: 1px dashed rgba(30, 22, 17, 0.2);
+  border-radius: var(--pg-radius);
+}
+.cbte-editor__logocaja img { display: block; max-width: min(100%, 264px); max-height: 112px; width: auto; height: auto; }
+.cbte-editor__acciones { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cbte-editor__acciones form { margin: 0; }
+/* Objetivos táctiles de 44 px: el editor se usa también desde el celular. */
+.cbte-editor .btnmini { min-height: 44px; }
+.cbte-editor__chips, .cbte-editor__tinta { display: flex; flex-wrap: wrap; gap: 8px; }
+.cbte-editor__chip { min-height: 44px; padding: 8px 14px; font-size: 0.86rem; }
+.cbte-editor__pie { display: grid; gap: 12px; margin-bottom: 8px; }
+.cbte-editor__pie .field__nota, .cbte-editor__pie .field__alerta { overflow-wrap: anywhere; }
+.cbte-editor__sitio { display: block; margin-top: 12px; }
+/* Lo fijo se ve como fijo: sin campo, con su porqué debajo. */
+.cbte-editor__fijo {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--pg-radius);
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  background: rgba(30, 22, 17, 0.035);
+}
+.cbte-editor__fijo b { font-size: 0.9rem; }
+.cbte-editor__fijo p { margin: 0; font-size: 0.88rem; line-height: 1.45; }
+.cbte-editor__fijo p span {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.cbte-editor__error, .cbte-editor__pendiente { margin: 0; font-size: 0.86rem; }
+
+/* La vista previa: el papel, la impresora de texto y el WhatsApp. */
+.cbte-editor__vista {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  min-width: 0;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid rgba(30, 22, 17, 0.1);
+  border-radius: var(--pg-radius-lg);
+}
+.cbte-editor__opciones { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.cbte-editor__seg { max-width: 100%; }
+.cbte-editor__seg button { min-height: 44px; }
+.cbte-editor__cargando { margin: 40px 0; }
+/* La impresora de texto, columna a columna: el recuadro mide justo el ancho del papel. */
+.cbte-editor__esc {
+  max-width: 100%;
+  padding: 12px 10px;
+  overflow-x: auto;
+  background: #fff;
+  color: #000;
+  border: 1px solid rgba(30, 22, 17, 0.16);
+  border-radius: 6px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+.cbte-editor__esc--32 { font-size: 13px; width: calc(32ch + 22px); }
+.cbte-editor__esc--48 { font-size: 10.5px; width: calc(48ch + 22px); }
+.cbte-editor__escl { white-space: pre; line-height: 1.35; }
+.cbte-editor__escl.is-centro { text-align: center; }
+.cbte-editor__escl.is-der { text-align: right; }
+.cbte-editor__escl.is-b { font-weight: 800; }
+/* Letra doble: el doble de ancho y de alto, como la imprime la térmica. */
+.cbte-editor__escl.is-doble { font-size: 2em; line-height: 1.15; }
+.cbte-editor__escl.is-alto { transform: scaleY(1.8); margin: 0.3em 0; }
+/* El WhatsApp, como burbuja: lo que lee el cliente en el celular. */
+.cbte-editor__wa {
+  width: 100%;
+  max-width: 330px;
+  padding: 10px 12px;
+  background: #e7ffdb;
+  color: #111b21;
+  border-radius: 10px 10px 10px 2px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+  font-size: 0.86rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+/* Los espacios cuentan: WhatsApp respeta los de "Nido Carbonara   $32.000" y la sangría
+   del detalle, y la vista previa también. */
+.cbte-editor__wa > div { min-height: 1.4em; white-space: pre-wrap; }
+@media (min-width: 1180px) {
+  .cbte-editor__cuerpo { grid-template-columns: minmax(0, 1fr) 360px; }
+  .cbte-editor__vista { position: sticky; top: 16px; }
+  .cbte-editor__ir { display: none; }
+}
+@media (max-width: 520px) {
+  .cbte-editor__vista { padding: 10px; }
+  .cbte-editor__seg button { padding: 0 10px; }
+}
+
 /* ═══ (fin de la fase 3) ═══ */
 
 

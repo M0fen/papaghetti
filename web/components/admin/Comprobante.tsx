@@ -8,7 +8,9 @@
  * esa obligación. Por eso este papel se llama COMPROBANTE DE CONSUMO y tiene
  * prohibido llevar las palabras "Factura", "Documento equivalente", "CUFE", "CUDE"
  * o una resolución de numeración: imitar un documento fiscal sin serlo es peor que
- * no entregar nada. El consecutivo es interno y así lo dice.
+ * no entregar nada. El consecutivo es interno y así lo dice. (El dueño personaliza
+ * el papel en Ajustes → Comprobante, pero el título y la nota legal son fijos y esas
+ * palabras se rechazan al guardar: ver lib/papel.ts.)
  *
  * IMPRIMIR SALÍA EN BLANCO, y por partida doble.
  *
@@ -29,50 +31,23 @@
  * TP586), una de 80mm si algún día se cambia, y la hoja normal de una impresora de
  * oficina. El rollo se recuerda POR EQUIPO (es cosa del aparato conectado), y el
  * selector cambia el dibujo, el texto ESC/POS y la regla `@page` de verdad.
+ *
+ * Y UN SOLO CONTENIDO: lo que dice este artículo, la imagen, el texto ESC/POS y el
+ * WhatsApp sale de `papelDe` (lib/papel.ts). Antes cada uno armaba el suyo y no
+ * decían lo mismo.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  formatCOP,
-  metodoLabel,
-  tipoLabel,
-  whatsappValido,
-  type Ajustes,
-  type Pedido,
-} from "@/lib/menu";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { formatCOP, whatsappValido, type Pedido } from "@/lib/menu";
+import { papelDe, trozosNombre, type AjustesPapel } from "@/lib/papel";
 import { dibujarTiquete, cargarImagen, binarizar, dibujarCalibracion } from "@/lib/tiquete-imagen";
-import { textoComprobante, waHref as enlaceWa } from "@/lib/comprobantes";
-import { cuentaImpresa } from "@/lib/precios";
+import { textoDePapel, waHref as enlaceWa } from "@/lib/comprobantes";
 import { imprimirImagen } from "@/lib/imprimir-imagen";
 import ImpresionDirecta, { type TrabajosDirectos } from "@/components/admin/ImpresionDirecta";
 import { trabajoEscPos, type Bitmap } from "@/lib/escpos";
-import { tiqueteEscPos } from "@/lib/tiquete-escpos";
+import { codificarRenglones, renglonesDePapel } from "@/lib/tiquete-escpos";
 import { ROLLOS } from "@/lib/rollo";
 import { useAlineacion, useRollo } from "@/components/admin/useRollo";
-
-/**
- * La fecha, ARMADA A MANO a partir de las piezas.
- *
- * `toLocaleString` completo mete literales que dependen de la versión de ICU: el
- * servidor (Node) escribía "07:15 a. m." con un espacio normal y el navegador con un
- * espacio fino, así que React descartaba el HTML del servidor y volvía a pintar el
- * comprobante entero (error 418 de hidratación). Tomando solo los valores y poniendo
- * nosotros los separadores, las dos mitades escriben exactamente lo mismo.
- */
-const PARTES = new Intl.DateTimeFormat("es-CO", {
-  timeZone: "America/Bogota",
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-function hora(iso: string) {
-  const p: Record<string, string> = {};
-  for (const x of PARTES.formatToParts(new Date(iso))) p[x.type] = x.value;
-  return `${p.day}/${p.month}/${p.year} · ${p.hour}:${p.minute}`;
-}
 
 /**
  * LA HEBRA: el mismo fideo que recorre el sitio, aquí como separador.
@@ -100,7 +75,7 @@ function Hebra({ corta }: { corta?: boolean }) {
   );
 }
 
-type Papel = "termica" | "hoja";
+type Hoja = "termica" | "hoja";
 
 export default function Comprobante({
   pedido: p,
@@ -110,7 +85,8 @@ export default function Comprobante({
   volver = "pedidos",
 }: {
   pedido: Pedido;
-  ajustes: Ajustes;
+  /** Solo lo que el papel necesita (`ajustesPapelDe`), con el logo. */
+  ajustes: AjustesPapel;
   /** Abre el diálogo de impresión al entrar (se llega desde el botón de la caja). */
   auto?: boolean;
   /** Llega desde "WhatsApp" de un pedido sin teléfono: arranca pidiendo el número. */
@@ -118,13 +94,21 @@ export default function Comprobante({
   /** De dónde se vino, para que "Volver" devuelva ahí (la caja o el archivo). */
   volver?: "pedidos" | "comprobantes";
 }) {
-  const [papel, setPapel] = useState<Papel>("termica");
+  const [papel, setPapel] = useState<Hoja>("termica");
   const [rollo, setRollo] = useRollo();
   const [alinear] = useAlineacion();
   const R = ROLLOS[rollo];
   const [tel, setTel] = useState(p.telefono ?? "");
   const [pidiendoTel, setPidiendoTel] = useState(Boolean(wa) && !p.telefono);
   const hoja = useRef<HTMLElement>(null);
+
+  /* El comprobante, decidido UNA vez: de aquí salen el artículo, la imagen, el texto
+     ESC/POS y el WhatsApp. La tarifa es la del PEDIDO, no la de Ajustes: un
+     comprobante archivado dice el porcentaje con el que se cobró. */
+  const c = useMemo(() => papelDe(p, a), [p, a]);
+
+  /* Si el logo propio no se deja pintar en el artículo, se escribe el nombre. */
+  const [logoRoto, setLogoRoto] = useState(false);
 
   /* La imagen del tiquete, ya dibujada. Se hace una vez al montar y cada vez que
      cambia el pedido: sirve para imprimir, descargar y ver en pantalla, así que lo
@@ -137,6 +121,8 @@ export default function Comprobante({
   /* El canvas binarizado en sí: es lo que se convierte a ESC/POS para el camino
      directo (Bluetooth / serie), sin pasar por PNG. */
   const [canvasTermica, setCanvasTermica] = useState<HTMLCanvasElement | null>(null);
+  /* Si el navegador no pudo dibujar ni la versión sin logo, se imprime el artículo. */
+  const [sinImagen, setSinImagen] = useState(false);
   useEffect(() => {
     let vivo = true;
     (async () => {
@@ -145,18 +131,41 @@ export default function Comprobante({
       } catch {
         /* sin API de fuentes: se dibuja con las del sistema */
       }
-      const logo = await cargarImagen("/logo-papaghetti-bn.png");
+      const logo = await cargarImagen(c.cabecera.logo);
       if (!vivo) return;
-      const c = dibujarTiquete({ pedido: p, ajustes: a, logo, rollo });
-      const bin = binarizar(c);
-      setPng(c.toDataURL("image/png"));
-      setPngTermica(bin.toDataURL("image/png"));
-      setCanvasTermica(bin);
+      const pintar = (l: HTMLImageElement | null) => {
+        const lienzo = dibujarTiquete({ papel: c, logo: l, rollo });
+        const bin = binarizar(lienzo);
+        return { suave: lienzo.toDataURL("image/png"), termica: bin.toDataURL("image/png"), bin };
+      };
+      /* UN LOGO QUE ENSUCIA EL LIENZO NO PUEDE DEJAR LA CAJA SIN PAPEL. Si dibujarlo
+         falla (una imagen de otro origen hace fallar getImageData y toDataURL), se
+         vuelve a dibujar con el nombre escrito: el botón no se queda en
+         "Preparando…" para siempre. */
+      let hecho: ReturnType<typeof pintar> | null = null;
+      try {
+        hecho = pintar(logo);
+      } catch {
+        try {
+          hecho = pintar(null);
+        } catch {
+          hecho = null;
+        }
+      }
+      if (!vivo) return;
+      if (hecho) {
+        setPng(hecho.suave);
+        setPngTermica(hecho.termica);
+        setCanvasTermica(hecho.bin);
+        setSinImagen(false);
+      } else {
+        setSinImagen(true);
+      }
     })();
     return () => {
       vivo = false;
     };
-  }, [p, a, rollo]);
+  }, [c, rollo]);
 
   /**
    * IMPRIMIR LA IMAGEN, Y NADA MÁS.
@@ -186,7 +195,7 @@ export default function Comprobante({
   /* Los dos trabajos del camino directo: el tiquete en TEXTO ESC/POS (2 KB, el
      rápido y el que menos puede fallar) y el mismo bitmap de arriba como raster. */
   const trabajos: TrabajosDirectos = {
-    texto: () => tiqueteEscPos(p, a, { cols: R.cols }),
+    texto: () => codificarRenglones(renglonesDePapel(c, R.cols), R.cols),
     imagen: () => {
       const bmp = getBitmap();
       return bmp ? trabajoEscPos(bmp) : null;
@@ -194,9 +203,15 @@ export default function Comprobante({
   };
 
   const imprimir = () => {
+    /* El último recurso: sin imagen, el artículo (que lleva `printable` y su propia
+       hoja de impresión) sale por el diálogo de siempre. */
+    if (sinImagen) {
+      window.print();
+      return;
+    }
     if (!png || !pngTermica) return;
     const termica = papel === "termica";
-    imprimirImagen(termica ? pngTermica : png, termica, `Comprobante N° ${p.consecutivo ?? p.id}`, R.mm, alinear);
+    imprimirImagen(termica ? pngTermica : png, termica, `Comprobante ${c.numero}`, R.mm, alinear);
   };
 
   /* El patrón de calibración: una regla en milímetros y un tablero de 1 px. En un
@@ -215,26 +230,13 @@ export default function Comprobante({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, png]);
 
-  /* El papel sale de UNA función (lib/precios): la misma que usan la imagen de la
-     térmica, el texto ESC/POS y el WhatsApp. La tarifa es la del PEDIDO, no la de
-     Ajustes: un comprobante archivado dice el porcentaje con el que se cobró. */
-  const cuenta = cuentaImpresa(p, a.impuestoPct);
-  const lineas = cuenta.sumas.map(([k, v]) => ({ k, v }));
-  const total = cuenta.total;
-
-  /* UN PEDIDO CANCELADO NO PUEDE IMPRIMIR UN PAPEL QUE PAREZCA UN CONSUMO VÁLIDO.
-     Se cancelaba un pedido, se abría su comprobante y salía idéntico a los demás:
-     mismo número, mismo total, ni una palabra de que estaba anulado. En una caja eso
-     es un papel que se puede entregar, reclamar o cuadrar por error. */
-  const anulado = p.estado === "cancelado";
-  const devuelto = p.pago === "devuelto";
-
-  /* El texto para WhatsApp y el portapapeles sale de la función compartida con la
-     caja y el historial: un solo texto, con los avisos de anulado/devuelto. */
-  const texto = useMemo(() => textoComprobante(p, a), [p, a]);
+  /* El texto para WhatsApp y el portapapeles: el mismo papel, en texto (con los avisos
+     de anulado/devuelto, los datos del negocio y la misma nota legal). */
+  const texto = useMemo(() => textoDePapel(c), [c]);
 
   const waHref = enlaceWa(tel, texto);
   const telOk = whatsappValido(tel);
+  const listo = Boolean(png && pngTermica) || sinImagen;
 
   return (
     <>
@@ -270,8 +272,8 @@ export default function Comprobante({
             Hoja normal
           </button>
         </div>
-        <button className="btn btn--primary" type="button" onClick={imprimir} disabled={!png || !pngTermica}>
-          <span>{png && pngTermica ? "Imprimir" : "Preparando…"}</span>
+        <button className="btn btn--primary" type="button" onClick={imprimir} disabled={!listo}>
+          <span>{listo ? "Imprimir" : "Preparando…"}</span>
         </button>
         {/* La misma imagen, como archivo. Es el salvavidas que no depende de NADA
             del navegador: Windows imprime una foto en cualquier impresora con
@@ -368,72 +370,61 @@ export default function Comprobante({
           abajo queda para lectores de pantalla, copiar texto y Ctrl+P. */}
       {png && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img className="cbte-imagen" src={png} alt={`Comprobante N° ${p.consecutivo ?? p.id}`} />
+        <img className="cbte-imagen" src={png} alt={`Comprobante ${c.numero}`} />
       )}
       <article
         ref={hoja}
-        className={`cbte printable cbte--${papel} cbte--r${rollo} ${anulado ? "cbte--anulado" : ""} ${png ? "cbte--respaldo" : ""}`}
+        className={`cbte printable cbte--${papel} cbte--r${rollo} ${c.anulado ? "cbte--anulado" : ""} ${png ? "cbte--respaldo" : ""}`}
       >
-        {anulado && (
+        {/* UN PEDIDO CANCELADO NO PUEDE IMPRIMIR UN PAPEL QUE PAREZCA UN CONSUMO VÁLIDO.
+            Se cancelaba un pedido, se abría su comprobante y salía idéntico a los demás:
+            mismo número, mismo total, ni una palabra de que estaba anulado. En una caja
+            eso es un papel que se puede entregar, reclamar o cuadrar por error. */}
+        {c.sello && (
           <div className="cbte__anulado" role="alert">
-            {devuelto ? "DINERO DEVUELTO" : "PEDIDO ANULADO"}
-            <em>
-              {devuelto ? (
-                <>
-                  Se devolvieron {formatCOP(p.devolucion?.monto ?? p.total)}
-                  {p.devolucion?.motivo ? ` — ${p.devolucion.motivo}` : ""}. Este pedido ya no
-                  es un consumo.
-                </>
-              ) : (
-                <>
-                  Este pedido se canceló
-                  {p.motivoCancelacion ? `: ${p.motivoCancelacion}` : ""}. No corresponde a un
-                  consumo y no debe cobrarse.
-                </>
-              )}
-            </em>
+            {c.sello.titulo}
+            <em>{c.sello.detalle}</em>
           </div>
         )}
 
         <header className="cbte__h">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="cbte__logo" src="/logo-papaghetti-bn.png" alt={a.negocio || "Papaghetti"} />
-          <p className="cbte__datos">
-            {a.razonSocial && <span>{a.razonSocial}</span>}
-            {a.nit && <span>NIT {a.nit}</span>}
-            {a.direccion && <span>{a.direccion}</span>}
-            {(a.telefonoLocal || a.whatsapp) && <span>Tel. {a.telefonoLocal || a.whatsapp}</span>}
-          </p>
+          {logoRoto ? (
+            <p className="cbte__nombre">{c.cabecera.nombre}</p>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img className="cbte__logo" src={c.cabecera.logo} alt={c.cabecera.nombre} onError={() => setLogoRoto(true)} />
+          )}
+          {c.cabecera.datos.length > 0 && (
+            <p className="cbte__datos">
+              {c.cabecera.datos.map((d, i) => (
+                <span key={i}>{d}</span>
+              ))}
+            </p>
+          )}
         </header>
 
         <Hebra />
 
         <div className="cbte__tit">
-          Comprobante de consumo
-          <b>N° {p.consecutivo ?? p.id}</b>
+          {c.titulo}
+          <b>{c.numero}</b>
         </div>
 
         <dl className="cbte__meta">
           <div>
             <dt>Fecha</dt>
-            <dd>{hora(p.creadoEn)}</dd>
+            <dd>{c.fecha}</dd>
           </div>
           <div>
             <dt>Servicio</dt>
-            <dd>{tipoLabel[p.tipo]}</dd>
+            <dd>{c.servicio}</dd>
           </div>
-          {p.referencia && (
-            <div>
-              <dt>Ubicación</dt>
-              <dd>{p.referencia}</dd>
+          {c.cliente.map((d) => (
+            <div key={d.k}>
+              <dt>{d.k}</dt>
+              <dd>{d.v}</dd>
             </div>
-          )}
-          {p.cliente && (
-            <div>
-              <dt>Cliente</dt>
-              <dd>{p.cliente}</dd>
-            </div>
-          )}
+          ))}
         </dl>
 
         <Hebra corta />
@@ -442,57 +433,60 @@ export default function Comprobante({
             ENTERO al lado y los extras debajo sin precio: el cliente leía "$34.400"
             como si fuera el precio de la papa criolla. */}
         <ul className="cbte__items">
-          {cuenta.lineas.map((l, i) => (
+          {c.cuenta.lineas.map((l, i) => (
             <li key={i}>
               <span className="cbte__cant">{l.cantidad > 1 ? `${l.cantidad}×` : ""}</span>
               <span className="cbte__nom">
-                {l.nombre}
+                {/* Un plato de dos bases se parte en la barra, no dentro de una base
+                    (como en la imagen y en el texto ESC/POS). */}
+                <span>
+                  {trozosNombre(l.nombre).map((t, j) => (
+                    <Fragment key={j}>
+                      {j > 0 && " "}
+                      <span className="cbte__trozo">{t}</span>
+                    </Fragment>
+                  ))}
+                </span>
                 {l.detalle && <em>{l.detalle}</em>}
               </span>
               <span className="cbte__val">{formatCOP(l.importe)}</span>
             </li>
           ))}
         </ul>
-        {p.notas && <p className="cbte__nota">Nota: {p.notas}</p>}
+        {c.nota && <p className="cbte__nota">Nota: {c.nota}</p>}
 
         <Hebra corta />
 
         <div className="cbte__sumas">
-          {lineas.map((l) => (
-            <div className="cbte__linea" key={l.k}>
-              <span>{l.k}</span>
-              <b>{formatCOP(l.v)}</b>
+          {c.cuenta.sumas.map(([k, v]) => (
+            <div className="cbte__linea" key={k}>
+              <span>{k}</span>
+              <b>{formatCOP(v)}</b>
             </div>
           ))}
         </div>
 
         <div className="cbte__total">
           <span>TOTAL</span>
-          <b>{formatCOP(total)}</b>
+          <b>{formatCOP(c.cuenta.total)}</b>
         </div>
-        {cuenta.nota && <p className="cbte__incluye">{cuenta.nota}</p>}
+        {c.cuenta.nota && <p className="cbte__incluye">{c.cuenta.nota}</p>}
 
         <div className="cbte__pago">
           <span>Pago</span>
-          <b>
-            {p.pago === "devuelto"
-              ? "DEVUELTO"
-              : p.pago === "pagado"
-                ? p.metodoPago
-                  ? metodoLabel[p.metodoPago]
-                  : "Pagado"
-                : "PENDIENTE"}
-          </b>
+          <b>{c.pago}</b>
         </div>
 
         <Hebra />
 
         <footer className="cbte__pie">
-          <p className="cbte__aviso">
-            Documento interno de control. No es factura electrónica de venta ni documento
-            equivalente P.O.S.
-          </p>
-          <p className="cbte__gracias">¡Gracias por venir!</p>
+          <p className="cbte__aviso">{c.pie.legal}</p>
+          {c.pie.extra.map((e, i) => (
+            <p className="cbte__extra" key={i}>
+              {e}
+            </p>
+          ))}
+          <p className="cbte__gracias">{c.pie.cierre}</p>
         </footer>
       </article>
     </>

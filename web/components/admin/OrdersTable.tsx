@@ -31,7 +31,7 @@ import {
 import { esVenta } from "@/lib/menu";
 /* El texto del comprobante para WhatsApp es el MISMO que el de la página del tiquete
    (con los avisos de anulado / dinero devuelto): antes aquí había una copia sin ellos. */
-import { waComprobanteHref } from "@/lib/comprobantes";
+import { telefonoWa, waComprobanteHref } from "@/lib/comprobantes";
 
 type Filtro = "todos" | EstadoPedido | "porpagar";
 
@@ -53,7 +53,6 @@ export default function OrdersTable({
   /** Lo que el comprobante necesita para el WhatsApp de cada pedido (sin el logo). */
   ajustesPapel?: AjustesPapel;
 }) {
-  void ajustesPapel; // (lo usa el WhatsApp del comprobante; ver la fase del comprobante)
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const router = useRouter();
 
@@ -119,7 +118,7 @@ export default function OrdersTable({
           </p>
         )}
         {filtrados.map((p) => (
-          <OrderCard key={p.id} p={p} adicionales={adicionales} />
+          <OrderCard key={p.id} p={p} adicionales={adicionales} ajustesPapel={ajustesPapel} />
         ))}
       </div>
     </>
@@ -218,10 +217,20 @@ function AgregarAdicional({ p, adicionales }: { p: Pedido; adicionales: Adiciona
   );
 }
 
-function OrderCard({ p, adicionales }: { p: Pedido; adicionales: AdicionalConfig[] }) {
+function OrderCard({
+  p,
+  adicionales,
+  ajustesPapel,
+}: {
+  p: Pedido;
+  adicionales: AdicionalConfig[];
+  ajustesPapel?: AjustesPapel;
+}) {
   /* Una sola vez: arma el texto completo del comprobante y esta lista se repinta
-     cada 10 segundos, con una tarjeta por pedido. */
-  const wa = waComprobanteHref(p);
+     cada 10 segundos, con una tarjeta por pedido. Con los ajustes del papel: sin ellos
+     el WhatsApp de la caja salía con el nombre y el pie de fábrica, distinto del que
+     se manda desde el propio comprobante. */
+  const wa = waComprobanteHref(p, ajustesPapel);
   const activo = p.estado !== "entregado" && p.estado !== "cancelado";
   /* Un pedido ENTREGADO por error (un toque de más en la cocina) no se podía ni
      devolver ni cancelar desde ninguna pantalla: el plato desaparecía del flujo y la
@@ -253,10 +262,11 @@ function OrderCard({ p, adicionales }: { p: Pedido; adicionales: AdicionalConfig
             <>
               {" · "}
               {/* Con clase: es el atajo para llamar al cliente de un domicilio que no
-                  aparece, y medía 18px de alto. Se toca con prisa y con una mano. */}
+                  aparece, y medía 18px de alto. Se toca con prisa y con una mano. Con el
+                  57 delante: wa.me con un celular de 10 cifras abría un chat inexistente. */}
               <a
                 className="ocard__tel"
-                href={`https://wa.me/${p.telefono.replace(/\D/g, "")}`}
+                href={`https://wa.me/${telefonoWa(p.telefono)}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >

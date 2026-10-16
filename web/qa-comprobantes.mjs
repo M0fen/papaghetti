@@ -150,17 +150,201 @@ eq("resumenLineas: uno solo", C.resumenLineas(P[0]), "Nido Carbonara");
 
 console.log("\n═══ EL TEXTO PARA WHATSAPP ═══");
 const t = C.textoComprobante(P[0], { negocio: "Papaghetti", impuestoPct: 8 });
-si("arranca con el negocio en negrita y el número", t.startsWith("*Papaghetti*\nComprobante N° 10 · 12/09/2026 · 12:03"));
+si("arranca con el negocio en negrita, y luego el título y el número", t.startsWith("*Papaghetti*\n\n*COMPROBANTE DE CONSUMO* · N° 10\nFecha: 12/09/2026 · 12:03"));
 si("lleva la línea del plato con su importe", t.includes("Nido Carbonara   $30.000"));
 si("impuesto con porcentaje y TOTAL en negrita", t.includes("Impuesto (8%): $2.400") && t.includes("*TOTAL: $32.400*"));
 si("pago con el método", t.includes("Pago: Efectivo"));
 si("y el aviso de que NO es factura", t.includes("No es factura electrónica de venta"));
-si("un devuelto lo grita arriba", C.textoComprobante(P[3]).includes("*** DINERO DEVUELTO ($32.400) ***") && C.textoComprobante(P[3]).includes("Pago: devuelto"));
-si("un anulado también", C.textoComprobante(P[4]).includes("*** PEDIDO ANULADO"));
+si("un devuelto lo grita arriba, con su motivo, y el pago dice DEVUELTO como el papel", C.textoComprobante(P[3]).startsWith("*** DINERO DEVUELTO ***\nSe devolvieron $32.400 — se cayó. Este pedido ya no es un consumo.") && C.textoComprobante(P[3]).includes("Pago: DEVUELTO"));
+si("un anulado también", C.textoComprobante(P[4]).includes("*** PEDIDO ANULADO") && C.textoComprobante(P[4]).includes("Este pedido se canceló: cliente se fue."));
 si("sin ajustes: Papaghetti e 'Impuesto' a secas", C.textoComprobante(P[0]).includes("*Papaghetti*") && C.textoComprobante(P[0]).includes("Impuesto: $2.400"));
 eq("telefonoWa: 10 dígitos → 57", [C.telefonoWa("300 123 4567"), C.telefonoWa("+57 300 123 4567"), C.telefonoWa("6063334455")], ["573001234567", "573001234567", "576063334455"]);
-si("waComprobanteHref con teléfono", C.waComprobanteHref(P[0]).startsWith("https://wa.me/573001234567?text=*Papaghetti*%0AComprobante"));
+si("waComprobanteHref con teléfono", C.waComprobanteHref(P[0]).startsWith("https://wa.me/573001234567?text=*Papaghetti*%0A%0A*COMPROBANTE%20DE%20CONSUMO*"));
 eq("y null sin teléfono", C.waComprobanteHref(P[1]), null);
+
+console.log("\n═══ F3 · EL PAPEL, UNA SOLA VEZ (lib/papel.ts) ═══");
+const Pa = await import("./lib/papel.ts");
+const LEGAL = "Documento interno de control. No es factura electrónica de venta ni documento equivalente P.O.S.";
+const m0 = Pa.papelDe(P[0]);
+eq("sin config: el papel de hoy (título, nota legal, cierre, sin extras, logo de la casa)",
+  [m0.titulo, m0.pie.legal, m0.pie.cierre, m0.pie.extra, m0.cabecera.logo, m0.cabecera.logoPropio, m0.cabecera.nombre],
+  ["COMPROBANTE DE CONSUMO", LEGAL, "¡Gracias por venir!", [], "/logo-papaghetti-bn.png", false, "Papaghetti"]);
+eq("las constantes son las de siempre (una sola redacción de la nota legal)", [Pa.TITULO, Pa.AVISO_LEGAL, Pa.CIERRE_POR_DEFECTO], ["COMPROBANTE DE CONSUMO", LEGAL, "¡Gracias por venir!"]);
+eq("datos del cliente de fábrica = el papel de hoy: cliente, ubicación y nota sí; teléfono y dirección no",
+  Pa.comprobanteDe({}).datosCliente, { cliente: true, ubicacion: true, telefono: false, direccion: false, notas: true });
+eq("sin config, P[0] muestra el cliente y NO su teléfono", m0.cliente, [{ k: "Cliente", v: "Ñandú Pérez" }]);
+eq("ubicación antes que el cliente, como hoy", Pa.papelDe(P[1]).cliente.map((d) => d.k), ["Ubicación", "Cliente"]);
+eq("la nota de cocina sale de fábrica", Pa.papelDe(P[6]).nota, "sin cebolla; alérgico");
+/* El papel de HOY, letra por letra (dorado): sin ajustes del dueño, con los datos de
+   siempre. Si esto cambia sin querer, todos los comprobantes cambian. */
+const DORADO = [
+  "*Papaghetti*",
+  "Papaghetti S.A.S.",
+  "NIT 901.234.567-8",
+  "Cra 7 # 20-15, Pereira",
+  "Tel. 606 333 4455",
+  "",
+  "*COMPROBANTE DE CONSUMO* · N° 11",
+  "Fecha: 12/09/2026 · 13:30",
+  "Servicio: En el local",
+  "Ubicación: ventanal; mesa 2",
+  "Cliente: Juan",
+  "",
+  "Nido Carbonara   $30.000",
+  "",
+  "Consumo: $30.000",
+  "Impuesto (8%): $2.400",
+  "*TOTAL: $32.400*",
+  "Pago: Nequi",
+  "",
+  LEGAL,
+  "¡Gracias por venir!",
+].join("\n");
+const AJ0 = { negocio: "Papaghetti", razonSocial: "Papaghetti S.A.S.", nit: "901.234.567-8", direccion: "Cra 7 # 20-15, Pereira", telefonoLocal: "6063334455", impuestoPct: 8 };
+eq("dorado: el WhatsApp de un pedido de mesa sin configurar", C.textoComprobante(P[1], AJ0), DORADO);
+
+console.log("\n═══ F3 · LO QUE EL DUEÑO CONFIGURA ═══");
+const A = {
+  negocio: "Papaghetti", razonSocial: "Enredos de Pereira S.A.S.", nit: "NIT 901.234.567-8", direccion: "Calle 19 # 8-32, Pereira",
+  whatsapp: "573001112233", impuestoPct: 8,
+  comprobante: {
+    mensajeCierre: "  ¡Vuelve\tpronto,\n enredado!  ",
+    lineasPie: ["Wi-Fi: Papaghetti · Clave: pasta2026", "   ", "Síguenos en @papaghetti.pereira", "Domicilios 300 000 0000", "una cuarta que NO sale"],
+    datosCliente: { telefono: true, direccion: true },
+  },
+};
+const m5 = Pa.papelDe(P[5], A);
+eq("cierre propio, limpio (sin tabuladores, saltos ni espacios de más)", m5.pie.cierre, "¡Vuelve pronto, enredado!");
+eq("máximo 3 líneas extra, sin vacías y en su orden", m5.pie.extra, ["Wi-Fi: Papaghetti · Clave: pasta2026", "Síguenos en @papaghetti.pereira", "Domicilios 300 000 0000"]);
+eq("un cierre en blanco vuelve al de fábrica", Pa.papelDe(P[0], { comprobante: { mensajeCierre: "   " } }).pie.cierre, "¡Gracias por venir!");
+eq("el NIT no sale dos veces aunque lo hayan escrito con 'NIT' delante", m5.cabecera.datos[1], "NIT 901.234.567-8");
+eq("la dirección del domicilio sale si se enciende, y el teléfono también, escrito para leerse",
+  Pa.papelDe({ ...P[5], telefono: "3001234567" }, A).cliente, [{ k: "Teléfono", v: "300 123 4567" }, { k: "Dirección", v: "Cra 7 # 20-15" }]);
+si("…y la dirección solo en domicilio: un pedido de mesa no la imprime", !Pa.papelDe({ ...P[0], direccion: "Cra 1" }, A).cliente.some((d) => d.k === "Dirección"));
+si("…y oculta si se apaga", !Pa.papelDe(P[5], { ...A, comprobante: { ...A.comprobante, datosCliente: { direccion: false } } }).cliente.some((d) => d.k === "Dirección"));
+const sinNadie = Pa.papelDe({ ...P[1], notas: "sin sal", telefono: "300 123 4567" }, { comprobante: { datosCliente: { cliente: false, ubicacion: false, notas: false, telefono: false } } });
+eq("todo el cliente apagado: ni nombre, ni ubicación, ni teléfono, ni nota", [sinNadie.cliente, sinNadie.nota], [[], undefined]);
+const tA = C.textoComprobante(P[0], { ...A, comprobante: { ...A.comprobante, datosCliente: { cliente: false } } });
+si("cliente oculto: ni su nombre ni su teléfono en el WhatsApp", !tA.includes("Ñandú Pérez") && !tA.includes("300 123 4567"));
+eq("datos del negocio en el papel", m5.cabecera.datos, ["Enredos de Pereira S.A.S.", "NIT 901.234.567-8", "Calle 19 # 8-32, Pereira"]);
+
+console.log("\n═══ F3 · EL NÚMERO DE EJEMPLO NUNCA SALE ═══");
+si("con el WhatsApp de ejemplo y sin teléfono del local: sin 'Tel.'", !Pa.piezasPapel(m5).some((s) => /573001112233|300 111 2233|Tel\./.test(s)));
+si("ni escrito sin el 57", Pa.telefonoNegocio({ whatsapp: "3001112233" }) === "" && Pa.telefonoNegocio({ telefonoLocal: "300 111 2233" }) === "");
+eq("un WhatsApp real sale escrito para leerse", Pa.telefonoNegocio({ whatsapp: "573104445566" }), "310 444 5566");
+eq("el teléfono del local manda sobre el WhatsApp", Pa.telefonoNegocio({ telefonoLocal: "6063334455", whatsapp: "573104445566" }), "606 333 4455");
+eq("un teléfono con extensión queda como se escribió", Pa.telefonoNegocio({ telefonoLocal: "606 333 4455 ext. 12" }), "606 333 4455 ext. 12");
+si("el WhatsApp de ejemplo tampoco sale en el texto de la caja", !C.textoComprobante(P[0], { whatsapp: "573001112233" }).includes("Tel."));
+
+console.log("\n═══ F3 · LO FIJO NO SE CAMBIA DESDE EL JSON ═══");
+const tocado = Pa.papelDe(P[0], { comprobante: { titulo: "FACTURA DE VENTA", legal: "", aviso: "x", pie: { legal: "" } } });
+eq("título y aviso legal, intactos aunque el JSON traiga otros", [tocado.titulo, tocado.pie.legal], ["COMPROBANTE DE CONSUMO", LEGAL]);
+const roto = Pa.papelDe(P[0], { comprobante: { lineasPie: "no es una lista", datosCliente: null, mensajeCierre: 42, logo: "javascript:alert(1)" } });
+eq("un JSON tocado a mano no revienta: valores de fábrica donde no cuadra", [roto.pie.extra, roto.pie.cierre, roto.cabecera.logo, roto.cliente.length], [[], "42", "/logo-papaghetti-bn.png", 1]);
+eq("un logo que no es PNG en data URL no se dibuja", Pa.comprobanteDe({ comprobante: { logo: "https://otro.com/logo.png" } }).logoPropio, false);
+eq("textos con topes: 60 en el cierre, 64 por línea", [Pa.comprobanteDe({ comprobante: { mensajeCierre: "x".repeat(200) } }).mensajeCierre.length, Pa.comprobanteDe({ comprobante: { lineasPie: ["y".repeat(200)] } }).lineasPie[0].length], [60, 64]);
+eq("los emojis se quitan del papel (la térmica no los tiene); ©® se quedan", [Pa.textoPapel("¡Vuelve pronto! 🍝"), Pa.textoPapel("❤️ Hecho con amor ❤️"), Pa.textoPapel("Papaghetti® ©2026")], ["¡Vuelve pronto!", "Hecho con amor", "Papaghetti® ©2026"]);
+
+console.log("\n═══ F3 · LAS SALIDAS DICEN LO MISMO (WhatsApp = papel) ═══");
+for (const [nombre, p, a] of [["mesa sin config", P[1], {}], ["domicilio configurado", P[5], A], ["devuelto", P[3], A], ["anulado", P[4], A], ["con nota", P[6], AJ0]]) {
+  const papel = Pa.papelDe(p, a);
+  const txt = C.textoComprobante(p, a);
+  eq(`WhatsApp = papel · ${nombre}`, Pa.piezasPapel(papel).filter((s) => !txt.includes(s)), []);
+}
+const t5 = C.textoComprobante(P[5], A);
+si("el cierre propio reemplaza al de fábrica", t5.includes("¡Vuelve pronto, enredado!") && !t5.includes("¡Gracias por venir!"));
+si("las líneas extra, en orden, entre la nota legal y el cierre", t5.indexOf(LEGAL) < t5.indexOf("Wi-Fi:") && t5.indexOf("Wi-Fi:") < t5.indexOf("Síguenos") && t5.indexOf("Domicilios 300") < t5.indexOf("¡Vuelve pronto"));
+si("la cuarta línea no sale", !t5.includes("una cuarta"));
+si("hay líneas en blanco de verdad, y nunca dos seguidas", t5.includes("\n\n") && !t5.includes("\n\n\n") && !t5.startsWith("\n") && !t5.endsWith("\n"));
+si("ninguna línea con espacios sueltos al final", t5.split("\n").every((l) => l === l.trimEnd()));
+eq("el enlace lleva exactamente ese texto", decodeURIComponent(C.waComprobanteHref(P[0], A).split("text=")[1]), C.textoComprobante(P[0], A));
+si("la caja sin ajustes arma el papel completo (título y nota legal)", C.textoComprobante(P[0]).includes("COMPROBANTE DE CONSUMO") && C.textoComprobante(P[0]).includes(LEGAL));
+si("ajustesPapelDe deja el logo fuera de la caja y lo trae donde se dibuja", (() => {
+  const aj = { ...AJ0, whatsapp: "", horarios: "", numMesas: 0, propinaSugeridaPct: 0, abierto: true, instagram: "", costoDomicilio: 0, pedidoMinimo: 0, promos: [], usuarios: ["Ana"], comprobante: { logo: "data:image/png;base64,AAAA", mensajeCierre: "Hola" } };
+  const sin = Pa.ajustesPapelDe(aj), con = Pa.ajustesPapelDe(aj, true);
+  return sin.comprobante.logo === undefined && sin.comprobante.mensajeCierre === "Hola" && con.comprobante.logo === "data:image/png;base64,AAAA" && !("usuarios" in con) && !("promos" in con) && aj.comprobante.logo === "data:image/png;base64,AAAA";
+})());
+
+console.log("\n═══ F3 · EL FORMULARIO DE AJUSTES (validación del servidor) ═══");
+const fd = (o) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) for (const x of [].concat(v)) f.append(k, x); return f; };
+const base3 = { negocio: "Papaghetti", razonSocial: "", nit: "", direccion: "Calle 19 # 8-32", telefonoLocal: "", mensajeCierre: "", lineaPie: ["", "", ""] };
+const F = (o = {}) => Pa.validarComprobante(Pa.formularioComprobante(fd({ ...base3, ...o })));
+const ok3 = F({ nit: "NIT: 901.234.567-8", mensajeCierre: " ¡Vuelve\tpronto! ", lineaPie: ["Wi-Fi: x", "  ", "IG @p"], dc_cliente: "0", dc_telefono: "1" });
+eq("acepta, limpia y deja el NIT sin 'NIT'", ok3.ok && [ok3.datos.nit, ok3.comprobante.mensajeCierre, ok3.comprobante.lineasPie], ["901.234.567-8", "¡Vuelve pronto!", ["Wi-Fi: x", "IG @p"]]);
+eq("los datos del cliente llegan como 1/0, y lo que no llega queda de fábrica", ok3.comprobante.datosCliente, { cliente: false, ubicacion: true, telefono: true, direccion: false, notas: true });
+si("sin el logo: tiene sus propias acciones", !("logo" in ok3.comprobante));
+const rechazos = [
+  ["nombre vacío", F({ negocio: "   " }), "nombre comercial"],
+  ["factura en el cierre", F({ mensajeCierre: "Gracias por su factura" }), "documentos de la DIAN"],
+  ["FACTURA ELECTRÓNICA en una línea", F({ lineaPie: ["FACTURA ELECTRÓNICA No. 1", "", ""] }), "línea 1"],
+  ["CUFE", F({ lineaPie: ["", "CUFE: 1234", ""] }), "línea 2"],
+  ["documento equivalente", F({ razonSocial: "Documento equivalente S.A.S." }), "razón social"],
+  ["resolución DIAN", F({ lineaPie: ["", "", "Resolución DIAN 1876"] }), "línea 3"],
+  ["propina", F({ mensajeCierre: "La propina es voluntaria" }), "propina"],
+  ["NIT con letras", F({ nit: "novecientos" }), "NIT"],
+  ["teléfono corto", F({ telefonoLocal: "123" }), "7 números"],
+  ["el número de ejemplo como teléfono del local", F({ telefonoLocal: "300 111 2233" }), "ejemplo"],
+];
+for (const [n, r, frag] of rechazos) si(`rechaza: ${n}`, !r.ok && r.error.includes(frag), r.ok ? "lo aceptó" : r.error);
+si("…pero no por una razón social honrada que contiene esas letras (Manufacturas Escudero)", F({ razonSocial: "Manufacturas Escudero S.A.S." }).ok);
+si("ningún mensaje de error usa la palabra 'factura'", rechazos.every(([, r]) => !/factura/i.test(r.error ?? "")));
+const conEmoji = F({ mensajeCierre: "¡Vuelve pronto! 🍝" });
+si("un emoji se guarda, pero se avisa que no se imprime", conEmoji.ok && conEmoji.avisos.some((x) => /emojis no se imprimen/.test(x)));
+eq("los topes de largo también los pone el servidor", (() => { const r = F({ negocio: "N".repeat(300), lineaPie: ["L".repeat(300), "", ""] }); return r.ok && [r.datos.negocio.length, r.comprobante.lineasPie[0].length]; })(), [60, 64]);
+eq("más de 3 líneas al pie (una petición a mano): solo 3", (() => { const r = F({ lineaPie: ["a", "b", "c", "d"] }); return r.ok && r.comprobante.lineasPie; })(), ["a", "b", "c"]);
+
+console.log("\n═══ F3 · EL LOGO QUE LLEGA AL SERVIDOR ═══");
+const PNG1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+// Un PNG de 16×16 de verdad (la cabecera dice el tamaño).
+const png16 = (() => {
+  const cab = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 16, 0, 0, 0, 16, 8, 6, 0, 0, 0, 0, 0, 0, 0];
+  return "data:image/png;base64," + Buffer.from(cab).toString("base64");
+})();
+const lv = Pa.logoPngValido(png16);
+eq("un PNG de verdad pasa, con su tamaño", lv.ok && [lv.ancho, lv.alto], [16, 16]);
+const rechLogo = [
+  ["vacío", ""],
+  ["un JPEG", "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ"],
+  ["una URL", "https://otro.com/logo.png"],
+  ["un PNG falso (otros bytes con la etiqueta de PNG)", "data:image/png;base64," + Buffer.from("GIF89a no soy un png, lo juro de verdad").toString("base64")],
+  ["demasiado pesado", png16 + "A".repeat(Pa.LOGO_MAX_CARACTERES)],
+  ["de 1×1 (no es un logo)", PNG1],
+  ["con algo raro pegado", png16 + "\"><script>"],
+];
+for (const [n, v] of rechLogo) { const r = Pa.logoPngValido(v); si(`rechaza el logo: ${n}`, !r.ok, r.ok ? "lo aceptó" : r.error); }
+
+console.log("\n═══ F3 · LA CLAVE DEL WI-FI ═══");
+eq("claveDe saca la clave de la línea", [Pa.claveDe("Wi-Fi: Papaghetti · Clave: Ñandú2026"), Pa.claveDe("Contraseña=abc"), Pa.claveDe("IG @papaghetti")], ["Ñandú2026", "abc", ""]);
+eq("solo avisa si la CLAVE cambia en la impresora de texto (no por el «·» de antes)", [Pa.claveCambiaEnTexto("Wi-Fi: Papaghetti · Clave: pasta2026"), Pa.claveCambiaEnTexto("Wi-Fi: Papaghetti · Clave: Ñandú2026"), Pa.claveCambiaEnTexto("Clave: ¡hola!")], [false, true, true]);
+const conClave = F({ lineaPie: ["", "Wi-Fi · Clave: Ñandú2026", ""] });
+si("se guarda, con un aviso que nombra SU línea", conClave.ok && conClave.avisos.some((x) => /clave de la línea 2/.test(x)), JSON.stringify(conClave.avisos));
+si("y una clave sin tildes no da aviso", F({ lineaPie: ["Wi-Fi · Clave: pasta2026", "", ""] }).avisos.length === 0);
+const variasClaves = F({ mensajeCierre: "¡Vuelve pronto! 🍝", lineaPie: ["Clave: Ñandú", "Clave: pasta", "Contraseña: ¡año!"] });
+si("varias claves: UN aviso con sus líneas, y todo cabe en el aviso del panel (300)", variasClaves.ok && variasClaves.avisos.filter((x) => /clave/i.test(x)).length === 1 && variasClaves.avisos.some((x) => x.includes("líneas 1 y 3")) && `Comprobante guardado. ${variasClaves.avisos.join(" ")}`.length <= 300, JSON.stringify(variasClaves.avisos));
+
+console.log("\n═══ F3 · DOS BASES EN EL PAPEL (nombre «A / B» y el modo al frente del detalle) ═══");
+eq("palabrasDe: un «+» suelto va con la palabra que le sigue", Pa.palabrasDe("con Pollo + Carne molida · + Parmesano"), ["con", "Pollo", "+ Carne", "molida", "·", "+ Parmesano"]);
+eq("trozosNombre: dos bases se parten en la barra; un nombre sin barra es uno solo", [Pa.trozosNombre("Spaghetti / Papa criolla"), Pa.trozosNombre("Nido Carbonara")], [["Spaghetti /", "Papa criolla"], ["Nido Carbonara"]]);
+const P2 = {
+  ...base, id: "HHHH8888", consecutivo: 21, creadoEn: "2026-09-12T19:03:00.000Z", impuestoIncluido: true, impuestoPct: 8,
+  items: [
+    { nombre: "Spaghetti / Papa criolla", detalle: "mitad y mitad · con Carne molida · + Parmesano", cantidad: 2, precio: 24907, precioFinal: 26900 },
+    { nombre: "Fettuccine / Papa francesa", detalle: "dos bases completas · con Pollo + Tocineta", cantidad: 1, precio: 30000, precioFinal: 32400 },
+  ],
+  bruto: 86200, total: 86200,
+};
+const m2 = Pa.papelDe(P2, AJ0);
+eq("el renglón conserva el nombre de las dos bases y el detalle con el modo", m2.cuenta.lineas.map((l) => [l.nombre, l.detalle, l.importe]), [["Spaghetti / Papa criolla", "mitad y mitad · con Carne molida · + Parmesano", 53800], ["Fettuccine / Papa francesa", "dos bases completas · con Pollo + Tocineta", 32400]]);
+const t2 = C.textoComprobante(P2, AJ0);
+si("el WhatsApp: «2× A / B   $…» y el detalle en cursiva debajo", t2.includes("2× Spaghetti / Papa criolla   $53.800\n   _mitad y mitad · con Carne molida · + Parmesano_") && t2.includes("Fettuccine / Papa francesa   $32.400\n   _dos bases completas · con Pollo + Tocineta_"));
+eq("WhatsApp = papel · dos bases", Pa.piezasPapel(m2).filter((s) => !t2.includes(s)), []);
+
+console.log("\n═══ F3 · EL PEDIDO DE MUESTRA (vista previa de Ajustes) ═══");
+const mu = Pa.pedidoDeMuestra("domicilio", 8);
+const cMu = Pa.papelDe(mu, { comprobante: { datosCliente: { telefono: true, direccion: true } } });
+eq("cuadra: total = bruto + domicilio, y el impuesto va dentro", [mu.total, mu.bruto + mu.domicilio, cMu.cuenta.total, mu.subtotal + mu.impuesto === mu.bruto], [55000, 55000, 55000, true]);
+eq("trae todo lo que el papel puede mostrar", cMu.cliente.map((d) => d.k), ["Cliente", "Teléfono", "Dirección"]);
+eq("y el de mesa, su ubicación", Pa.papelDe(Pa.pedidoDeMuestra("local", 8)).cliente.map((d) => d.k), ["Ubicación", "Cliente"]);
 
 console.log(`\n═══ ${ok} ✅  ·  ${mal} ❌ ═══`);
 process.exit(mal ? 1 : 0);

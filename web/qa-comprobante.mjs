@@ -6,11 +6,11 @@
  * PDF no bastaba —decía "1 página" mientras el papel salía en blanco—, porque la
  * pregunta nunca fue cuántas páginas sino qué hay dentro de ellas.
  *
- *   node qa-comprobante.mjs     (servidor en :3112, con despensa cargada)
+ *   node qa-comprobante.mjs     (servidor en PG_URL, por defecto :3112, con despensa cargada)
  */
 import { chromium } from "playwright";
 import fs from "node:fs";
-const B = "http://127.0.0.1:3112";
+const B = process.env.PG_URL || "http://127.0.0.1:3112";
 const S = "C:/Users/Carlos/AppData/Local/Temp/claude/c--Users-Carlos-Desktop-Papaghetti/0b9eca89-af0c-469f-953c-639458dbdd51/scratchpad";
 let ok = 0, mal = 0;
 const check = (n, c, d = "") => { c ? ok++ : mal++; console.log(`  ${c ? "OK " : "MAL"} ${n}${d ? " · " + d : ""}`); };

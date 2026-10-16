@@ -71,7 +71,8 @@ try {
   const imprimir = await filaDe("Ana Ríos").locator("a", { hasText: "Imprimir" }).getAttribute("href");
   check("Imprimir abre el tiquete con ?imprimir=1", imprimir === `/admin/tiquete/${ana.id}?imprimir=1&de=comprobantes`);
   const waAna = await filaDe("Ana Ríos").locator("a", { hasText: "WhatsApp" }).getAttribute("href");
-  check("WhatsApp de Ana va a su número con 57 y el texto", /^https:\/\/wa\.me\/573001112233\?text=/.test(waAna) && /Comprobante/.test(decodeURIComponent(waAna)));
+  // El texto es el mismo papel que se imprime: con su título (antes decía "Comprobante N° …").
+  check("WhatsApp de Ana va a su número con 57 y el texto", /^https:\/\/wa\.me\/573001112233\?text=/.test(waAna) && /COMPROBANTE DE CONSUMO/.test(decodeURIComponent(waAna)));
   const waBruno = await filaDe("Bruno").locator("a", { hasText: "WhatsApp" }).getAttribute("href");
   check("WhatsApp de Bruno (sin teléfono) abre el tiquete pidiendo el número", waBruno === `/admin/tiquete/${bruno.id}?wa=1&de=comprobantes`);
 
