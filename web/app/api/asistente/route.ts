@@ -21,8 +21,11 @@ import {
   type Periodo,
   type GastoCategoria,
   ventaNeta,
+  basesMaxDe,
+  cobroBasesDe,
 } from "@/lib/menu";
 import { diaNegocio, sinImpuesto } from "@/lib/precios";
+import { porcionesPorComponente, platosPorEnredo, masPedidos, porcionesTexto } from "@/lib/porciones";
 
 export const dynamic = "force-dynamic";
 
@@ -156,10 +159,9 @@ async function ejecutar(name: string, args: Args): Promise<{ msg: string; change
 // Límite de tasa simple por instancia (best-effort).
 let llamadas: number[] = [];
 
-function top(arr: string[]): string {
-  const m = new Map<string, number>();
-  arr.forEach((x) => m.set(x, (m.get(x) ?? 0) + 1));
-  return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+/** "Spaghetti o fettuccine (12,5), Papa criolla (9)": lo más pedido CON la cifra, para que la IA no la invente. */
+function masPedidosTexto(conteo: ReadonlyMap<string, number>, lista: readonly { id: string; nombre: string }[]): string {
+  return masPedidos(conteo, lista, 3).map(([nombre, n]) => `${nombre} (${porcionesTexto(n)})`).join(", ") || "—";
 }
 
 function resumen(cat: Catalog): string {
@@ -232,6 +234,21 @@ function resumen(cat: Catalog): string {
     })
     .join("\n");
 
+  /* LA REGLA DE DOS BASES, dicha con la configuración de HOY. Sin ella la IA ve platos
+     "Spaghetti / Papa criolla" a un precio que no es la suma de nada y se inventa el
+     margen. */
+  const reglaBases =
+    basesMaxDe(cat.ajustes) === 1
+      ? "REGLA DE BASES: hoy cada plato armado lleva UNA sola base."
+      : cobroBasesDe(cat.ajustes) === "mitad"
+        ? "REGLA DE DOS BASES: un plato armado puede llevar hasta dos bases. En «mitad y mitad» se cobra solo la base más cara y cada base gasta MEDIA porción de su receta: el costo de las bases de ese plato es la mitad del costo de cada una, sumadas."
+        : "REGLA DE DOS BASES: un plato armado puede llevar hasta dos bases. Con «dos bases completas» se cobran las dos a su precio y cada una gasta su porción entera (costo completo de las dos).";
+
+  /* LO MÁS PEDIDO, en porciones vendidas (ver lib/porciones.ts). Contaba el texto del
+     resumen de TODOS los pedidos, cancelados incluidos: un pedido anulado salía como lo
+     que más se vende, y una mesa de tres platos como un plato llamado "3 platos". */
+  const porciones = porcionesPorComponente(ped);
+
   return [
     `NEGOCIO: ${cat.ajustes.negocio} (Pereira). Impuesto ${cat.ajustes.impuestoPct}% (ya incluido en los precios de la carta). Estado: ${cat.ajustes.abierto === false ? "CERRADO" : "abierto"}.`,
     ``,
@@ -246,9 +263,10 @@ function resumen(cat: Catalog): string {
     despensa,
     ``,
     `PLATOS (costo receta y margen):`,
+    reglaBases,
     platos,
     ``,
-    `Más pedido — base: ${top(ped.map((p) => p.base))}; proteína: ${top(ped.map((p) => p.proteina))}. Leads nuevos: ${leadsNuevos}.`,
+    `Más pedido (porciones vendidas, sin cancelados; media porción = 0,5) — bases: ${masPedidosTexto(porciones, cat.bases)}; proteínas: ${masPedidosTexto(porciones, cat.proteinas)}; platos de la carta: ${masPedidosTexto(platosPorEnredo(ped), cat.enredos)}. Leads nuevos: ${leadsNuevos}.`,
   ].join("\n");
 }
 

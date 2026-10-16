@@ -11,6 +11,13 @@
  *   · un segundo commit no vuelve a archivar nada,
  *   · ponerACero borra también el archivo.
  *
+ * Y lo que sale del almacén sin tocarlo:
+ *   · la puerta de las fotos (/foto/…) solo deja pasar fotos bajo fotos/: nunca cerebro/,
+ *     ni "..", ni rutas absolutas, ni otras extensiones,
+ *   · el almacén y su credencial se leen como los lee el SDK (sin tocar el entorno real),
+ *   · la copia completa trae todo (con los meses archivados), sin pilas de deshacer, con
+ *     `completo: true` al final, y NO escribe nada.
+ *
  *   node --import ./qa-ts.mjs qa-archivo.mjs
  */
 import fs from "node:fs";
@@ -186,6 +193,188 @@ try {
   eq("cero pedidos", cero.pedidos.length, 0);
   eq("cero meses", cero.archivoMeses, []);
   si("y el documento del mes desapareció", !fs.existsSync(archivoDe("2026-05")));
+
+  console.log("\n═══ LA PUERTA DE LAS FOTOS: SOLO SALE LO QUE ES UNA FOTO ═══");
+  {
+    const { rutaFoto, formatoFoto, direccionFoto } = await import("./lib/fotos.ts");
+    // Como las pide el navegador (los pedazos de la ruta) y como las guarda guardarFoto (texto).
+    const buenas = [
+      [["fotos", "pollo-Xy7ZaB12CdEfGh34IjKlMn56OpQrSt.jpg"], "image/jpeg"],
+      ["fotos/pollo-x.jpeg", "image/jpeg"],
+      ["fotos/logo_1.png", "image/png"],
+      ["fotos/portada-AbC.webp", "image/webp"],
+      ["fotos/plato.avif", "image/avif"],
+      [["fotos", "pruebas", "mi-rama_2", "pollo-AbC.webp"], "image/webp"],
+    ];
+    for (const [r, tipo] of buenas) {
+      eq(`sí: ${JSON.stringify(r)}`, rutaFoto(r), { pathname: Array.isArray(r) ? r.join("/") : r, tipo });
+    }
+    const malas = [
+      // El negocio entero: lo que esta puerta existe para no entregar.
+      "cerebro/catalog.json", ["cerebro", "catalog.json"], "cerebro/comprobantes-2026-05.json",
+      "cerebro/respaldo-2026-10-16.json", ["cerebro", "pruebas", "rama", "catalog.json"],
+      // Escaleras para salir de fotos/.
+      "fotos/../cerebro/catalog.json", ["fotos", "..", "cerebro", "catalog.json"], ["fotos", "..", "cerebro", "x.jpg"],
+      "fotos/%2e%2e/cerebro/x.jpg", "fotos/./pollo.jpg", "fotos//pollo.jpg", ["fotos", "", "pollo.jpg"], "fotos\\pollo.jpg",
+      // Rutas absolutas o de otro sitio.
+      "/fotos/pollo.jpg", "https://x.public.blob.vercel-storage.com/fotos/pollo.jpg", "//evil.com/fotos/pollo.jpg",
+      // Lo que no es foto, o no se sirve (un SVG puede llevar código).
+      "fotos/pollo.svg", "fotos/pollo.gif", "fotos/pollo.html", "fotos/pollo.json", "fotos/pollo.JPG",
+      "fotos/pollo.jpg.html", "fotos/pollo", "fotos/", "fotos/.jpg", "fotos/pollo.jpg/", "fotos/pollo.jpg?x=1",
+      // Caracteres raros y nombres casi iguales.
+      "fotos/pollo .jpg", "fotos/piña.jpg", "fotos/pollo%20x.jpg", "Fotos/pollo.jpg", "fotosx/pollo.jpg", "pollo.jpg",
+      "fotos/" + "a".repeat(260) + ".jpg",
+      // Lo que ni siquiera es una ruta.
+      "", [], undefined, null, 42, {}, ["fotos", 3],
+    ];
+    for (const r of malas) si(`no: ${JSON.stringify(r) ?? String(r)}`.slice(0, 90), rutaFoto(r) === null);
+    eq("jpeg se guarda como .jpg", formatoFoto("JPEG"), { ext: "jpg", tipo: "image/jpeg" });
+    eq("png se guarda como .png", formatoFoto("png"), { ext: "png", tipo: "image/png" });
+    eq("svg no se sube", formatoFoto("svg+xml"), null);
+    eq("gif tampoco", formatoFoto("gif"), null);
+    const dir = direccionFoto("fotos/pollo-AbC.jpg");
+    eq("la dirección es del mismo sitio", dir, "/foto/fotos/pollo-AbC.jpg");
+    eq("y la puerta la reconoce tal cual", rutaFoto(dir.slice("/foto/".length).split("/"))?.pathname, "fotos/pollo-AbC.jpg");
+
+    // Sin almacén (local): la foto se queda como texto y la puerta no tiene qué leer.
+    const c = await import(`./lib/catalog.ts?fresco=${Date.now()}h`);
+    const texto = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+    eq("en local la foto se queda como texto (como siempre)", await c.guardarFoto(texto, "pollo"), texto);
+    eq("una dirección ya guardada se respeta", await c.guardarFoto("/foto/fotos/pollo-AbC.jpg", "pollo"), "/foto/fotos/pollo-AbC.jpg");
+    eq("sin foto, sin foto", await c.guardarFoto(undefined, "pollo"), undefined);
+    eq("leerFoto en local: no hay almacén → nada (la puerta responde 404)", await c.leerFoto("fotos/pollo-AbC.jpg"), null);
+    eq("leerFoto se niega a cerebro/ aunque se lo pidan directo", await c.leerFoto("cerebro/catalog.json"), null);
+  }
+
+  console.log("\n═══ EL ALMACÉN: CUÁL ES Y CÓMO SE ENTRA (con entornos de mentira) ═══");
+  {
+    const c = await import(`./lib/catalog.ts?fresco=${Date.now()}i`);
+    // Un token falso armado a pedazos, para que ningún buscador de secretos lo tome por real.
+    const token = (almacen, secreto = "noEsSecreto123") => ["vercel", "blob", "rw", almacen, secreto].join("_");
+    eq("sin nada: no hay almacén", c.almacenBlob({}), null);
+    eq("con el token: su almacén", c.almacenBlob({ BLOB_READ_WRITE_TOKEN: token("AbC123") }), { id: "store_AbC123", credencial: "token" });
+    eq(
+      "con la conexión del proyecto, en Vercel: OIDC",
+      c.almacenBlob({ VERCEL: "1", BLOB_STORE_ID: "store_xyz789" }),
+      { id: "store_xyz789", credencial: "oidc" },
+    );
+    eq("la conexión sin el prefijo store_ es la misma", c.almacenBlob({ VERCEL: "1", BLOB_STORE_ID: "xyz789" }), { id: "store_xyz789", credencial: "oidc" });
+    eq("la conexión NO cuenta fuera de Vercel", c.almacenBlob({ BLOB_STORE_ID: "store_xyz789" }), null);
+    eq(
+      "fuera de Vercel, con las dos, manda el token",
+      c.almacenBlob({ BLOB_STORE_ID: "store_xyz789", BLOB_READ_WRITE_TOKEN: token("AbC123") }),
+      { id: "store_AbC123", credencial: "token" },
+    );
+    eq(
+      "en Vercel, las dos del MISMO almacén: la conexión, sin aviso (mayúsculas aparte)",
+      c.almacenBlob({ VERCEL: "1", BLOB_STORE_ID: "store_abc123", BLOB_READ_WRITE_TOKEN: token("AbC123") }),
+      { id: "store_abc123", credencial: "oidc" },
+    );
+    eq(
+      "en Vercel, dos almacenes DISTINTOS: la conexión, y el otro queda anotado",
+      c.almacenBlob({ VERCEL: "1", BLOB_STORE_ID: "store_xyz789", BLOB_READ_WRITE_TOKEN: token("AbC123") }),
+      { id: "store_xyz789", credencial: "oidc", otro: "store_AbC123" },
+    );
+    eq(
+      "variables con solo espacios cuentan como vacías (igual que el SDK)",
+      c.almacenBlob({ VERCEL: "1", BLOB_STORE_ID: "  ", BLOB_READ_WRITE_TOKEN: " " }),
+      null,
+    );
+    eq("un token mal formado no se inventa un almacén", c.almacenBlob({ BLOB_READ_WRITE_TOKEN: "basura" }), { id: "", credencial: "token" });
+    si(
+      "el secreto del token no sale nunca",
+      !JSON.stringify(c.almacenBlob({ VERCEL: "1", BLOB_STORE_ID: "store_x", BLOB_READ_WRITE_TOKEN: token("AbC123", "SECRETO999") })).includes("SECRETO999"),
+    );
+    const estado = await c.estadoPersistencia();
+    eq("en local: archivo, sin almacén que mostrar", [estado.backend, estado.ok, estado.almacen ?? null], ["archivo", true, null]);
+  }
+
+  console.log("\n═══ LA COPIA COMPLETA: TODO EL NEGOCIO, SIN ESCRIBIR NADA ═══");
+  {
+    const base = JSON.parse(fs.readFileSync(FILE, "utf8"));
+    const archivado = pedido(Date.UTC(2026, 5, 20, 18, 0, 0)); // junio: vive en el archivo
+    const ayer = pedido(Date.UTC(2026, 9, 15, 18, 0, 0));
+    const hoy = pedido(Date.UTC(2026, 9, 16, 15, 0, 0), { abierto: true });
+    const fotoArchivo = "/foto/fotos/pollo-AbC123.jpg";
+    const fotoPortada = "/foto/fotos/portada-Xy7.webp";
+    const fotoTexto = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+    const foto0 = { ...base.bases[0], foto: fotoArchivo };
+    const snap = { ...base, undo: undefined, redo: undefined, historial: undefined, etiqueta: "Editó algo" };
+    const historial = [
+      { id: "h2", fecha: "2026-10-16T15:00:00.000Z", texto: "Cobró #A2 · Ana", meta: false },
+      { id: "h1", fecha: "2026-10-15T18:00:00.000Z", texto: "Editó \"Pollo\" · Ana", meta: false },
+    ];
+    const sembrado = {
+      ...base,
+      bases: [foto0, ...base.bases.slice(1)],
+      enredos: [{ ...base.enredos[0], foto: fotoTexto }, ...base.enredos.slice(1)],
+      ajustes: { ...base.ajustes, sitio: { portada: { foto: { url: fotoPortada, ancho: 928, alto: 1152 } } } },
+      pedidos: [hoy, ayer],
+      undo: [snap, snap],
+      redo: [snap],
+      historial,
+      // Julio está en el índice pero su documento no existe: no se inventa, se avisa.
+      archivoMeses: ["2026-06", "2026-07"],
+    };
+    fs.writeFileSync(FILE, JSON.stringify(sembrado), "utf8");
+    fs.writeFileSync(archivoDe("2026-06"), JSON.stringify({ mes: "2026-06", pedidos: [archivado] }), "utf8");
+
+    // La huella de data/: qué archivos hay, cuánto pesan y cuándo se escribieron.
+    const huella = () =>
+      fs.readdirSync(DATA).sort().map((f) => {
+        const st = fs.statSync(path.join(DATA, f));
+        return `${f} · ${st.size} · ${st.mtimeMs}`;
+      });
+    const antes = huella();
+    const bytesAntes = fs.readFileSync(FILE);
+
+    const c = await import(`./lib/catalog.ts?fresco=${Date.now()}j`);
+    const ahora = new Date("2026-10-16T15:41:00.000Z"); // 10:41 a. m. en Pereira
+    const copia = await c.copiaCompleta(ahora);
+    const claves = Object.keys(copia);
+    eq("empieza diciendo qué es", [claves[0], copia.formato, copia.version], ["formato", "papaghetti/copia-completa", 1]);
+    eq("y `completo: true` es la ÚLTIMA clave", [claves.at(-1), copia.completo], ["completo", true]);
+    const texto = JSON.stringify(copia);
+    si('también escrita: el archivo termina en "completo":true}', texto.endsWith('"completo":true}'));
+    si("y se lee de vuelta idéntica", JSON.stringify(JSON.parse(texto)) === texto);
+    eq("con la fecha y el día de Pereira", [copia.generadoEn, copia.diaNegocio], [ahora.toISOString(), "2026-10-16"]);
+    eq("y de dónde salió", copia.origen, { backend: "archivo", entorno: "local" });
+    eq("sin las pilas de deshacer ni rehacer", [copia.cerebro.undo, copia.cerebro.redo], [[], []]);
+    eq("con el historial entero", copia.cerebro.historial, historial);
+    eq("con los pedidos del cerebro", copia.cerebro.pedidos.map((p) => p.id), [hoy.id, ayer.id]);
+    eq("y el mes archivado, tal como está guardado", copia.archivo, { "2026-06": { mes: "2026-06", pedidos: [archivado] } });
+    eq("el mes sin documento se avisa, no se inventa", [Object.keys(copia.archivo), copia.conteos.mesesSinDocumento], [["2026-06"], ["2026-07"]]);
+    eq("los conteos cuadran", copia.conteos, {
+      pedidos: 2,
+      pedidosArchivados: 1,
+      porMes: { "2026-06": 1 },
+      mesesSinDocumento: ["2026-07"],
+      movimientos: sembrado.movimientos.length,
+      leads: sembrado.leads.length,
+      arqueos: (sembrado.arqueos ?? []).length,
+      historial: 2,
+      fotosEnlazadas: 2,
+      fotosDentro: 1,
+    });
+    eq("las fotos que son archivo aparte van como dirección", copia.fotos, [
+      { donde: `bases/${foto0.id}`, url: fotoArchivo },
+      { donde: "ajustes/sitio/portada/foto", url: fotoPortada },
+    ]);
+    si(
+      "la de texto no se repite en la lista: ya va dentro del cerebro",
+      copia.cerebro.enredos[0].foto === fotoTexto && !copia.fotos.some((f) => f.url.startsWith("data:")),
+    );
+    eq("NO ESCRIBIÓ NADA: data/ quedó igual (archivos, pesos y fechas)", huella(), antes);
+    si("y el cerebro quedó igual byte por byte", fs.readFileSync(FILE).equals(bytesAntes));
+    eq("el nombre lleva el día y la hora de Pereira", c.nombreCopia(ahora), "papaghetti-copia-2026-10-16-1041.json");
+    eq(
+      "a las 11:30 p. m. en Pereira el servidor ya está en otro día; el nombre no",
+      c.nombreCopia(new Date("2026-10-17T04:30:00.000Z")),
+      "papaghetti-copia-2026-10-16-2330.json",
+    );
+    eq("pasada la medianoche: 0005, nunca 2405", c.nombreCopia(new Date("2026-10-17T05:05:00.000Z")), "papaghetti-copia-2026-10-17-0005.json");
+    fs.unlinkSync(archivoDe("2026-06"));
+  }
 } catch (e) {
   mal++;
   console.log("  ❌ reventó:", e?.stack ?? e);
