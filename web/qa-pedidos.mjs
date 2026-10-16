@@ -266,6 +266,54 @@ try {
     );
   }
 
+  /* El camino que usan los CLIENTES (QR, web, el juego): `crearPedido`, sin sesión. Antes
+     rearmaba el renglón solo con `baseId`, así que la segunda base se perdía aquí mismo. */
+  console.log("\n═══ DOS BASES POR EL CAMINO PÚBLICO (QR / web) ═══");
+  try {
+    await cat.updateAjustes({ abierto: true, controlarStock: true, basesMax: 2, cobroBases: "mitad" });
+    const [b0, b1, b2] = original.bases.filter((b) => b.activo !== false);
+    const fotoIns = () => Object.fromEntries(JSON.parse(fs.readFileSync(FILE, "utf8")).insumos.map((i) => [i.id, i.stock]));
+    const f0 = fotoIns();
+    // Tocadas al revés: el nombre y el precio salen en el orden de la carta igual.
+    const pm = await cat.crearPedido({ baseIds: [b1.id, b0.id], proteinaId: "", toppingIds: [], tipo: "llevar", canal: "qr" });
+    const f1 = fotoIns();
+    check("entra un plato de dos bases", Boolean(pm.id));
+    check("mitad: cobra la más cara", pm.total === Math.max(b0.precio, b1.precio), `${pm.total}`);
+    check("se llama con las dos, en el orden de la carta", pm.items?.[0]?.nombre === `${b0.nombre} / ${b1.nombre}`, pm.items?.[0]?.nombre);
+    check("y la cocina lee primero el modo", pm.items?.[0]?.detalle === "mitad y mitad", pm.items?.[0]?.detalle);
+    const esperado = {}; // media receta de cada base; si comparten insumo, se suma
+    for (const b of [b0, b1]) for (const r of b.receta ?? []) esperado[r.insumoId] = (esperado[r.insumoId] ?? 0) + r.cantidad / 2;
+    const fuera = Object.keys(f0).filter((k) => Math.abs(f0[k] - f1[k] - (esperado[k] ?? 0)) > 0.0015);
+    check("gastó media receta de cada base, y nada más", fuera.length === 0, fuera.join(", ") || JSON.stringify(esperado));
+    await cat.cancelarPedido(pm.id, "QA");
+    const f2 = fotoIns();
+    const noVolvio = Object.keys(f0).filter((k) => f2[k] !== f0[k]);
+    check("cancelar devuelve exactamente lo gastado", noVolvio.length === 0, noVolvio.map((k) => `${k}: ${f0[k]} → ${f2[k]}`).join(", "));
+    await rechaza("sin ninguna base", () => cat.crearPedido({ baseIds: [], toppingIds: [], tipo: "llevar" }), "falta la base");
+    await rechaza("la misma base dos veces", () => cat.crearPedido({ baseIds: [b0.id, b0.id], toppingIds: [], tipo: "llevar" }), "dos veces");
+    if (b2) {
+      await rechaza("tres bases", () => cat.crearPedido({ baseIds: [b0.id, b1.id, b2.id], toppingIds: [], tipo: "llevar" }), "máximo dos bases");
+    }
+    await rechaza("una base que no existe", () => cat.crearPedido({ baseIds: [b0.id, "no-existe-xyz"], toppingIds: [], tipo: "llevar" }), "ya no existe");
+    await rechaza("una proteína disfrazada de base", () => cat.crearPedido({ baseIds: [b0.id, protId], toppingIds: [], tipo: "llevar" }), "no es una base");
+    await cat.updateAjustes({ basesMax: 1 });
+    await rechaza("basesMax = 1: el QR tampoco cuela dos", () => cat.crearPedido({ baseIds: [b0.id, b1.id], toppingIds: [], tipo: "llevar" }), "máximo una base");
+    await cat.updateAjustes({ basesMax: 2, cobroBases: "suma" });
+    const ps = await cat.crearPedido({ baseIds: [b0.id, b1.id], toppingIds: [], tipo: "llevar" });
+    check("suma: cobra las dos", ps.total === b0.precio + b1.precio, `${ps.total}`);
+    await cat.updateAjustes({ cobroBases: "mitad" });
+    const legado = await cat.crearPedido({ baseId: b0.id, toppingIds: [], tipo: "llevar" });
+    check("el baseId de siempre sigue entrando, a su precio y con su nombre", legado.total === b0.precio && legado.base === b0.nombre, `${legado.total} · ${legado.base}`);
+    const ambos = await cat.crearPedido({ baseId: b0.id, baseIds: [b0.id, b1.id], toppingIds: [], tipo: "llevar" });
+    check("con baseId y baseIds a la vez, manda baseIds", ambos.total === Math.max(b0.precio, b1.precio), `${ambos.total}`);
+    const k1 = await cat.crearPedido({ baseIds: [b0.id, b1.id], toppingIds: [], tipo: "llevar", idemKey: "QA-F1" });
+    const k2 = await cat.crearPedido({ baseIds: [b0.id, b1.id], toppingIds: [], tipo: "llevar", idemKey: "QA-F1" });
+    check("el doble envío de dos bases es UN pedido", k1.id === k2.id, `${k1.id} vs ${k2.id}`);
+    for (const p of [ps, legado, ambos, k1]) await cat.cancelarPedido(p.id, "QA");
+  } catch (e) {
+    check("el bloque de dos bases no revienta", false, String(e?.message ?? e).slice(0, 160));
+  }
+
   console.log(`\n═══ ${ok} ✅  ·  ${mal} ❌ ═══\n`);
 } finally {
   fs.copyFileSync(BACKUP, FILE);

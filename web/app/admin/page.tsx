@@ -8,6 +8,7 @@ import {
   ventaNeta,
 } from "@/lib/menu";
 import { diaNegocio } from "@/lib/precios";
+import { resumenLineas } from "@/lib/comprobantes";
 import TurnoReportes from "@/components/admin/TurnoReportes";
 import ArqueoCaja from "@/components/admin/ArqueoCaja";
 import Pendientes from "@/components/admin/Pendientes";
@@ -153,8 +154,10 @@ export default async function Dashboard() {
             <ul className="dash-list">
               {recientes.map((p) => (
                 <li key={p.id}>
+                  {/* Los renglones, como en Comprobantes: el resumen viejo decía "3 platos · —"
+                      de una mesa entera y no dejaba reconocer ningún pedido. */}
                   <span>
-                    <b>#{p.id}</b> · {p.base} · {p.proteina}
+                    <b>#{p.id}</b> · {resumenLineas(p)}
                   </span>
                   <span className={`badge badge--${p.estado}`}>
                     {estadoLabel[p.estado]}

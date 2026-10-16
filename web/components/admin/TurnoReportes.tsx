@@ -15,14 +15,13 @@ import {
   type Pedido,
 } from "@/lib/menu";
 import { diaNegocio } from "@/lib/precios";
+import { porcionesPorComponente, platosPorEnredo, masPedidos } from "@/lib/porciones";
 
 type Vista = null | "apertura" | "cierre" | "jornada";
 
-const topDe = (arr: string[]) => {
-  const m = new Map<string, number>();
-  arr.forEach((x) => m.set(x, (m.get(x) ?? 0) + 1));
-  return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
-};
+/** El primero de "lo más pedido", o null si no se vendió nada de esa lista. */
+const primero = (conteo: ReadonlyMap<string, number>, lista: readonly { id: string; nombre: string }[]) =>
+  masPedidos(conteo, lista, 1)[0]?.[0] ?? null;
 
 export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
   const [vista, setVista] = useState<Vista>(null);
@@ -59,6 +58,13 @@ export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
   const ventasHoy = sum(validos, ventaNeta);
   const ticket = validos.length ? Math.round(ventasHoy / validos.length) : 0;
   const cobrado = sum(validos.filter((p) => p.pago === "pagado"), (p) => p.total);
+  /* Lo más pedido en PORCIONES de cocina (ver lib/porciones.ts), no el texto del resumen:
+     una mesa de tres platos ya no "gana" como "3 platos" y un mitad y mitad le suma media
+     porción a cada una de sus bases. */
+  const porciones = porcionesPorComponente(validos);
+  const topBase = primero(porciones, catalog.bases);
+  const topProteina = primero(porciones, catalog.proteinas);
+  const topPlato = primero(platosPorEnredo(validos), catalog.enredos);
 
   const reponer = insumos
     .map((i) => ({
@@ -192,8 +198,13 @@ export default function TurnoReportes({ catalog }: { catalog: Catalog }) {
                   </tbody>
                 </table>
                 <p style={{ marginTop: 8 }}>
-                  Más pedido — base: <b>{topDe(validos.map((p) => p.base))}</b> · proteína:{" "}
-                  <b>{topDe(validos.map((p) => p.proteina))}</b>.
+                  Más pedido — base: <b>{topBase ?? "—"}</b> · proteína: <b>{topProteina ?? "—"}</b>
+                  {topPlato && (
+                    <>
+                      {" "}· plato de la carta: <b>{topPlato}</b>
+                    </>
+                  )}
+                  .
                 </p>
                 <h4>Para mañana (despensa)</h4>
                 <p>
