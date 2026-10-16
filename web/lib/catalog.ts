@@ -1441,15 +1441,25 @@ export async function getSitioPublico() {
  * pesan demasiado para copiarlas seis veces), así que su foto en la pila sería un
  * «Deshacer: Cambió la foto» que no deshace nada. Quedan en el historial, y para volver a
  * la de fábrica cada foto tiene su propio botón.
+ *
+ * Devuelve si hubo cambio. Guardar un bloque tal como estaba no escribe nada: dejaba un
+ * paso en la pila que no deshacía nada, y el «Deshacer» siguiente se gastaba en él en
+ * vez de revertir el cambio de verdad.
  */
 export async function guardarSitio(
   cambio: (a: Ajustes) => Partial<Ajustes>,
   texto: string,
   opciones?: { transaccional?: boolean },
-): Promise<void> {
+): Promise<boolean> {
   const cat = await read();
-  cat.ajustes = normalizarAjustes({ ...cat.ajustes, ...cambio(cat.ajustes) });
+  const antes = normalizarAjustes(cat.ajustes);
+  const despues = normalizarAjustes({ ...cat.ajustes, ...cambio(cat.ajustes) });
+  // Un sitio sin nada propio es un sitio de fábrica: ni siquiera el objeto vacío.
+  if (despues.sitio && !Object.keys(despues.sitio).length) delete despues.sitio;
+  if (JSON.stringify(despues) === JSON.stringify(antes)) return false;
+  cat.ajustes = despues;
   await commit(cat, texto, opciones?.transaccional ? { transaccional: true } : undefined);
+  return true;
 }
 
 /* ═══════════════════ (fin de la fase 4) ═══════════════════ */

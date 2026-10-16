@@ -51,9 +51,11 @@ export default function Hero({ portada }: { portada: SitioPublico["portada"] }) 
         <div className="hero__plato">
           {portada.foto ? (
             /* La foto del dueño, con <img> como el resto de fotos subidas (IngImg,
-               PlatoImg): viene del almacén de fotos, que next/image no tiene autorizado,
-               y ya llega recortada a 4:5 y comprimida desde el panel. Es lo primero que
-               se ve, así que se pide con prioridad alta y sin carga diferida. */
+               PlatoImg): en producción es una dirección propia (/foto/…, la sirve el
+               almacén privado) y en local la imagen en texto. Ya llega recortada a 4:5 y
+               comprimida desde el panel: pasarla por el optimizador de Next la volvería a
+               comprimir. Es lo primero que se ve, así que se pide con prioridad alta y
+               sin carga diferida. */
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={portada.foto.url}

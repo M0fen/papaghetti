@@ -22,7 +22,8 @@ if (fs.existsSync(FILE)) fs.copyFileSync(FILE, RESPALDO);
 let ok = 0;
 let mal = 0;
 const si = (n, c, d = "") => {
-  c ? ok++ : mal++;
+  if (c) ok++;
+  else mal++;
   console.log(`  ${c ? "✅" : "❌"} ${n}${d && !c ? " · " + d : ""}`);
 };
 const eq = (n, a, b) => si(n, JSON.stringify(a) === JSON.stringify(b), `dio ${JSON.stringify(a)}, esperaba ${JSON.stringify(b)}`);
@@ -259,17 +260,61 @@ try {
   eq("una foto en texto (desarrollo) no va a la vista previa: va la de fábrica", metaData.openGraph.images[0].url, "/og.jpg");
   eq("«<» escapado en el JSON-LD", sitio.jsonLdSeguro({ n: "</script><b>" }), '{"n":"\\u003c/script>\\u003cb>"}');
 
+  console.log("\n═══ LA CACHÉ DE UN AÑO NO ALCANZA A LAS FOTOS SUBIDAS ═══");
+  // Con el mismo comparador de rutas que usa Next para `headers()` en next.config.ts.
+  const { getPathMatch } = await import("next/dist/shared/lib/router/utils/path-match.js");
+  const config = (await import("./next.config.ts")).default;
+  const anual = (await config.headers()).filter((r) =>
+    r.headers.some((h) => h.key === "Cache-Control" && h.value.includes("immutable")),
+  );
+  const inmutable = (ruta) =>
+    anual.some((r) => getPathMatch(r.source, { removeUnnamedParams: true, strict: true, sensitive: false })(ruta));
+  si(
+    "lo de /public sigue un año (video, fotos de comida, la de compartir)",
+    ["/logo-hero.mp4", "/food/chicharron.webp", "/platos/ceviche-chicharron.webp", "/og.jpg", "/hero-enredo.webp"].every(inmutable),
+  );
+  si(
+    "/foto/… no: su puerta pone sus cabeceras (un 404 no se queda un año)",
+    !["/foto/fotos/x.jpg", "/foto/fotos/pruebas/rama/sitio-portada-Ab1.webp"].some(inmutable),
+  );
+
   // ─────────────────────────── con el cerebro local ───────────────────────────
   const cat = await import("./lib/catalog.ts");
   const leer = () => JSON.parse(fs.readFileSync(FILE, "utf8"));
   const original = leer();
+  /* Sin sitio guardado al empezar: las pruebas de abajo cuentan con lo de fábrica, y un
+     cerebro local con el sitio ya cambiado (una prueba a mano en el navegador) las hacía
+     fallar sin que el código tuviera la culpa. */
   fs.writeFileSync(
     FILE,
-    JSON.stringify({ ...original, pedidos: [], movimientos: [], historial: [], undo: [], redo: [], archivoMeses: [] }, null, 2),
+    JSON.stringify(
+      {
+        ...original,
+        ajustes: { ...original.ajustes, sitio: undefined },
+        pedidos: [],
+        movimientos: [],
+        historial: [],
+        undo: [],
+        redo: [],
+        archivoMeses: [],
+      },
+      null,
+      2,
+    ),
   );
   await new Promise((r) => setTimeout(r, 2100)); // que caduque el memo de 2 s
 
   console.log("\n═══ GUARDAR UN BLOQUE NO BORRA LOS OTROS (en el cerebro) ═══");
+  const histInicial = (leer().historial ?? []).length;
+  eq(
+    "con el sitio de fábrica, «Restaurar» no escribe nada (ni un sitio vacío)",
+    [
+      await cat.guardarSitio((a) => ({ sitio: sitio.conCampos(a.sitio, "portada", { antetitulo: undefined, frase: undefined }) }), "QA"),
+      leer().ajustes.sitio,
+      (leer().historial ?? []).length,
+    ],
+    [false, undefined, histInicial],
+  );
   await cat.updateAjustes({ usuarios: ["Carlos", "Ana"], comprobante: { mensajeCierre: "Vuelve pronto" } }, "QA");
   await cat.updateAjustes({ sitio: { historia: { titulo: "Nuestra historia QA" }, textos: { pie: "Pie QA" } } }, "Cambió el sitio: historia");
   await cat.updateAjustes({ sitio: { portada: { antetitulo: "Hola QA" } } }, "Cambió el sitio: portada");
@@ -298,6 +343,20 @@ try {
   d = leer();
   eq("Deshacer devuelve el texto y conserva la foto", [d.ajustes.sitio.portada.antetitulo, d.ajustes.sitio.portada.foto?.url === FOTO_DATA], ["Hola QA", true]);
   eq("y no toca los demás bloques", [d.ajustes.sitio.historia.titulo, d.ajustes.usuarios], ["Nuestra historia QA", ["Carlos", "Ana"]]);
+  {
+    // Si guardar sin cambios dejara un paso en la pila, el próximo «Deshacer» se gastaría en él.
+    const [pila, hist] = [(d.undo ?? []).length, (d.historial ?? []).length];
+    const huboCambio = await cat.guardarSitio(
+      (a) => ({ sitio: sitio.conCampos(sitio.conCampos(a.sitio, "portada", { antetitulo: "Hola QA" }), "redes", { tiktok: undefined }) }),
+      "Cambió el sitio: portada",
+    );
+    d = leer();
+    eq("guardar un bloque tal como estaba no escribe nada (ni pila ni historial)", [huboCambio, (d.undo ?? []).length, (d.historial ?? []).length], [
+      false,
+      pila,
+      hist,
+    ]);
+  }
   await cat.guardarSitio(
     (a) => ({
       telefonoLocal: "606 333 4455",

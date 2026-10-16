@@ -61,6 +61,7 @@ async function sinSesion(prev: EstadoSitio): Promise<EstadoSitio> {
 /**
  * Guarda con `intentar` (el aviso de la barra, como el resto del panel) y además deja el
  * resultado para el formulario. El sitio es estático: `reflejarSitio` lo manda a rehacer.
+ * Si el bloque ya estaba así no se escribe nada (ver guardarSitio), y se dice.
  */
 async function guardar(
   prev: EstadoSitio,
@@ -71,14 +72,15 @@ async function guardar(
   opciones?: { transaccional?: boolean },
 ): Promise<EstadoSitio> {
   let fallo = "";
+  let cambiado = false;
   const ok = await intentar(async () => {
     try {
-      await guardarSitio(cambio, historial, opciones);
+      cambiado = await guardarSitio(cambio, historial, opciones);
     } catch (e) {
       fallo = e instanceof Error ? e.message : "";
       throw e;
     }
-  }, exito);
+  });
   if (!ok) {
     return {
       ok: false,
@@ -87,8 +89,10 @@ async function guardar(
       n: siguiente(prev),
     };
   }
-  reflejarSitio();
-  return { ok: true, mensaje: exito, n: siguiente(prev) };
+  const mensaje = cambiado ? exito : "Sin cambios: ya estaba así.";
+  await avisar(mensaje, "ok");
+  if (cambiado) reflejarSitio();
+  return { ok: true, mensaje, n: siguiente(prev) };
 }
 
 const conAviso = (exito: string, aviso?: string) => (aviso ? `${exito} ${aviso}` : exito);

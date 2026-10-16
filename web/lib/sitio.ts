@@ -601,7 +601,9 @@ export function sitioPublicoDe(a: Ajustes): SitioPublico {
 }
 
 /** La foto para compartir que sirve en una vista previa: un data URL no la ve nadie fuera
- *  de este navegador, así que ahí va la de fábrica. */
+ *  de este navegador, así que ahí va la de fábrica. Una dirección propia (/og.jpg, o
+ *  /foto/… la subida en producción) la completa con el dominio el `metadataBase` del
+ *  layout: WhatsApp y Facebook solo aceptan la dirección entera. */
 const fotoPublicable = (f: FotoSitio): FotoSitio =>
   f.url.startsWith("data:") ? { ...SITIO_FABRICA.seo.fotoCompartir } : f;
 
