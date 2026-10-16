@@ -37,13 +37,13 @@ export async function GET(_req: Request, ctx: RouteContext<"/foto/[...ruta]">) {
 }
 
 /**
- * Una respuesta que NINGUNA caché reutiliza. next.config.ts le pone un año de caché a
- * todo lo que termina en .jpg o .webp, y Next no deja que una ruta cambie una cabecera
- * que la configuración ya puso (comprobado: el 404 de un .jpg sale con `immutable`), así
- * que el `no-store` de aquí no alcanza. Sin lo demás, un tropiezo del almacén, o un
- * despliegue que todavía no tiene el almacén conectado, se quedaba como foto rota un
- * año: `Vary: *` hace que el navegador no la reutilice, y `CDN-Cache-Control`, que el
- * CDN lee antes que `Cache-Control`, que no la guarde.
+ * Una respuesta que NINGUNA caché reutiliza. La regla de un año de next.config.ts deja
+ * fuera /foto/ a propósito: Next no deja que una ruta cambie una cabecera que la
+ * configuración ya puso, y antes el 404 de un .jpg salía con `immutable`. `Vary: *` (el
+ * navegador no la reutiliza) y `CDN-Cache-Control` (el CDN lo lee antes que
+ * `Cache-Control`) quedan de cinturón: si esa regla se vuelve a ensanchar, un tropiezo
+ * del almacén, o un despliegue que todavía no tiene el almacén conectado, no se queda
+ * como foto rota un año.
  */
 function sinGuardar(status: number, texto: string, extra: Record<string, string> = {}): Response {
   return new Response(texto, {

@@ -174,7 +174,10 @@ export default async function AyudaPage() {
             final, hasta tres líneas como el Wi-Fi o el Instagram y qué datos del cliente
             salen) se cambia en{" "}
             <a href="/admin/ajustes#comprobante">Ajustes → Comprobante</a>, con una vista previa
-            del papel. El título y la nota legal son fijos.
+            del papel. El título y la nota legal son fijos. La dirección y el teléfono son los
+            mismos del sitio web. Los emojis no se imprimen, y la clave del Wi-Fi va{" "}
+            <b>sin tildes ni eñes</b>: la impresora de texto las cambia y el cliente teclearía
+            otra clave.
           </p>
         </article>
 
@@ -194,23 +197,28 @@ export default async function AyudaPage() {
           <h3>Dos bases en un plato</h3>
           <p>
             {dosBases
-              ? "Hoy el cliente puede elegir una o dos bases: en el sitio, en el QR y en la caja se toca la segunda base y se suma al plato. "
+              ? "Hoy el cliente puede elegir una o dos bases: en el sitio, en el juego, en el QR y en la caja se toca una segunda base y se suma al plato; tocarla otra vez la quita, y con dos elegidas una tercera cambia la última. "
               : "Hoy cada plato lleva una sola base. "}
             Se cambia en <a href="/admin/ajustes#cobro">Ajustes → Cobro y servicio</a>:{" "}
             <b>mitad y mitad</b> cobra la base más cara y gasta media porción de cada una;{" "}
             <b>las dos completas</b> cobra las dos y gasta porción entera de cada una. En la
-            cocina y en el papel el plato sale con las dos bases y cómo van.
+            cocina y en el papel el plato sale con las dos bases y cómo van («Spaghetti / Papa
+            criolla · mitad y mitad»). Un plato de la carta al que se le suma otra base se
+            cobra por partes. Si cambias esto con clientes pidiendo, quien tenga la pantalla
+            vieja verá «Este plato lleva máximo una base.» y solo tiene que quitar una.
           </p>
         </article>
         <article className="ayuda-card">
           <h3>Subir o bajar todos los precios</h3>
           <p>
-            En <a href="/admin/precios#ajustar">Precios → Ajustar precios</a>: escribe el
-            porcentaje, marca los grupos (bases, proteínas, acompañantes, platos de precio
-            cerrado, adicionales), revisa la <b>vista previa</b> con el antes y el después y
-            confirma. Todo queda redondeado a $100; las salsas no se tocan. Si no era eso,{" "}
-            <b>Deshacer</b> lo revierte entero. Las cuentas que ya estaban abiertas conservan
-            sus precios.
+            En <a href="/admin/precios#ajustar">Precios → Ajustar precios</a>: toca{" "}
+            <b>Subir</b> o <b>Bajar</b>, escribe el porcentaje (o toca 3, 5 o 10 %), marca los
+            grupos (Bases, Proteínas, Acompañantes, Platos y, si quieres, Adicionales) y revisa
+            la <b>vista previa</b>: cada precio de ahora y el nuevo, redondeado a $100. Lee los
+            avisos: si una promoción o una descripción tiene un precio escrito a mano, ese lo
+            corriges tú. Confirma. Las salsas no se tocan; lo que hoy está apagado también se
+            ajusta, para que vuelva con el precio de ahora. Si no era eso, <b>Deshacer</b> lo
+            revierte entero. Las cuentas que ya estaban abiertas conservan sus precios.
           </p>
         </article>
         <article className="ayuda-card">
@@ -218,9 +226,14 @@ export default async function AyudaPage() {
           <p>
             En <a href="/admin/ajustes#sitio">Ajustes → Sitio web</a> cambias la portada, la
             historia, los horarios, la dirección, el teléfono, el WhatsApp, las redes, los
-            enlaces de Rappi, DiDi y Google Maps, las fotos y lo que dice Google. Un enlace
-            vacío esconde su botón. <b>Restaurar</b> devuelve el texto original. Las reseñas
-            solo pueden ser <b>reales</b>, copiadas de una fuente pública: nunca inventadas.
+            enlaces de Rappi, DiDi y Google Maps, las fotos y lo que dice Google. Cada bloque
+            se abre tocándolo y se guarda solo. Un texto en blanco vuelve al original y{" "}
+            <b>Restaurar el texto original</b> devuelve el bloque entero. Un enlace vacío
+            esconde su botón, y mientras el WhatsApp sea el de ejemplo el sitio esconde los
+            suyos. El teléfono y las redes salen solo si los enciendes. Las reseñas solo
+            pueden ser <b>reales</b>, copiadas tal cual de una fuente pública: nunca
+            inventadas. Google y WhatsApp tardan unos días en mostrar un título o una foto
+            nuevos.
           </p>
         </article>
         <article className="ayuda-card">
@@ -239,7 +252,9 @@ export default async function AyudaPage() {
             ajustes</b>: un precio, un ajuste de precios, una receta, un texto del sitio. Pasa
             el dedo (o el mouse) por encima y te dice qué va a deshacer. <b>No</b> deshace
             pedidos, cobros, la caja ni lo que gastó la despensa: eso pasó de verdad. Para
-            eso están Cancelar, Corregir cobro y Devolver dinero.
+            eso están Cancelar, Corregir cobro y Devolver dinero. Tampoco devuelve una foto
+            del sitio ni el logo del comprobante: esos tienen su propio botón para volver al
+            original.
           </p>
         </article>
         <article className="ayuda-card">
