@@ -1141,6 +1141,49 @@ export async function usuariosDelPanel(): Promise<string[]> {
   }
 }
 
+/* ═══════════════════ FASE 4 · EL SITIO EN MANOS DEL DUEÑO ═══════════════════
+   (lib/sitio.ts se importa aquí dentro y no arriba: este bloque es todo lo que la
+   fase toca de este archivo.) */
+
+/**
+ * EL SITIO QUE PUEDE VER UN DESCONOCIDO: los datos del negocio y lo que el dueño escribió
+ * en Ajustes → Sitio, ya resueltos (ver `sitioPublicoDe` en lib/sitio.ts).
+ *
+ * Va APARTE de getCatalogPublico a propósito: FeaturedMenu recibe el catálogo público
+ * entero y todo lo que lleva viaja dentro del HTML. Un borrador de reseña, un teléfono que
+ * el dueño no quiso mostrar o los usuarios del panel no pueden ir ahí — ni aquí: esta
+ * puerta tampoco los entrega.
+ */
+export async function getSitioPublico() {
+  const { sitioPublicoDe } = await import("./sitio");
+  return sitioPublicoDe((await read()).ajustes);
+}
+
+/**
+ * GUARDA UN CAMBIO DEL SITIO SOBRE LO QUE HAY AHORA. `cambio` recibe los ajustes de este
+ * momento y devuelve lo que cambia: campos de siempre (WhatsApp, dirección…) y/o el
+ * `sitio` entero ya mezclado (ver `conCampos`). Hace falta leer antes de escribir porque
+ * updateAjustes reemplaza cada grupo del sitio entero, y la portada guarda en el mismo
+ * grupo sus textos y su foto: guardar la frase borraba la foto, y agregar una reseña
+ * necesita las que ya hay.
+ *
+ * `transaccional` es para las FOTOS. No viajan en la pila de Deshacer (RUTAS_IMAGEN_AJUSTES:
+ * pesan demasiado para copiarlas seis veces), así que su foto en la pila sería un
+ * «Deshacer: Cambió la foto» que no deshace nada. Quedan en el historial, y para volver a
+ * la de fábrica cada foto tiene su propio botón.
+ */
+export async function guardarSitio(
+  cambio: (a: Ajustes) => Partial<Ajustes>,
+  texto: string,
+  opciones?: { transaccional?: boolean },
+): Promise<void> {
+  const cat = await read();
+  cat.ajustes = normalizarAjustes({ ...cat.ajustes, ...cambio(cat.ajustes) });
+  await commit(cat, texto, opciones?.transaccional ? { transaccional: true } : undefined);
+}
+
+/* ═══════════════════ (fin de la fase 4) ═══════════════════ */
+
 export async function updateIngrediente(
   id: string,
   patch: Partial<Ingrediente>

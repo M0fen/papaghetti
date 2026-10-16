@@ -1,6 +1,7 @@
 import Reveal from "./Reveal";
 import LeadCapture from "./LeadCapture";
-import type { AjustesPublicos } from "@/lib/catalog";
+import { waLink } from "@/lib/menu";
+import { telHref, type SitioPublico } from "@/lib/sitio";
 
 /* Iconos propios en vez de emojis del sistema: el resto de la carta ya habla en SVG
    y arte horneado, y los emojis se renderizan distinto en cada teléfono. */
@@ -20,10 +21,13 @@ const Ico = ({ d }: { d: string }) => (
 );
 const PIN = "M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11Z M12 10.5v.01";
 const MOTO = "M5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z M19 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z M7.5 15.5h6l3-6h2 M13.5 9.5H10";
-const CHISPA = "M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9 12 3.5Z";
 
-export default function Location({ ajustes }: { ajustes: AjustesPublicos }) {
-  const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(ajustes.direccion)}`;
+/**
+ * Dónde estamos y cómo pedir. Todo lo de aquí sale de Ajustes → Sitio: lo que no está
+ * puesto no se pinta (un botón de Rappi sin enlace era un callejón sin salida), y el
+ * teléfono solo aparece si el dueño decidió mostrarlo.
+ */
+export default function Location({ sitio }: { sitio: SitioPublico }) {
   return (
     <section className="section section--dark" id="ubicacion">
       <div className="container">
@@ -38,13 +42,22 @@ export default function Location({ ajustes }: { ajustes: AjustesPublicos }) {
             <div className="loc__card">
               <h3><Ico d={PIN} /> Dónde estamos</h3>
               <div className="loc__row">
-                <span>{ajustes.direccion}</span>
+                <span>{sitio.direccion}</span>
               </div>
               <div className="loc__row">
-                <span>{ajustes.horarios}</span>
+                <span>{sitio.horarios}</span>
               </div>
+              {sitio.telefono ? (
+                <div className="loc__row">
+                  <a href={telHref(sitio.telefono)} className="loc__tel" aria-label={`Llamar al ${sitio.telefono}`}>
+                    Tel. {sitio.telefono}
+                  </a>
+                </div>
+              ) : null}
+              {/* El enlace propio del local en Google Maps (con su ficha y sus reseñas)
+                  si el dueño lo puso; si no, la búsqueda de la dirección, como siempre. */}
               <a
-                href={mapsUrl}
+                href={sitio.mapa}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn btn--gold"
@@ -58,7 +71,7 @@ export default function Location({ ajustes }: { ajustes: AjustesPublicos }) {
             <div className="loc__card">
               <h3><Ico d={MOTO} /> Pide a domicilio</h3>
               <div className="loc__row">
-                <span>Arma tu enredo y te lo llevamos calientico.</span>
+                <span>{sitio.textos.domicilio}</span>
               </div>
               <div
                 style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 18 }}
@@ -66,16 +79,38 @@ export default function Location({ ajustes }: { ajustes: AjustesPublicos }) {
                 <a href="#arma" className="btn btn--primary">
                   <span>Armar y pedir</span>
                 </a>
-                {/* Solo si el dueño puso su enlace real en /admin/ajustes: mandar a la
-                    home genérica de Rappi era un callejón sin salida. */}
-                {ajustes.rappi ? (
+                {/* Solo con un número real: el de ejemplo mandaba al cliente a un chat
+                    que no existe (ver whatsappValido). */}
+                {sitio.whatsapp ? (
                   <a
-                    href={ajustes.rappi}
+                    href={waLink(sitio.whatsapp, `¡Hola ${sitio.negocio}! 🍝 Quiero hacer un pedido a domicilio.`)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn--ghost"
+                  >
+                    <span>WhatsApp</span>
+                  </a>
+                ) : null}
+                {/* Solo si el dueño puso su enlace real en Ajustes → Sitio: mandar a la
+                    home genérica de Rappi era un callejón sin salida. */}
+                {sitio.rappi ? (
+                  <a
+                    href={sitio.rappi}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn btn--ghost"
                   >
                     <span>Rappi</span>
+                  </a>
+                ) : null}
+                {sitio.didi ? (
+                  <a
+                    href={sitio.didi}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn--ghost"
+                  >
+                    <span>DiDi Food</span>
                   </a>
                 ) : null}
               </div>

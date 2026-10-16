@@ -1,6 +1,7 @@
 import Image from "next/image";
 import LogoMedia from "./LogoMedia";
 import heroFoto from "@/public/hero-enredo.webp";
+import type { SitioPublico } from "@/lib/sitio";
 
 /* HERO v2 (auditoría "nivel máximo"): identidad + APETITO. La ciencia (Spence, Oxford:
  * "visual hunger") y los números (Grubhub +30%, DoorDash +44% con foto) mandan comida
@@ -9,12 +10,15 @@ import heroFoto from "@/public/hero-enredo.webp";
  * premiado: plato hero + ingredientes en parallax).
  * Los 3 pasos llevan CÓDIGO DE COLOR (patrón Marco Pasta: base=oro, proteína=pomodoro,
  * topping=perejil) — el mismo lenguaje que la carta y el juego — y una HEBRA los
- * conecta (patrón Dashi Ramen: el fideo como sistema, no decoración). */
+ * conecta (patrón Dashi Ramen: el fideo como sistema, no decoración).
+ *
+ * Los TEXTOS y la FOTO son del dueño (Ajustes → Sitio → Portada); el diseño no: colores,
+ * etiquetas de los pasos, ingredientes flotantes y la hebra se quedan fijos. */
 
 const PASOS = [
-  { n: 1, tono: "oro", art: "/food/papa-criolla.webp", label: "Base", desc: "criolla · francesa · spaghetti" },
-  { n: 2, tono: "pomodoro", art: "/food/chicharron.webp", label: "Proteína", desc: "chicharrón · res · pollo" },
-  { n: 3, tono: "perejil", art: "/food/maicitos.webp", label: "Toppings", desc: "maicitos · piña · queso" },
+  { n: 1, tono: "oro", art: "/food/papa-criolla.webp", label: "Base" },
+  { n: 2, tono: "pomodoro", art: "/food/chicharron.webp", label: "Proteína" },
+  { n: 3, tono: "perejil", art: "/food/maicitos.webp", label: "Toppings" },
 ];
 
 const FLOTANTES = [
@@ -23,16 +27,16 @@ const FLOTANTES = [
   { art: "/food/perejil.webp", cls: "hero__flot hero__flot--c" },
 ];
 
-export default function Hero() {
+export default function Hero({ portada }: { portada: SitioPublico["portada"] }) {
   return (
     <header className="hero" id="top">
       <div className="hero__inner container">
         <div className="hero__copy">
-          <p className="hero__kicker">Pereira · Un delicioso enredo</p>
+          <p className="hero__kicker">{portada.antetitulo}</p>
           <LogoMedia className="hero__logo" priority />
-          <p className="hero__tagline">
-            Papa criolla, pasta y tu antojo: así&nbsp;se&nbsp;arma un enredo.
-          </p>
+          {/* La frase de fábrica trae dos espacios de no separación («así se arma» no se
+              parte): viajan dentro del texto, no como &nbsp; escritos aquí. */}
+          <p className="hero__tagline">{portada.frase}</p>
 
           <div className="hero__cta">
             <a href="#arma" className="btn btn--primary">
@@ -45,14 +49,30 @@ export default function Hero() {
         </div>
 
         <div className="hero__plato">
-          <Image
-            src={heroFoto}
-            alt="Enredo Papaghetti: nido de spaghetti con papa criolla dorada y chicharrón crocante, humeando en su caja kraft"
-            priority
-            placeholder="blur"
-            sizes="(min-width: 920px) 42vw, 78vw"
-            className="hero__foto"
-          />
+          {portada.foto ? (
+            /* La foto del dueño, con <img> como el resto de fotos subidas (IngImg,
+               PlatoImg): viene del almacén de fotos, que next/image no tiene autorizado,
+               y ya llega recortada a 4:5 y comprimida desde el panel. Es lo primero que
+               se ve, así que se pide con prioridad alta y sin carga diferida. */
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={portada.foto.url}
+              alt={portada.fotoAlt}
+              width={portada.foto.ancho ?? 960}
+              height={portada.foto.alto ?? 1200}
+              fetchPriority="high"
+              className="hero__foto hero__foto--propia"
+            />
+          ) : (
+            <Image
+              src={heroFoto}
+              alt={portada.fotoAlt}
+              priority
+              placeholder="blur"
+              sizes="(min-width: 920px) 42vw, 78vw"
+              className="hero__foto"
+            />
+          )}
           {FLOTANTES.map((f) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img key={f.cls} src={f.art} alt="" aria-hidden className={f.cls} />
@@ -64,13 +84,13 @@ export default function Hero() {
           <svg className="hero__hilo" viewBox="0 0 300 12" aria-hidden preserveAspectRatio="none">
             <path d="M4 6 Q 40 -2 75 6 T 150 6 T 225 6 T 296 6" pathLength={100} />
           </svg>
-          {PASOS.map((p) => (
+          {PASOS.map((p, i) => (
             <div className={`hstep hstep--${p.tono}`} role="listitem" key={p.n}>
               <span className="hstep__n">{p.n}</span>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img className="hstep__art" src={p.art} alt="" aria-hidden />
               <b>{p.label}</b>
-              <small>{p.desc}</small>
+              <small>{portada.pasos[i]}</small>
             </div>
           ))}
         </div>
